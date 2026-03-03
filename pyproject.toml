@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ragent"
+dynamic = ["version"]
+#-->> modified by acs
+authors = [
+    {name = "ACS"}
+]
+description = "Ragent: Dynamic and Intelligent RAG via Agent Architecture"
+#-->> ended by acs
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "aiohttp",
+    "configparser",
+    "dotenv",
+    "future",
+    "numpy",
+    "pandas>=2.0.0",
+    "pipmaster",
+    "pydantic",
+    "python-dotenv",
+    "pyuca",
+    "setuptools",
+    "tenacity",
+    "tiktoken",
+    "xlsxwriter>=3.1.0",
+]
+
+[project.optional-dependencies]
+api = [
+    # Core dependencies
+    "aiohttp",
+    "configparser",
+    "dotenv",
+    "future",
+    "numpy",
+    "openai",
+    "pandas>=2.0.0",
+    "pipmaster",
+    "pydantic",
+    "python-dotenv",
+    "pyuca",
+    "setuptools",
+    "tenacity",
+    "tiktoken",
+    "xlsxwriter>=3.1.0",
+    # API-specific dependencies
+    "aiofiles",
+    "ascii_colors",
+    "asyncpg",
+    "distro",
+    "fastapi",
+    "httpcore",
+    "httpx",
+    "jiter",
+    "passlib[bcrypt]",
+    "PyJWT",
+    "python-jose[cryptography]",
+    "python-multipart",
+    "pytz",
+    "uvicorn",
+]
+
+[tool.setuptools.packages.find]
+include = ["ragent*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "ragent.__version__"}
+
+[tool.ruff]
+target-version = "py310"
