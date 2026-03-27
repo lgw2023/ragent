@@ -1,17 +1,24 @@
 import os
 import asyncio
 import logging
+from dataclasses import asdict
 from dotenv import load_dotenv
+from pathlib import Path
 # use the .env that is inside the current folder
 # allows to use different .env file for each ragent instance
 # the OS environment variables take precedence over the .env file
-load_dotenv(dotenv_path=".env", override=True) #$HOME替换为本地ragent存储的绝对路径
+_ENV_PATH = Path(__file__).resolve().with_name(".env")
+load_dotenv(dotenv_path=_ENV_PATH, override=True) #$HOME替换为本地ragent存储的绝对路径
 import subprocess
 from ragent import Ragent, QueryParam
 from ragent.llm.openai import env_openai_complete, openai_embed
 from ragent.rerank import rerank_from_env
 from ragent.kg.shared_storage import initialize_pipeline_status
 from ragent.utils import log_model_call, logger
+from ragent.operate import (
+    graph_query,
+    hybrid_query,
+)
 import json
 from ragent.prompt import dismantle_prompt
 import requests
@@ -20,7 +27,6 @@ import copy
 import re
 import mimetypes
 import time
-from pathlib import Path
 import aiofiles
 from typing import Any
 
@@ -47,6 +53,415 @@ _MODEL_HEALTHCHECK_DONE = False
 _MODEL_HEALTHCHECK_LOCK = asyncio.Lock()
 _INFO_PIPELINE_STAGE_PREFIXES = ("image_mm_", "md_injection_")
 _INFO_PIPELINE_STAGE_NAMES = {"build_enhanced_md_start"}
+
+
+def _preview_text(value: Any, limit: int = 160) -> str:
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _safe_score(value: Any) -> float | None:
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _collect_ranked_chunks(
+    weights: dict[str, Any],
+    texts: dict[str, str],
+    file_paths: dict[str, str],
+    limit: int = 5,
+    source: str | None = None,
+):
+    ranked = sorted(weights.items(), key=lambda x: x[1], reverse=True)[:limit]
+    results = []
+    for index, (chunk_id, score) in enumerate(ranked, 1):
+        result = {
+            "rank": index,
+            "chunk_id": chunk_id,
+            "score": _safe_score(score),
+            "file_path": file_paths.get(chunk_id, "unknown_source"),
+            "preview": _preview_text(texts.get(chunk_id, "")),
+        }
+        if source is not None:
+            result["source"] = source
+        results.append(result)
+    return results
+
+
+def _collect_entity_hits(entities: list[dict], limit: int = 5):
+    results = []
+    for item in entities[:limit]:
+        results.append(
+            {
+                "entity": item.get("entity", "UNKNOWN"),
+                "type": item.get("type", "UNKNOWN"),
+                "file_path": item.get("file_path", "unknown_source"),
+                "preview": _preview_text(item.get("description", "")),
+            }
+        )
+    return results
+
+
+def _extract_document_chunks_from_context(context_text: str) -> list[dict[str, Any]]:
+    patterns = [
+        r"---Document Chunks\(DC\)---\s*```json\s*(.*?)\s*```",
+        r"---Document Chunks---\s*```json\s*(.*?)\s*```",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, context_text, re.DOTALL)
+        if not match:
+            continue
+        try:
+            parsed = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, list):
+            return parsed
+        return []
+    return []
+
+
+def _collect_relation_hits(relations: list[dict], limit: int = 5):
+    results = []
+    for item in relations[:limit]:
+        results.append(
+            {
+                "entity1": item.get("entity1", "UNKNOWN"),
+                "entity2": item.get("entity2", "UNKNOWN"),
+                "file_path": item.get("file_path", "unknown_source"),
+                "preview": _preview_text(item.get("description", "")),
+            }
+        )
+    return results
+
+
+def _collect_final_context_chunks(
+    rerank_results: list[dict[str, Any]],
+    results_text: list[str],
+    results_file_paths: list[str],
+    results_chunk_ids: list[str],
+    results_source_labels: list[str],
+    limit: int | None = None,
+):
+    final_chunks = []
+    top_k = len(rerank_results) if limit is None else min(len(rerank_results), limit)
+    for index in range(top_k):
+        rerank_index = rerank_results[index].get("index")
+        if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
+            continue
+        final_chunks.append(
+            {
+                "rank": len(final_chunks) + 1,
+                "chunk_id": results_chunk_ids[rerank_index],
+                "source": results_source_labels[rerank_index],
+                "file_path": results_file_paths[rerank_index],
+                "content": results_text[rerank_index],
+                "preview": _preview_text(results_text[rerank_index], limit=220),
+            }
+        )
+    return final_chunks
+
+
+def _collect_rerank_results(
+    rerank_results: list[dict[str, Any]],
+    results_text: list[str],
+    results_file_paths: list[str],
+    results_chunk_ids: list[str],
+    results_source_labels: list[str],
+    limit: int | None = None,
+):
+    ranked = []
+    top_k = len(rerank_results) if limit is None else min(len(rerank_results), limit)
+    for index in range(top_k):
+        item = rerank_results[index]
+        rerank_index = item.get("index")
+        if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
+            continue
+        ranked.append(
+            {
+                "rank": len(ranked) + 1,
+                "chunk_id": results_chunk_ids[rerank_index],
+                "source": results_source_labels[rerank_index],
+                "rerank_score": _safe_score(item.get("relevance_score")),
+                "file_path": results_file_paths[rerank_index],
+                "preview": _preview_text(results_text[rerank_index], limit=220),
+            }
+        )
+    return ranked
+
+
+def _build_one_hop_trace(
+    query: str,
+    mode: str,
+    answer: str,
+    image_list: list[str],
+    debug_payload: dict[str, Any],
+) -> dict[str, Any]:
+    trace = {
+        "query": query,
+        "mode": mode,
+        "high_level_keywords": debug_payload.get("high_level_keywords", []),
+        "low_level_keywords": debug_payload.get("low_level_keywords", []),
+        "graph_entity_hits": [],
+        "graph_relation_hits": [],
+        "vector_candidates": [],
+        "graph_chunk_candidates": [],
+        "merged_candidates": [],
+        "rerank_model": None,
+        "rerank_input_candidates": [],
+        "rerank_output_candidates": [],
+        "final_context_chunks": [],
+        "final_context_document_chunks": [],
+        "final_context_text": (debug_payload.get("final_context_text") or "").strip(),
+        "final_prompt_text": debug_payload.get("final_prompt_text", ""),
+        "answer": answer,
+        "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+    }
+
+    if mode == "hybrid":
+        trace["vector_candidates"] = _collect_ranked_chunks(
+            debug_payload["vector_weights"],
+            debug_payload["vector_texts"],
+            debug_payload["vector_file_paths"],
+            source="vector",
+        )
+        trace["graph_entity_hits"] = _collect_entity_hits(debug_payload["graph_entities"])
+        trace["graph_relation_hits"] = _collect_relation_hits(debug_payload["graph_relations"])
+        trace["graph_chunk_candidates"] = _collect_ranked_chunks(
+            debug_payload["graph_weights"],
+            debug_payload["graph_texts"],
+            debug_payload["graph_file_paths"],
+            source="graph",
+        )
+        trace["merged_candidates"] = [
+            {
+                "rank": item["rank"],
+                "source": item["source"],
+                "sources": item.get("sources", []),
+                "chunk_id": item["chunk_id"],
+                "score": _safe_score(item.get("score")),
+                "file_path": item["file_path"],
+                "preview": _preview_text(item.get("content", "")),
+            }
+            for item in debug_payload["merged_candidates"]
+        ]
+        trace["rerank_model"] = os.getenv("RERANK_MODEL")
+        trace["rerank_output_candidates"] = _collect_rerank_results(
+            debug_payload["rerank_results"],
+            debug_payload["results_text"],
+            debug_payload["results_file_paths"],
+            debug_payload["results_chunk_ids"],
+            debug_payload["results_source_labels"],
+        )
+        trace["rerank_input_candidates"] = list(trace["merged_candidates"])
+        trace["final_context_chunks"] = _collect_final_context_chunks(
+            debug_payload["rerank_results"],
+            debug_payload["results_text"],
+            debug_payload["results_file_paths"],
+            debug_payload["results_chunk_ids"],
+            debug_payload["results_source_labels"],
+            limit=len(debug_payload["final_context_document_chunks"]),
+        )
+        trace["final_context_document_chunks"] = debug_payload["final_context_document_chunks"]
+    else:
+        trace["graph_entity_hits"] = _collect_entity_hits(debug_payload.get("graph_entities", []))
+        trace["graph_relation_hits"] = _collect_relation_hits(debug_payload.get("graph_relations", []))
+        trace["final_context_document_chunks"] = _extract_document_chunks_from_context(
+            debug_payload.get("final_context_text", "") or ""
+        )
+
+    return trace
+
+
+async def _run_one_hop_with_rag(
+    rag: Ragent,
+    query: str,
+    mode: str,
+    include_trace: bool = False,
+):
+    query_param = QueryParam(mode=mode)
+    global_config = asdict(rag)
+    normalized_query = query.strip()
+
+    if mode == "hybrid":
+        if include_trace:
+            answer, image_list, debug_payload = await hybrid_query(
+                normalized_query,
+                rag.chunks_vdb,
+                rag.chunk_entity_relation_graph,
+                rag.relationships_vdb,
+                rag.entities_vdb,
+                query_param,
+                global_config,
+                rag.llm_response_cache,
+                return_debug=True,
+            )
+            await rag._query_done()
+            return {
+                "answer": answer,
+                "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+                "trace": _build_one_hop_trace(
+                    normalized_query, mode, answer, image_list, debug_payload
+                ),
+            }
+        answer, image_list = await hybrid_query(
+            normalized_query,
+            rag.chunks_vdb,
+            rag.chunk_entity_relation_graph,
+            rag.relationships_vdb,
+            rag.entities_vdb,
+            query_param,
+            global_config,
+            rag.llm_response_cache,
+        )
+    else:
+        if include_trace:
+            answer, image_list, debug_payload = await graph_query(
+                normalized_query,
+                rag.chunk_entity_relation_graph,
+                rag.entities_vdb,
+                rag.relationships_vdb,
+                rag.text_chunks,
+                query_param,
+                global_config,
+                rag.llm_response_cache,
+                chunks_vdb=rag.chunks_vdb,
+                return_debug=True,
+            )
+            await rag._query_done()
+            return {
+                "answer": answer,
+                "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+                "trace": _build_one_hop_trace(
+                    normalized_query, mode, answer, image_list, debug_payload
+                ),
+            }
+        answer, image_list = await graph_query(
+            normalized_query,
+            rag.chunk_entity_relation_graph,
+            rag.entities_vdb,
+            rag.relationships_vdb,
+            rag.text_chunks,
+            query_param,
+            global_config,
+            rag.llm_response_cache,
+            chunks_vdb=rag.chunks_vdb,
+        )
+
+    await rag._query_done()
+
+    return {
+        "answer": answer,
+        "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+        "trace": None,
+    }
+
+
+async def trace_one_hop_problem(work_dir, query, mode="hybrid"):
+    rag = await initialize_rag(work_dir)
+    result = await _run_one_hop_with_rag(rag, query, mode, include_trace=True)
+    return result["trace"]
+
+
+def _parse_dismantle_result(raw_text: str) -> dict[str, Any]:
+    try:
+        return json.loads(raw_text)
+    except Exception:
+        return json.loads(raw_text.split("```json")[1].split("```")[0])
+
+
+async def _run_multi_hop_with_rag(
+    rag: Ragent,
+    query: str,
+    include_trace: bool = False,
+):
+    res_dismantle = await rag.llm_model_func(prompt=query, system_prompt=dismantle_prompt)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"问题拆解结果：{res_dismantle}")
+    res_dismantle_json = _parse_dismantle_result(res_dismantle)
+
+    memory_new = {"多跳问题分解结果": res_dismantle_json}
+    steps = []
+    count = 0
+    final_answer = ""
+    images_list = []
+
+    for index, sub_question in enumerate(res_dismantle_json["sub_questions"]):
+        if count == 2:
+            prompt_summary = (
+                "请对历史信息中存储的知识内容进行总结，要求字数少于1000字，并保留sub_questions列表中的问题信息，以下是历史信息\n"
+                + str(memory_new)
+            )
+            summary_result = await _run_one_hop_with_rag(
+                rag, prompt_summary, mode="hybrid", include_trace=include_trace
+            )
+            memory_new = {"历史信息总结": summary_result["answer"]}
+            count = 0
+            images_list.extend(summary_result["image_list"])
+            if include_trace:
+                steps.append(
+                    {
+                        "stage_type": "history_summary",
+                        "display_question": "历史信息总结",
+                        "internal_query": prompt_summary,
+                        "memory_snapshot": _preview_text(
+                            json.dumps(memory_new, ensure_ascii=False), limit=240
+                        ),
+                        "trace": summary_result["trace"],
+                    }
+                )
+
+        if index == len(res_dismantle_json["sub_questions"]) - 1 and index > 0:
+            internal_query = (
+                "当前回答的问题是"
+                + sub_question
+                + "该问题历史记录为"
+                + str(memory_new)
+                + "当前是最后一个子问题在回答子问题的基础上请对以上内容进行总结回答"
+            )
+            stage_type = "final_synthesis"
+        else:
+            internal_query = "当前回答的问题是" + sub_question + "该问题历史记录为" + str(memory_new)
+            stage_type = "sub_question"
+
+        step_result = await _run_one_hop_with_rag(
+            rag, internal_query, mode="hybrid", include_trace=include_trace
+        )
+        memory_new[sub_question] = step_result["answer"]
+        count += 1
+        final_answer = step_result["answer"]
+        images_list.extend(step_result["image_list"])
+        if include_trace:
+            steps.append(
+                {
+                    "stage_type": stage_type,
+                    "display_question": sub_question,
+                    "internal_query": internal_query,
+                    "memory_snapshot": _preview_text(
+                        json.dumps(memory_new, ensure_ascii=False), limit=240
+                    ),
+                    "trace": step_result["trace"],
+                }
+            )
+
+    result = {
+        "query": query,
+        "decomposition": res_dismantle_json,
+        "answer": final_answer,
+        "image_list": sorted([item for item in set(images_list) if item != "unknown_source"]),
+    }
+    if include_trace:
+        result["steps"] = steps
+    return result
+
+
+async def trace_multi_hop_problem(work_dir, query):
+    rag = await initialize_rag(work_dir)
+    return await _run_multi_hop_with_rag(rag, query, include_trace=True)
 
 
 def _shorten_for_log(value: Any, limit: int = 600) -> str:
@@ -248,10 +663,11 @@ async def initialize_rag(WORKING_DIR):
     return rag
 
 
-async def ainsert_rag(work_dir, text, doc_name):
+async def ainsert_rag(work_dir, text, doc_name, file_paths: str | None = None):
     if not os.path.exists(work_dir):
         os.mkdir(work_dir)
     rag = await initialize_rag(work_dir)
+    source_file_path = os.path.abspath(file_paths) if file_paths else None
     hard_timeout_enabled = os.getenv("RAG_INSERT_HARD_TIMEOUT", "0") == "1"
     insert_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_SECONDS", "0")) if hard_timeout_enabled else 0
     max_retries = int(os.getenv("RAG_INSERT_RETRIES", "2"))
@@ -259,12 +675,15 @@ async def ainsert_rag(work_dir, text, doc_name):
     max_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_MAX_SECONDS", "600"))
     try:
         if insert_timeout <= 0:
-            await rag.ainsert(text, doc_name)
+            await rag.ainsert(text, doc_name, file_paths=source_file_path)
             return True
         for attempt in range(max_retries + 1):
             cur_timeout = min(int(insert_timeout * (timeout_backoff ** attempt)), max_timeout)
             try:
-                await asyncio.wait_for(rag.ainsert(text, doc_name), timeout=cur_timeout)
+                await asyncio.wait_for(
+                    rag.ainsert(text, doc_name, file_paths=source_file_path),
+                    timeout=cur_timeout,
+                )
                 return True
             except asyncio.TimeoutError:
                 if attempt >= max_retries:
@@ -367,59 +786,19 @@ async def process_image_file(work_dir, image_file_path, doc_name):
 
 async def inference_multi_hop_problem(work_dir, query, return_all: bool = False):
     rag = await initialize_rag(work_dir)
-    res_dismantle = await rag.llm_model_func(prompt=query, system_prompt=dismantle_prompt)
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"问题拆解结果：{res_dismantle}")
-    try:
-        res_dismantle_json = json.loads(res_dismantle)
-    except:
-        res_dismantle_json = json.loads(res_dismantle.split("```json")[1].split("```")[0])
-
-    global memory_new
-    memory_new= {}
-    count = 0
-    memory_new["多跳问题分解结果"] = res_dismantle_json
-    images_list = []
-    for i in range(len(res_dismantle_json["sub_questions"])):
-        if count == 2:
-            prompt_summary = "请对历史信息中存储的知识内容进行总结，要求字数少于1000字，并保留sub_questions列表中的问题信息，以下是历史信息\n" +  str(memory_new)
-            query_dismantle_response , image_list= await rag.aquery(
-                    prompt_summary, param=QueryParam(mode="hybrid")
-                    )
-            memory_new={}
-            memory_new["历史信息总结"] = query_dismantle_response
-            count = 0
-            images_list.extend(image_list)
-        else:
-            pass
-        if i == len(res_dismantle_json["sub_questions"]) - 1 and i > 0:
-            pro_dismantle_sys_n = "当前回答的问题是" + res_dismantle_json["sub_questions"][i] + "该问题历史记录为" + str(memory_new) + "当前是最后一个子问题在回答子问题的基础上请对以上内容进行总结回答"
-            query_dismantle_response, image_list = await rag.aquery(
-                pro_dismantle_sys_n, param=QueryParam(mode="hybrid")
-                    )
-            memory_new[res_dismantle_json["sub_questions"][i]] = query_dismantle_response
-            count +=1
-            images_list.extend(image_list)
-        else:
-            pro_dismantle_sys = "当前回答的问题是" + res_dismantle_json["sub_questions"][i] + "该问题历史记录为" + str(memory_new)
-            query_dismantle_response, image_list = await rag.aquery(
-                    pro_dismantle_sys, param=QueryParam(mode="hybrid")
-                    )
-            memory_new[res_dismantle_json["sub_questions"][i]] = query_dismantle_response
-            count += 1 
-            images_list.extend(image_list)
+    result = await _run_multi_hop_with_rag(rag, query, include_trace=False)
     if return_all:
-        return "question:"+ query +  "answer_multi_hop:" + query_dismantle_response + "\nimage_list:" + str(set(images_list))
+        return "question:"+ query +  "answer_multi_hop:" + result["answer"] + "\nimage_list:" + str(set(result["image_list"]))
     else:
-        return query_dismantle_response
+        return result["answer"]
 
 
 
 async def inference_one_hop_problem(work_dir, query, mode, return_all: bool = False):
     rag = await initialize_rag(work_dir)
-    one_hop_query_response, image_list = await rag.aquery(
-                    query, param=QueryParam(mode=mode)
-                    )
+    result = await _run_one_hop_with_rag(rag, query, mode, include_trace=False)
+    one_hop_query_response = result["answer"]
+    image_list = result["image_list"]
     if return_all:
         return "question:"+ query +  "one_hop_query_response" + one_hop_query_response + "\nimage_list:" + str(image_list)
     else:
@@ -836,7 +1215,7 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                     image_desc_text = ""
 
             if image_desc_text:
-                insertion_block = "\n" + marker_start + "\n```image_description_start\n" + image_desc_text + "\n```\n" + marker_end + "\n"
+                insertion_block = "\n" + marker_start + "\n```image_description_start\n\n" + image_desc_text + "\n\n```\n" + marker_end + "\n"
                 new_content_parts.append(insertion_block)
                 has_modification = True
                 injected_count += 1
@@ -890,6 +1269,7 @@ async def index_md_to_rag(pdf_file_path, project_dir, md_path, progress: dict[st
     """第二阶段：基于最终 md 和图片描述文件，构建 RAG/KG 索引。"""
     rag = await initialize_rag(project_dir)
     image_dir = os.path.join(os.path.dirname(md_path), "images")
+    source_pdf_path = os.path.abspath(pdf_file_path)
     hard_timeout_enabled = os.getenv("RAG_INSERT_HARD_TIMEOUT", "0") == "1"
     insert_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_SECONDS", "0")) if hard_timeout_enabled else 0
     max_retries = int(os.getenv("RAG_INSERT_RETRIES", "2"))
@@ -947,10 +1327,8 @@ async def index_md_to_rag(pdf_file_path, project_dir, md_path, progress: dict[st
             return
 
         async def _ainsert_once():
-            if file_paths:
-                await rag.ainsert(text, doc_name=doc_name, file_paths=file_paths)
-            else:
-                await rag.ainsert(text, doc_name=doc_name)
+            resolved_file_path = os.path.abspath(file_paths) if file_paths else source_pdf_path
+            await rag.ainsert(text, doc_name=doc_name, file_paths=resolved_file_path)
 
         if insert_timeout <= 0:
             try:
@@ -1034,11 +1412,12 @@ async def index_md_to_rag(pdf_file_path, project_dir, md_path, progress: dict[st
                 phase="insert_text_first",
                 chunk_index=0,
                 chunk_type="text_first",
+                file_paths=source_pdf_path,
                 text_len=len(text),
                 preview=_content_preview(text),
             )
             await safe_rag_insert(
-                text, doc_name_with_ext,
+                text, doc_name_with_ext, file_paths=source_pdf_path,
                 chunk_index=0, chunk_type="text_first",
             )
             continue
@@ -1046,7 +1425,7 @@ async def index_md_to_rag(pdf_file_path, project_dir, md_path, progress: dict[st
         image_match = image_name_pattern.match(text)
         if image_match:
             image_file_name = image_match.group(1)
-            image_path = os.path.join(image_dir, image_file_name)
+            image_path = os.path.abspath(os.path.join(image_dir, image_file_name))
             image_dismantle = os.path.join(image_dir, os.path.splitext(image_file_name)[0] + ".txt")
             image_desc_text = ""
             if os.path.exists(image_dismantle):
@@ -1087,11 +1466,12 @@ async def index_md_to_rag(pdf_file_path, project_dir, md_path, progress: dict[st
             phase="insert_text",
             chunk_index=i,
             chunk_type="text",
+            file_paths=source_pdf_path,
             text_len=len(text),
             preview=_content_preview(text),
         )
         await safe_rag_insert(
-            text, doc_name_with_ext,
+            text, doc_name_with_ext, file_paths=source_pdf_path,
             chunk_index=i, chunk_type="text",
         )
 

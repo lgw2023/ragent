@@ -955,6 +955,7 @@ async def graph_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     chunks_vdb: BaseVectorStorage = None,
+    return_debug: bool = False,
 ):
     if query_param.model_func:
         use_model_func = query_param.model_func
@@ -968,9 +969,6 @@ async def graph_query(
     cached_response, quantized, min_val, max_val = await handle_cache(
         hashing_kv, args_hash, query, query_param.mode, cache_type="query"
     )
-    if cached_response is not None:
-        return cached_response
-
     hl_keywords, ll_keywords = await get_keywords_from_query(
         query, query_param, global_config, hashing_kv
     )
@@ -980,6 +978,25 @@ async def graph_query(
 
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+
+    ll_entities_context, ll_relations_context, _, _ = await _get_node_data(
+        ll_keywords_str,
+        knowledge_graph_inst,
+        entities_vdb,
+        query_param,
+    )
+    hl_entities_context, hl_relations_context, _, _ = await _get_edge_data(
+        hl_keywords_str,
+        knowledge_graph_inst,
+        relationships_vdb,
+        query_param,
+    )
+    graph_entities = process_combine_contexts(
+        ll_entities_context, hl_entities_context
+    )
+    graph_relations = process_combine_contexts(
+        hl_relations_context, ll_relations_context
+    )
 
     # Build context
     context = await _build_query_context(
@@ -994,10 +1011,27 @@ async def graph_query(
         chunks_vdb,
     )
 
+    debug_payload = {
+        "high_level_keywords": hl_keywords,
+        "low_level_keywords": ll_keywords,
+        "graph_entities": graph_entities,
+        "graph_relations": graph_relations,
+        "final_context_text": context if context is not None else "",
+        "final_prompt_text": "",
+    }
+
     if query_param.only_need_context:
-        return context if context is not None else PROMPTS["fail_response"]
+        context_output = context if context is not None else PROMPTS["fail_response"]
+        if return_debug:
+            debug_payload["final_context_text"] = context_output
+            return context_output, [], debug_payload
+        return context_output
     if context is None:
-        return PROMPTS["fail_response"]
+        fail_response = PROMPTS["fail_response"]
+        if return_debug:
+            debug_payload["final_context_text"] = fail_response
+            return fail_response, [], debug_payload
+        return fail_response, []
 
     # Process conversation history
     history_context = ""
@@ -1019,8 +1053,11 @@ async def graph_query(
         history=history_context,
         user_prompt=user_prompt,
     )
+    debug_payload["final_prompt_text"] = sys_prompt
 
     if query_param.only_need_prompt:
+        if return_debug:
+            return sys_prompt, [], debug_payload
         return sys_prompt
 
     tokenizer: Tokenizer = global_config["tokenizer"]
@@ -1029,28 +1066,31 @@ async def graph_query(
         f"[kg_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})"
     )
 
-    response = await use_model_func(
-        query,
-        system_prompt=sys_prompt,
-        stream=query_param.stream,
-    )
-    if isinstance(response, str) and len(response) > len(sys_prompt):
-        response = (
-            response.replace(sys_prompt, "")
-            .replace("user", "")
-            .replace("model", "")
-            .replace(query, "")
-            .replace("<system>", "")
-            .replace("</system>", "")
-            .strip()
+    if cached_response is not None:
+        response = cached_response
+    else:
+        response = await use_model_func(
+            query,
+            system_prompt=sys_prompt,
+            stream=query_param.stream,
         )
-    response = await use_model_func(
-        response,
-        system_prompt=PROMPTS["rag_response_new"],
-        stream=query_param.stream,
-    )
+        if isinstance(response, str) and len(response) > len(sys_prompt):
+            response = (
+                response.replace(sys_prompt, "")
+                .replace("user", "")
+                .replace("model", "")
+                .replace(query, "")
+                .replace("<system>", "")
+                .replace("</system>", "")
+                .strip()
+            )
+        response = await use_model_func(
+            response,
+            system_prompt=PROMPTS["rag_response_new"],
+            stream=query_param.stream,
+        )
     image_file_path_list = []
-    if hashing_kv.global_config.get("enable_llm_cache"):
+    if cached_response is None and hashing_kv.global_config.get("enable_llm_cache"):
         # Save to cache
         await save_to_cache(
             hashing_kv,
@@ -1065,6 +1105,9 @@ async def graph_query(
                 cache_type="query",
             ),
         )
+
+    if return_debug:
+        return response, image_file_path_list, debug_payload
 
     return response, image_file_path_list
 
@@ -2166,6 +2209,218 @@ def cosine_similarity(query_embedding, chunk_embedding_list) -> list:
             similarity_list.append(dot_product / (norm_a * norm_b))
     return  similarity_list
 
+
+def _resolve_hybrid_chunk_candidate(
+    chunk_id: str,
+    vector_text_map: dict[str, str],
+    vector_file_path_map: dict[str, str],
+    graph_text_map: dict[str, str],
+    graph_file_path_map: dict[str, str],
+) -> tuple[str, str, list[str], str]:
+    sources = []
+    if chunk_id in vector_text_map:
+        sources.append("vector")
+    if chunk_id in graph_text_map:
+        sources.append("graph")
+
+    chunk_text = vector_text_map.get(chunk_id) or graph_text_map.get(chunk_id, "")
+    file_path = vector_file_path_map.get(chunk_id, "unknown_source")
+    if file_path in (None, "", "unknown_source"):
+        file_path = graph_file_path_map.get(chunk_id, file_path or "unknown_source")
+    elif chunk_id not in vector_file_path_map:
+        file_path = graph_file_path_map.get(chunk_id, file_path)
+
+    source_label = "+".join(sources) if sources else "unknown"
+    return chunk_text, file_path, sources, source_label
+
+
+async def _build_hybrid_retrieval_debug_data(
+    query: str,
+    chunks_vdb: BaseVectorStorage,
+    knowledge_graph_inst: BaseGraphStorage,
+    relationships_vdb: BaseVectorStorage,
+    entities_vdb: BaseVectorStorage,
+    query_param: QueryParam,
+    global_config: dict[str, str],
+    hashing_kv: BaseKVStorage | None = None,
+) -> dict[str, Any]:
+    vector_weights, vector_texts, vector_file_paths = await _get_vector_context_new(
+        query, chunks_vdb, query_param
+    )
+
+    hl_keywords, ll_keywords = await get_keywords_from_query(
+        query, query_param, global_config, hashing_kv
+    )
+
+    logger.debug(f"High-level keywords: {hl_keywords}")
+    logger.debug(f"Low-level  keywords: {ll_keywords}")
+
+    ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
+    hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+
+    ll_entities_context, ll_relations_context, ll_node_datas, _ = await _get_node_data(
+        ll_keywords_str,
+        knowledge_graph_inst,
+        entities_vdb,
+        query_param,
+    )
+    hl_entities_context, hl_relations_context, _, hl_use_entities = await _get_edge_data(
+        hl_keywords_str,
+        knowledge_graph_inst,
+        relationships_vdb,
+        query_param,
+    )
+
+    graph_entities = process_combine_contexts(
+        ll_entities_context, hl_entities_context
+    )
+    graph_relations = process_combine_contexts(
+        hl_relations_context, ll_relations_context
+    )
+
+    chunk_ids = []
+    chunk_texts = []
+    chunk_embeddings = []
+    chunk_file_paths = []
+    seen_chunk_ids = set()
+
+    for item in ll_node_datas:
+        if item.get("entity_type") != "chunk_text":
+            continue
+        chunk_id = item.get("entity_id")
+        if chunk_id in seen_chunk_ids:
+            continue
+        seen_chunk_ids.add(chunk_id)
+        chunk_ids.append(chunk_id)
+        chunk_texts.append(item.get("description", ""))
+        chunk_embeddings.append(item.get("embeddings"))
+        chunk_file_paths.append(item.get("file_path", "unknown_source"))
+
+    for item in hl_use_entities:
+        if item.get("entity_type") != "chunk_text":
+            continue
+        chunk_id = item.get("entity_id")
+        if chunk_id in seen_chunk_ids:
+            continue
+        seen_chunk_ids.add(chunk_id)
+        chunk_ids.append(chunk_id)
+        chunk_texts.append(item.get("description", ""))
+        chunk_embeddings.append(item.get("embeddings"))
+        chunk_file_paths.append(item.get("file_path", "unknown_source"))
+
+    graph_weights = {}
+    graph_text_map = {}
+    graph_file_path_map = {}
+    valid_chunk_ids = []
+    valid_chunk_embeddings = []
+
+    for chunk_id, text, embedding, file_path in zip(
+        chunk_ids, chunk_texts, chunk_embeddings, chunk_file_paths
+    ):
+        if embedding in (None, "", "None"):
+            continue
+        valid_chunk_ids.append(chunk_id)
+        valid_chunk_embeddings.append(
+            embedding if isinstance(embedding, str) else json.dumps(embedding)
+        )
+        graph_text_map[chunk_id] = text
+        graph_file_path_map[chunk_id] = file_path
+
+    if valid_chunk_embeddings:
+        query_embedding = await openai_embed([query])
+        similarity_scores = cosine_similarity(
+            query_embedding[0], valid_chunk_embeddings
+        )
+        for chunk_id, score in zip(valid_chunk_ids, similarity_scores):
+            graph_weights[chunk_id] = score
+
+    merge_weight = weightd_merge(vector_weights, graph_weights)
+    sorted_items = sorted(merge_weight.items(), key=lambda x: x[1], reverse=True)
+    topk_text = sorted_items[:20]
+
+    results_text = []
+    results_file_paths = []
+    results_chunk_ids = []
+    results_sources = []
+    results_source_labels = []
+    image_file_path_list = []
+    merged_candidates = []
+
+    for index, (chunk_id, score) in enumerate(topk_text, 1):
+        chunk_text, file_path, sources, source_label = _resolve_hybrid_chunk_candidate(
+            chunk_id,
+            vector_texts,
+            vector_file_paths,
+            graph_text_map,
+            graph_file_path_map,
+        )
+        results_text.append(chunk_text)
+        results_file_paths.append(file_path)
+        results_chunk_ids.append(chunk_id)
+        results_sources.append(sources)
+        results_source_labels.append(source_label)
+        image_file_path_list.append(file_path)
+        merged_candidates.append(
+            {
+                "rank": index,
+                "source": source_label,
+                "sources": sources,
+                "chunk_id": chunk_id,
+                "score": score,
+                "file_path": file_path,
+                "content": chunk_text,
+            }
+        )
+
+    rerank_results = []
+    if results_text:
+        rerank_results = await rerank_from_env(
+            query=query,
+            documents=results_text,
+            top_k=10,
+        )
+
+    text_units_context = []
+    top_k_l = min(len(rerank_results), 10)
+    for i in range(top_k_l):
+        rerank_index = rerank_results[i]["index"]
+        if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
+            continue
+        text_units_context.append(
+            {
+                "id": i + 1,
+                "content": results_text[rerank_index],
+                "file_path": results_file_paths[rerank_index],
+            }
+        )
+
+    image_file_path_list = set(image_file_path_list)
+    image_file_path_list.discard("unknown_source")
+
+    return {
+        "high_level_keywords": hl_keywords,
+        "low_level_keywords": ll_keywords,
+        "ll_keywords_str": ll_keywords_str,
+        "hl_keywords_str": hl_keywords_str,
+        "graph_entities": graph_entities,
+        "graph_relations": graph_relations,
+        "vector_weights": vector_weights,
+        "vector_texts": vector_texts,
+        "vector_file_paths": vector_file_paths,
+        "graph_weights": graph_weights,
+        "graph_texts": graph_text_map,
+        "graph_file_paths": graph_file_path_map,
+        "merged_candidates": merged_candidates,
+        "rerank_results": rerank_results,
+        "results_text": results_text,
+        "results_file_paths": results_file_paths,
+        "results_chunk_ids": results_chunk_ids,
+        "results_sources": results_sources,
+        "results_source_labels": results_source_labels,
+        "text_units_context": text_units_context,
+        "image_file_path_list": image_file_path_list,
+    }
+
 async def hybrid_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
@@ -2176,6 +2431,7 @@ async def hybrid_query(
     global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
+    return_debug: bool = False,
 ):
     if query_param.model_func:
         use_model_func = query_param.model_func
@@ -2188,68 +2444,24 @@ async def hybrid_query(
         hashing_kv, args_hash, query, query_param.mode, cache_type="query"
     )
 
-    chunks1_weight, chunk1_text, chunks1_file_path = await _get_vector_context_new(query, chunks_vdb, query_param)
-    
-    # Handle cache
-    hl_keywords, ll_keywords = await get_keywords_from_query(
-        query, query_param, global_config, hashing_kv
+    retrieval_debug = await _build_hybrid_retrieval_debug_data(
+        query=query,
+        chunks_vdb=chunks_vdb,
+        knowledge_graph_inst=knowledge_graph_inst,
+        relationships_vdb=relationships_vdb,
+        entities_vdb=entities_vdb,
+        query_param=query_param,
+        global_config=global_config,
+        hashing_kv=hashing_kv,
     )
-    
-    logger.debug(f"High-level keywords: {hl_keywords}")
-    logger.debug(f"Low-level  keywords: {ll_keywords}")
 
-    ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
-    hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+    image_file_path_list = retrieval_debug["image_file_path_list"]
+    results_text = retrieval_debug["results_text"]
+    results_file_paths = retrieval_debug["results_file_paths"]
+    result_chunk = retrieval_debug["rerank_results"]
 
-   # try:
-    chunks_id_list, chunks_list,  chunks_embeddding_list, chunks_file_path_list= await _build_query_context_new(
-            query=query,
-            ll_keywords=ll_keywords_str,
-            hl_keywords=hl_keywords_str, 
-            knowledge_graph_inst=knowledge_graph_inst,
-            relationships_vdb=relationships_vdb,
-            entities_vdb=entities_vdb,
-            query_param=query_param,
-        )
-   # except:
-   #     chunks_id_list, chunks_list,  chunks_embeddding_list, chunks_file_path_list = [], [], [], []
-    embeddings_list = [query]
-    query_embedding = await openai_embed(embeddings_list)
-    metrics2_list = cosine_similarity(query_embedding[0], chunks_embeddding_list)
-    chunks2_weight, chunk2_text, chunk2_file_path = {}, {}, {}
-    
-    for i in range(len(chunks_id_list)):
-        chunks2_weight[chunks_id_list[i]] = metrics2_list[i]
-        chunk2_text[chunks_id_list[i]] = chunks_list[i]
-        chunk2_file_path[chunks_id_list[i]] = chunks_file_path_list[i]
-
-    merge_weight = weightd_merge(chunks1_weight, chunks2_weight)
-    sorted_items = sorted(merge_weight.items(), key=lambda x: x[1], reverse=True)
-    topk_text = sorted_items[:20]
-
-    results_text = []
-    results_file_paths = []
-    image_file_path_list = []
-    for chunk in topk_text:
-        if chunk[0] in chunk1_text:
-            results_text.append(chunk1_text[chunk[0]])
-            path_value = chunks1_file_path[chunk[0]]
-            results_file_paths.append(path_value)
-            image_file_path_list.append(path_value)
-        else:
-            results_text.append(chunk2_text[chunk[0]])
-            path_value = chunk2_file_path[chunk[0]]
-            results_file_paths.append(path_value)
-            image_file_path_list.append(path_value)
-    image_file_path_list = set(image_file_path_list)
-    image_file_path_list.discard("unknown_source")
-    result_chunk= await rerank_from_env(
-            query=query,
-            documents=results_text,
-            top_k=10,
-        )
     top_k_l = min(len(result_chunk), 10)
-    text_units_context=[]
+    text_units_context = []
 
     for i in range(top_k_l):
         rerank_index = result_chunk[i]["index"]
@@ -2264,9 +2476,7 @@ async def hybrid_query(
         )
 
     text_units_str = json.dumps(text_units_context, ensure_ascii=False)
-    tokenizer: Tokenizer = global_config["tokenizer"]
-    if query_param.only_need_context:
-        return f"""
+    context_text = f"""
 ---Document Chunks---
 
 ```json
@@ -2274,6 +2484,17 @@ async def hybrid_query(
 ```
 
 """
+    tokenizer: Tokenizer = global_config["tokenizer"]
+    if query_param.only_need_context:
+        if return_debug:
+            debug_payload = {
+                **retrieval_debug,
+                "final_context_document_chunks": text_units_context,
+                "final_context_text": context_text,
+                "final_prompt_text": "",
+            }
+            return context_text, image_file_path_list, debug_payload
+        return context_text
     # Process conversation history
     history_context = ""
     if query_param.conversation_history:
@@ -2295,6 +2516,14 @@ async def hybrid_query(
         user_prompt=user_prompt,
     )
     if query_param.only_need_prompt:
+        if return_debug:
+            debug_payload = {
+                **retrieval_debug,
+                "final_context_document_chunks": text_units_context,
+                "final_context_text": context_text,
+                "final_prompt_text": sys_prompt,
+            }
+            return sys_prompt, image_file_path_list, debug_payload
         return sys_prompt
 
     len_of_prompts = len(tokenizer.encode(query + sys_prompt))
@@ -2339,6 +2568,15 @@ async def hybrid_query(
                 cache_type="query",
             ),
         )
+
+    if return_debug:
+        debug_payload = {
+            **retrieval_debug,
+            "final_context_document_chunks": text_units_context,
+            "final_context_text": context_text,
+            "final_prompt_text": sys_prompt,
+        }
+        return response, image_file_path_list, debug_payload
 
     return response, image_file_path_list
 

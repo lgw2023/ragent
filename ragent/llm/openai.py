@@ -90,6 +90,18 @@ def create_openai_async_client(
             "LLM_API_BASE", "https://api.openai.com/v1"
         )
 
+    # Keep request timeout configurable for slower third-party OpenAI-compatible gateways.
+    # If caller already provided timeout in client_configs, keep caller value.
+    if "timeout" not in merged_configs:
+        timeout_env = os.getenv("LLM_API_TIMEOUT_SECONDS")
+        if timeout_env:
+            try:
+                merged_configs["timeout"] = float(timeout_env)
+            except ValueError:
+                logger.warning(
+                    f"Invalid LLM_API_TIMEOUT_SECONDS value: {timeout_env}. Ignore timeout override."
+                )
+
     return AsyncOpenAI(**merged_configs)
 
 
@@ -150,7 +162,9 @@ async def openai_complete_if_cache(
     client_configs = kwargs.pop("openai_client_configs", {})
     # Create the OpenAI client
     openai_async_client = create_openai_async_client(
-        api_key=os.environ["LLM_API_KEY"], base_url=os.environ["LLM_API_URL"], client_configs=client_configs
+        api_key=api_key or os.getenv("LLM_API_KEY"),
+        base_url=base_url or os.getenv("LLM_API_URL"),
+        client_configs=client_configs,
     )
 
     # Remove special kwargs that shouldn't be passed to OpenAI
