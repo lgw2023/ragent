@@ -39,13 +39,6 @@ cd ragent_master
 
 ### 2. 安装依赖
 
-`README` 中下面的命令按当前代码入口整理过：
-
-- 当前 `integrations.py` / `singlefile.py` 会在导入阶段直接加载 `MinerU pipeline` 相关模块，所以即使只跑 `onehop` / `multihop` / `chat`，环境里也必须具备 `MinerU` 的 `pipeline` 依赖（如 `torch`、`torchvision`、`transformers`、`doclayout_yolo`）。
-- 仓库的 `pyproject.toml` 已将根依赖切换为 `mineru[pipeline]`，因此 `uv sync` 会一并安装这组依赖。
-- 如果你要直接运行 `integrations.py` / `singlefile.py` 的主流程，建议至少安装 `openai` 和 `api` 两组 extra。
-- `api` 这个名字虽然偏服务端，但当前文档解析主流程里实际用到了其中的 `aiofiles` 依赖。
-
 **使用 uv（推荐）：**
 
 ```bash
