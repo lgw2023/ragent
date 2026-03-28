@@ -32,6 +32,7 @@ from ragent.utils import (
     safe_unicode_decode,
     logger,
     log_model_call,
+    record_model_usage,
 )
 from ragent.types import GPTKeywordExtractionFormat
 
@@ -301,6 +302,13 @@ async def openai_complete_if_cache(
                     }
                     token_tracker.add_usage(token_counts)
                     logger.debug(f"Streaming token usage (from API): {token_counts}")
+                if final_chunk_usage:
+                    record_model_usage(
+                        "chat",
+                        os.environ.get("LLM_API_MODEL") or model,
+                        final_chunk_usage,
+                        source="ragent.llm.openai.openai_complete_if_cache.stream",
+                    )
                 elif token_tracker:
                     logger.debug("No usage information available in streaming response")
             except Exception as e:
@@ -380,6 +388,13 @@ async def openai_complete_if_cache(
                     "total_tokens": getattr(response.usage, "total_tokens", 0),
                 }
                 token_tracker.add_usage(token_counts)
+            if hasattr(response, "usage"):
+                record_model_usage(
+                    "chat",
+                    os.environ.get("LLM_API_MODEL") or model,
+                    response.usage,
+                    source="ragent.llm.openai.openai_complete_if_cache",
+                )
 
             logger.debug(f"Response content len: {len(content)}")
             verbose_debug(f"Response: {response}")
@@ -589,6 +604,13 @@ async def openai_embed(
         )
         try:
             response = await openai_async_client.embeddings.create(**request_kwargs)
+            record_model_usage(
+                "embedding",
+                embedding_model,
+                getattr(response, "usage", None),
+                source="ragent.llm.openai.openai_embed",
+                extra={"batch_size": len(texts)},
+            )
             _trace_model(
                 f"embed.request.done model={embedding_model} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s"
             )

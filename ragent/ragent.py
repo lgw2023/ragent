@@ -557,7 +557,16 @@ class Ragent:
             namespace=NameSpace.VECTOR_STORE_CHUNKS,
             workspace=self.workspace,
             embedding_func=self.embedding_func,
-            meta_fields={"full_doc_id", "content", "file_path"},
+            meta_fields={
+                "full_doc_id",
+                "content",
+                "file_path",
+                "page_numbers",
+                "page_number_start",
+                "page_number_end",
+                "section_path",
+                "source_ref",
+            },
         )
 
         # Initialize document status storage
@@ -705,6 +714,7 @@ class Ragent:
         split_by_character_only: bool = False,
         ids: str | list[str] | None = None,
         file_paths: str | list[str] | None = None,
+        metadata: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> None:
         """Async Insert documents with checkpoint support
 
@@ -716,6 +726,7 @@ class Ragent:
             split_by_character is None, this parameter is ignored.
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
+            metadata: optional per-document metadata, used for source attribution
         """
         start_ts = time.perf_counter()
         input = clean_text_for_xml(input)
@@ -723,7 +734,9 @@ class Ragent:
         _trace_insert(f"ainsert.begin doc_name={doc_name} input_count={input_count}")
 
         enqueue_start = time.perf_counter()
-        await self.apipeline_enqueue_documents(input, ids, file_paths, doc_name)
+        await self.apipeline_enqueue_documents(
+            input, ids, file_paths, doc_name, metadata=metadata
+        )
         _trace_insert(
             f"ainsert.enqueue.done doc_name={doc_name} elapsed={time.perf_counter() - enqueue_start:.2f}s"
         )
@@ -745,6 +758,7 @@ class Ragent:
         ids: list[str] | None = None,
         file_paths: str | list[str] | None = None,
         doc_name: str | list[str] | None = None,
+        metadata: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> None:
         """
         Pipeline for Processing Documents
@@ -767,6 +781,8 @@ class Ragent:
             ids = [ids]
         if isinstance(file_paths, str):
             file_paths = [file_paths]
+        if isinstance(metadata, dict):
+            metadata = [metadata]
 
         # If file_paths is provided, ensure it matches the number of documents
         if file_paths is not None:
@@ -780,6 +796,14 @@ class Ragent:
             # If no file paths provided, use placeholder
             file_paths = ["unknown_source"] * len(input)
 
+        if metadata is not None:
+            if len(metadata) != len(input):
+                raise ValueError(
+                    "Number of metadata entries must match the number of documents"
+                )
+        else:
+            metadata = [{} for _ in input]
+
         # 1. Validate ids if provided or generate MD5 hash IDs
         if ids is not None:
             # Check if the number of IDs matches the number of documents
@@ -792,28 +816,30 @@ class Ragent:
 
             # Generate contents dict of IDs provided by user and documents
             contents = {
-                id_: {"content": doc, "file_path": path}
-                for id_, doc, path in zip(ids, input, file_paths)
+                id_: {"content": doc, "file_path": path, "metadata": doc_metadata}
+                for id_, doc, path, doc_metadata in zip(ids, input, file_paths, metadata)
             }
         else:
             # Clean input text and remove duplicates
             cleaned_input = [
-                (clean_text(doc), path) for doc, path in zip(input, file_paths)
+                (clean_text(doc), path, doc_metadata)
+                for doc, path, doc_metadata in zip(input, file_paths, metadata)
             ]
             unique_content_with_paths = {}
 
             # Keep track of unique content and their paths
-            for content, path in cleaned_input:
+            for content, path, doc_metadata in cleaned_input:
                 if content not in unique_content_with_paths:
-                    unique_content_with_paths[content] = path
+                    unique_content_with_paths[content] = (path, doc_metadata)
 
             # Generate contents dict of MD5 hash IDs and documents with paths
             contents = {
                 compute_mdhash_id(content, prefix="doc-"): {
                     "content": content,
                     "file_path": path,
+                    "metadata": doc_metadata,
                 }
-                for content, path in unique_content_with_paths.items()
+                for content, (path, doc_metadata) in unique_content_with_paths.items()
             }
 
         # 2. Remove duplicate contents
@@ -821,13 +847,14 @@ class Ragent:
         for id_, content_data in contents.items():
             content = content_data["content"]
             file_path = content_data["file_path"]
+            doc_metadata = content_data.get("metadata", {})
             if content not in unique_contents:
-                unique_contents[content] = (id_, file_path)
+                unique_contents[content] = (id_, file_path, doc_metadata)
 
         # Reconstruct contents with unique content
         contents = {
-            id_: {"content": content, "file_path": file_path}
-            for content, (id_, file_path) in unique_contents.items()
+            id_: {"content": content, "file_path": file_path, "metadata": doc_metadata}
+            for content, (id_, file_path, doc_metadata) in unique_contents.items()
         }
 
         # 3. Generate document initial status
@@ -842,6 +869,7 @@ class Ragent:
                 "file_path": content_data[
                     "file_path"
                 ],  # Store file path in document status
+                "metadata": content_data.get("metadata", {}),
             }
             for id_, content_data in contents.items()
         }
@@ -1026,14 +1054,19 @@ class Ragent:
 
                             # Generate chunks from document
                             chunking_start_ts = time.perf_counter()
-                            chunks: dict[str, Any] = {
-                                compute_mdhash_id(dp["content"], prefix="chunk-"): {
-                                    **dp,
-                                    "full_doc_id": doc_id,
-                                    "file_path": file_path,  # Add file path to each chunk
-                                    "llm_cache_list": [],  # Initialize empty LLM cache list for each chunk
-                                }
-                                for dp in self.chunking_func(
+                            try:
+                                raw_chunks = self.chunking_func(
+                                    doc_name,
+                                    self.tokenizer,
+                                    status_doc.content,
+                                    doc_metadata=status_doc.metadata,
+                                    split_by_character=split_by_character,
+                                    split_by_character_only=split_by_character_only,
+                                    overlap_token_size=self.chunk_overlap_token_size,
+                                    max_token_size=self.chunk_token_size,
+                                )
+                            except TypeError:
+                                raw_chunks = self.chunking_func(
                                     doc_name,
                                     self.tokenizer,
                                     status_doc.content,
@@ -1042,6 +1075,14 @@ class Ragent:
                                     self.chunk_overlap_token_size,
                                     self.chunk_token_size,
                                 )
+                            chunks: dict[str, Any] = {
+                                compute_mdhash_id(dp["content"], prefix="chunk-"): {
+                                    **dp,
+                                    "full_doc_id": doc_id,
+                                    "file_path": file_path,  # Add file path to each chunk
+                                    "llm_cache_list": [],  # Initialize empty LLM cache list for each chunk
+                                }
+                                for dp in raw_chunks
                             }
                             _trace_insert(
                                 f"process.chunking.done file={file_path} chunks={len(chunks)} elapsed={time.perf_counter() - chunking_start_ts:.2f}s"

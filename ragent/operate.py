@@ -46,10 +46,153 @@ from .constants import (
 from .kg.shared_storage import get_storage_keyed_lock
 import time
 
+def _normalize_source_text_for_match(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.replace("\r", "\n")
+    normalized = re.sub(r"<!--.*?-->", " ", normalized, flags=re.DOTALL)
+    normalized = re.sub(r"```.*?```", " ", normalized, flags=re.DOTALL)
+    normalized = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", normalized)
+    normalized = re.sub(r"^\s*#+\s*", "", normalized, flags=re.MULTILINE)
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized.strip()
+
+
+def _strip_doc_name_markers(text: str) -> str:
+    stripped = text or ""
+    pattern = re.compile(r"^[^\n#]+#{5,7}")
+    while True:
+        match = pattern.match(stripped)
+        if not match:
+            break
+        stripped = stripped[match.end() :].lstrip()
+    return stripped
+
+
+def _build_source_ref(
+    file_path: str,
+    page_numbers: list[int] | None = None,
+    section_path: str | None = None,
+) -> str:
+    base_name = os.path.basename(file_path) if file_path else "unknown_source"
+    parts = [base_name]
+    if page_numbers:
+        ordered_pages = sorted({int(page) for page in page_numbers if isinstance(page, int)})
+        if ordered_pages:
+            if len(ordered_pages) == 1:
+                parts.append(f"p.{ordered_pages[0]}")
+            else:
+                parts.append(f"p.{ordered_pages[0]}-{ordered_pages[-1]}")
+    if section_path:
+        parts.append(section_path)
+    return " | ".join(parts)
+
+
+def _extract_chunk_citation_fields(chunk: dict[str, Any]) -> dict[str, Any]:
+    citation: dict[str, Any] = {}
+    for key in (
+        "file_path",
+        "page_numbers",
+        "page_number_start",
+        "page_number_end",
+        "section_path",
+        "source_ref",
+    ):
+        value = chunk.get(key)
+        if value not in (None, "", [], {}):
+            citation[key] = value
+    return citation
+
+
+def _build_chunk_context_entry(rank: int, chunk: dict[str, Any]) -> dict[str, Any]:
+    entry = {
+        "id": rank,
+        "content": chunk.get("content", ""),
+        "file_path": chunk.get("file_path", "unknown_source"),
+    }
+    entry.update(_extract_chunk_citation_fields(chunk))
+    return entry
+
+
+def _annotate_chunk_with_source_metadata(
+    chunk: dict[str, Any],
+    doc_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not doc_metadata:
+        return chunk
+
+    content_blocks = doc_metadata.get("content_blocks") or []
+    normalized_chunk = _normalize_source_text_for_match(
+        _strip_doc_name_markers(chunk.get("content", ""))
+    )
+    matched_blocks: list[dict[str, Any]] = []
+
+    if normalized_chunk:
+        for block in content_blocks:
+            match_text = block.get("match_text") or ""
+            min_length = 2 if block.get("is_heading") else 6
+            if len(match_text) < min_length:
+                continue
+            if match_text in normalized_chunk:
+                matched_blocks.append(block)
+
+    page_numbers = sorted(
+        {
+            int(block["page_number"])
+            for block in matched_blocks
+            if isinstance(block.get("page_number"), int)
+        }
+    )
+    if not page_numbers:
+        page_numbers = [
+            int(page)
+            for page in doc_metadata.get("page_numbers", [])
+            if isinstance(page, int)
+        ]
+        page_numbers = sorted(set(page_numbers))
+
+    section_path = next(
+        (
+            block.get("section_path", "")
+            for block in matched_blocks
+            if block.get("section_path") and not block.get("is_heading")
+        ),
+        "",
+    )
+    if not section_path:
+        section_path = next(
+            (block.get("section_path", "") for block in matched_blocks if block.get("section_path")),
+            "",
+        )
+    if not section_path:
+        section_path = doc_metadata.get("section_path", "")
+
+    if page_numbers:
+        chunk["page_numbers"] = page_numbers
+        chunk["page_number_start"] = page_numbers[0]
+        chunk["page_number_end"] = page_numbers[-1]
+    elif doc_metadata.get("page_number_start") is not None:
+        chunk["page_number_start"] = doc_metadata.get("page_number_start")
+        chunk["page_number_end"] = doc_metadata.get("page_number_end")
+
+    if section_path:
+        chunk["section_path"] = section_path
+
+    source_ref = doc_metadata.get("source_ref")
+    source_file_path = chunk.get("file_path") or doc_metadata.get("file_path", "")
+    if (page_numbers or section_path) and source_file_path:
+        source_ref = _build_source_ref(source_file_path, page_numbers, section_path)
+    if source_ref:
+        chunk["source_ref"] = source_ref
+
+    return chunk
+
+
 def chunking_by_token_size(
     doc_name: str,
     tokenizer: Tokenizer,
     content: str,
+    doc_metadata: dict[str, Any] | None = None,
     split_by_character: str | None = None,
     split_by_character_only: bool = False,
     overlap_token_size: int = 128,
@@ -80,25 +223,23 @@ def chunking_by_token_size(
                 else:
                     new_chunks.append((len(_tokens), chunk))
         for index, (_len, chunk) in enumerate(new_chunks):
-            results.append(
-                {
-                    "tokens": _len,
-                    "content": doc_name+ "#####" +chunk.strip(),
-                    "chunk_order_index": index,
-                }
-            )
+            chunk_data = {
+                "tokens": _len,
+                "content": doc_name + "#####" + chunk.strip(),
+                "chunk_order_index": index,
+            }
+            results.append(_annotate_chunk_with_source_metadata(chunk_data, doc_metadata))
     else:
         for index, start in enumerate(
             range(0, len(tokens), max_token_size - overlap_token_size)
         ):
             chunk_content = tokenizer.decode(tokens[start : start + max_token_size])
-            results.append(
-                {
-                    "tokens": min(max_token_size, len(tokens) - start),
-                    "content": doc_name+ "#####" + chunk_content.strip(),
-                    "chunk_order_index": index,
-                }
-            )
+            chunk_data = {
+                "tokens": min(max_token_size, len(tokens) - start),
+                "content": doc_name + "#####" + chunk_content.strip(),
+                "chunk_order_index": index,
+            }
+            results.append(_annotate_chunk_with_source_metadata(chunk_data, doc_metadata))
     return results
 
 
@@ -1275,17 +1416,19 @@ async def _get_vector_context_new(
         # Use chunk_top_k if specified, otherwise fall back to top_k
         search_top_k = query_param.chunk_top_k or query_param.top_k
         results = await chunks_vdb.query(query, top_k=search_top_k, ids=query_param.ids)
-        chunk_weight={}
+        chunk_weight = {}
         chunk_text = {}
-        chunk_file_path ={}
+        chunk_file_path = {}
+        chunk_metadata = {}
         for rr in results:
             chunk_weight[rr.get("__id__")] = rr.get("__metrics__")
             chunk_text[rr.get("__id__")] = rr.get('content')
             chunk_file_path[rr.get("__id__")] = rr.get("file_path")
-        return  chunk_weight, chunk_text, chunk_file_path
+            chunk_metadata[rr.get("__id__")] = _extract_chunk_citation_fields(rr)
+        return chunk_weight, chunk_text, chunk_file_path, chunk_metadata
     except Exception as e:
         logger.error(f"Error in _get_vector_context: {e}")
-        return [], []
+        return {}, {}, {}, {}
 
 
 async def _build_query_context_new(
@@ -1611,10 +1754,7 @@ async def _build_query_context(
         # Re-process chunks with dynamic token limit
         if all_chunks:
             # Create a temporary query_param copy with adjusted chunk token limit
-            temp_chunks = [
-                {"content": chunk["content"], "file_path": chunk["file_path"]}
-                for chunk in all_chunks
-            ]
+            temp_chunks = [chunk.copy() for chunk in all_chunks]
 
             # Apply token truncation to chunks using the dynamic limit
             truncated_chunks = await process_chunks_unified(
@@ -1628,13 +1768,7 @@ async def _build_query_context(
 
             # Rebuild text_units_context with truncated chunks
             for i, chunk in enumerate(truncated_chunks):
-                text_units_context.append(
-                    {
-                        "id": i + 1,
-                        "content": chunk["content"],
-                        "file_path": chunk.get("file_path", "unknown_source"),
-                    }
-                )
+                text_units_context.append(_build_chunk_context_entry(i + 1, chunk))
 
             logger.debug(
                 f"Re-truncated chunks for dynamic token limit: {len(temp_chunks)} -> {len(text_units_context)} (chunk available tokens: {available_chunk_tokens})"
@@ -2214,9 +2348,11 @@ def _resolve_hybrid_chunk_candidate(
     chunk_id: str,
     vector_text_map: dict[str, str],
     vector_file_path_map: dict[str, str],
+    vector_metadata_map: dict[str, dict[str, Any]],
     graph_text_map: dict[str, str],
     graph_file_path_map: dict[str, str],
-) -> tuple[str, str, list[str], str]:
+    graph_metadata_map: dict[str, dict[str, Any]],
+) -> tuple[str, str, list[str], str, dict[str, Any]]:
     sources = []
     if chunk_id in vector_text_map:
         sources.append("vector")
@@ -2230,8 +2366,17 @@ def _resolve_hybrid_chunk_candidate(
     elif chunk_id not in vector_file_path_map:
         file_path = graph_file_path_map.get(chunk_id, file_path)
 
+    citation_metadata = {}
+    for metadata_map in (graph_metadata_map, vector_metadata_map):
+        metadata = metadata_map.get(chunk_id, {})
+        for key, value in metadata.items():
+            if value not in (None, "", [], {}):
+                citation_metadata[key] = value
+    if file_path not in (None, "", "unknown_source"):
+        citation_metadata["file_path"] = file_path
+
     source_label = "+".join(sources) if sources else "unknown"
-    return chunk_text, file_path, sources, source_label
+    return chunk_text, file_path, sources, source_label, citation_metadata
 
 
 async def _build_hybrid_retrieval_debug_data(
@@ -2244,7 +2389,7 @@ async def _build_hybrid_retrieval_debug_data(
     global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
 ) -> dict[str, Any]:
-    vector_weights, vector_texts, vector_file_paths = await _get_vector_context_new(
+    vector_weights, vector_texts, vector_file_paths, vector_metadata_map = await _get_vector_context_new(
         query, chunks_vdb, query_param
     )
 
@@ -2282,6 +2427,7 @@ async def _build_hybrid_retrieval_debug_data(
     chunk_texts = []
     chunk_embeddings = []
     chunk_file_paths = []
+    chunk_metadata_list = []
     seen_chunk_ids = set()
 
     for item in ll_node_datas:
@@ -2295,6 +2441,7 @@ async def _build_hybrid_retrieval_debug_data(
         chunk_texts.append(item.get("description", ""))
         chunk_embeddings.append(item.get("embeddings"))
         chunk_file_paths.append(item.get("file_path", "unknown_source"))
+        chunk_metadata_list.append(_extract_chunk_citation_fields(item))
 
     for item in hl_use_entities:
         if item.get("entity_type") != "chunk_text":
@@ -2307,15 +2454,17 @@ async def _build_hybrid_retrieval_debug_data(
         chunk_texts.append(item.get("description", ""))
         chunk_embeddings.append(item.get("embeddings"))
         chunk_file_paths.append(item.get("file_path", "unknown_source"))
+        chunk_metadata_list.append(_extract_chunk_citation_fields(item))
 
     graph_weights = {}
     graph_text_map = {}
     graph_file_path_map = {}
+    graph_metadata_map = {}
     valid_chunk_ids = []
     valid_chunk_embeddings = []
 
-    for chunk_id, text, embedding, file_path in zip(
-        chunk_ids, chunk_texts, chunk_embeddings, chunk_file_paths
+    for chunk_id, text, embedding, file_path, chunk_metadata in zip(
+        chunk_ids, chunk_texts, chunk_embeddings, chunk_file_paths, chunk_metadata_list
     ):
         if embedding in (None, "", "None"):
             continue
@@ -2325,6 +2474,7 @@ async def _build_hybrid_retrieval_debug_data(
         )
         graph_text_map[chunk_id] = text
         graph_file_path_map[chunk_id] = file_path
+        graph_metadata_map[chunk_id] = chunk_metadata
 
     if valid_chunk_embeddings:
         query_embedding = await openai_embed([query])
@@ -2343,34 +2493,38 @@ async def _build_hybrid_retrieval_debug_data(
     results_chunk_ids = []
     results_sources = []
     results_source_labels = []
+    results_chunk_metadata = []
     image_file_path_list = []
     merged_candidates = []
 
     for index, (chunk_id, score) in enumerate(topk_text, 1):
-        chunk_text, file_path, sources, source_label = _resolve_hybrid_chunk_candidate(
+        chunk_text, file_path, sources, source_label, chunk_metadata = _resolve_hybrid_chunk_candidate(
             chunk_id,
             vector_texts,
             vector_file_paths,
+            vector_metadata_map,
             graph_text_map,
             graph_file_path_map,
+            graph_metadata_map,
         )
         results_text.append(chunk_text)
         results_file_paths.append(file_path)
         results_chunk_ids.append(chunk_id)
         results_sources.append(sources)
         results_source_labels.append(source_label)
+        results_chunk_metadata.append(chunk_metadata)
         image_file_path_list.append(file_path)
-        merged_candidates.append(
-            {
-                "rank": index,
-                "source": source_label,
-                "sources": sources,
-                "chunk_id": chunk_id,
-                "score": score,
-                "file_path": file_path,
-                "content": chunk_text,
-            }
-        )
+        merged_candidate = {
+            "rank": index,
+            "source": source_label,
+            "sources": sources,
+            "chunk_id": chunk_id,
+            "score": score,
+            "file_path": file_path,
+            "content": chunk_text,
+        }
+        merged_candidate.update(chunk_metadata)
+        merged_candidates.append(merged_candidate)
 
     rerank_results = []
     if results_text:
@@ -2386,13 +2540,12 @@ async def _build_hybrid_retrieval_debug_data(
         rerank_index = rerank_results[i]["index"]
         if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
             continue
-        text_units_context.append(
-            {
-                "id": i + 1,
-                "content": results_text[rerank_index],
-                "file_path": results_file_paths[rerank_index],
-            }
-        )
+        chunk_entry = {
+            "content": results_text[rerank_index],
+            "file_path": results_file_paths[rerank_index],
+        }
+        chunk_entry.update(results_chunk_metadata[rerank_index])
+        text_units_context.append(_build_chunk_context_entry(i + 1, chunk_entry))
 
     image_file_path_list = set(image_file_path_list)
     image_file_path_list.discard("unknown_source")
@@ -2407,9 +2560,11 @@ async def _build_hybrid_retrieval_debug_data(
         "vector_weights": vector_weights,
         "vector_texts": vector_texts,
         "vector_file_paths": vector_file_paths,
+        "vector_metadata_map": vector_metadata_map,
         "graph_weights": graph_weights,
         "graph_texts": graph_text_map,
         "graph_file_paths": graph_file_path_map,
+        "graph_metadata_map": graph_metadata_map,
         "merged_candidates": merged_candidates,
         "rerank_results": rerank_results,
         "results_text": results_text,
@@ -2417,6 +2572,7 @@ async def _build_hybrid_retrieval_debug_data(
         "results_chunk_ids": results_chunk_ids,
         "results_sources": results_sources,
         "results_source_labels": results_source_labels,
+        "results_chunk_metadata": results_chunk_metadata,
         "text_units_context": text_units_context,
         "image_file_path_list": image_file_path_list,
     }
@@ -2458,6 +2614,7 @@ async def hybrid_query(
     image_file_path_list = retrieval_debug["image_file_path_list"]
     results_text = retrieval_debug["results_text"]
     results_file_paths = retrieval_debug["results_file_paths"]
+    results_chunk_metadata = retrieval_debug["results_chunk_metadata"]
     result_chunk = retrieval_debug["rerank_results"]
 
     top_k_l = min(len(result_chunk), 10)
@@ -2467,13 +2624,12 @@ async def hybrid_query(
         rerank_index = result_chunk[i]["index"]
         if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
             continue
-        text_units_context.append(
-            {
-                "id": i + 1,
-                "content": results_text[rerank_index],
-                "file_path": results_file_paths[rerank_index],
-            }
-        )
+        chunk_entry = {
+            "content": results_text[rerank_index],
+            "file_path": results_file_paths[rerank_index],
+        }
+        chunk_entry.update(results_chunk_metadata[rerank_index])
+        text_units_context.append(_build_chunk_context_entry(i + 1, chunk_entry))
 
     text_units_str = json.dumps(text_units_context, ensure_ascii=False)
     context_text = f"""

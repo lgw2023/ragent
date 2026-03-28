@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+from contextlib import nullcontext
 from dataclasses import asdict
 from dotenv import load_dotenv
 from pathlib import Path
@@ -14,7 +15,14 @@ from ragent import Ragent, QueryParam
 from ragent.llm.openai import env_openai_complete, openai_embed
 from ragent.rerank import rerank_from_env
 from ragent.kg.shared_storage import initialize_pipeline_status
-from ragent.utils import log_model_call, logger
+from ragent.utils import (
+    log_model_call,
+    logger,
+    ModelUsageCollector,
+    get_current_model_usage_collector,
+    record_model_usage,
+    write_model_usage_report,
+)
 from ragent.operate import (
     graph_query,
     hybrid_query,
@@ -27,6 +35,7 @@ import copy
 import re
 import mimetypes
 import time
+from collections import Counter
 import aiofiles
 from typing import Any
 
@@ -55,6 +64,44 @@ _INFO_PIPELINE_STAGE_PREFIXES = ("image_mm_", "md_injection_")
 _INFO_PIPELINE_STAGE_NAMES = {"build_enhanced_md_start"}
 
 
+def _resolve_md_usage_report_dir(pdf_outdir: str) -> str:
+    candidate = os.path.abspath(pdf_outdir)
+    if os.path.basename(candidate) == "txt":
+        parent = os.path.dirname(candidate)
+        if os.path.basename(parent).endswith("_md"):
+            return parent
+    return candidate
+
+
+def _resolve_kg_usage_report_dir(project_dir: str) -> str:
+    return os.path.abspath(project_dir)
+
+
+def _maybe_create_usage_collector(label: str):
+    if get_current_model_usage_collector() is not None:
+        return nullcontext(None)
+    return ModelUsageCollector(label)
+
+
+def _write_usage_report_if_needed(
+    collector: ModelUsageCollector | None,
+    report_dir: str,
+    *,
+    task_name: str,
+    metadata: dict[str, Any],
+) -> str | None:
+    if collector is None:
+        return None
+    report_path = write_model_usage_report(
+        collector,
+        report_dir,
+        task_name=task_name,
+        metadata=metadata,
+    )
+    logger.info(f"Model usage report written: {os.path.abspath(report_path)}")
+    return report_path
+
+
 def _preview_text(value: Any, limit: int = 160) -> str:
     text = re.sub(r"\s+", " ", str(value)).strip()
     if len(text) <= limit:
@@ -67,6 +114,211 @@ def _safe_score(value: Any) -> float | None:
         return round(float(value), 4)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_source_text_for_match(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.replace("\r", "\n")
+    normalized = re.sub(r"<!--.*?-->", " ", normalized, flags=re.DOTALL)
+    normalized = re.sub(r"```.*?```", " ", normalized, flags=re.DOTALL)
+    normalized = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", normalized)
+    normalized = re.sub(r"^\s*#+\s*", "", normalized, flags=re.MULTILINE)
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized.strip()
+
+
+def _estimate_section_level(text: str) -> int:
+    stripped = (text or "").strip()
+    if not stripped:
+        return 1
+    if re.match(r"^[（(][一二三四五六七八九十百千万0-9]+[)）]", stripped):
+        return 2
+    if re.match(r"^[0-9]+[.)．、]", stripped):
+        return 3
+    if re.match(r"^[A-Za-z][.)]", stripped):
+        return 3
+    return 1
+
+
+def _is_heading_item(item: dict[str, Any]) -> bool:
+    text = (item.get("text") or "").strip()
+    if not text:
+        return False
+    if item.get("text_level") == 1:
+        return True
+    return bool(
+        re.match(
+            r"^(第[一二三四五六七八九十百千万0-9]+[章节篇]|附录\s*[0-9一二三四五六七八九十]+|[一二三四五六七八九十百千万0-9]+[、.]|[（(][一二三四五六七八九十百千万0-9]+[)）])",
+            text,
+        )
+    )
+
+
+def _build_source_ref(
+    file_path: str,
+    page_numbers: list[int] | None = None,
+    section_path: str | None = None,
+) -> str:
+    base_name = os.path.basename(file_path) if file_path else "unknown_source"
+    parts = [base_name]
+    if page_numbers:
+        ordered_pages = sorted({int(p) for p in page_numbers if isinstance(p, int)})
+        if ordered_pages:
+            if len(ordered_pages) == 1:
+                parts.append(f"p.{ordered_pages[0]}")
+            else:
+                parts.append(f"p.{ordered_pages[0]}-{ordered_pages[-1]}")
+    if section_path:
+        parts.append(section_path)
+    return " | ".join(parts)
+
+
+def _build_content_list_index(
+    content_list: list[dict[str, Any]],
+    source_file_path: str,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    text_blocks: list[dict[str, Any]] = []
+    image_metadata_map: dict[str, dict[str, Any]] = {}
+    section_stack: list[str] = []
+
+    for item in content_list:
+        page_idx = item.get("page_idx")
+        page_number = page_idx + 1 if isinstance(page_idx, int) else None
+
+        if item.get("type") == "text":
+            raw_text = (item.get("text") or "").strip()
+            if not raw_text:
+                continue
+
+            if _is_heading_item(item):
+                level = max(_estimate_section_level(raw_text), 1)
+                section_stack = section_stack[: level - 1]
+                section_stack.append(raw_text)
+
+            normalized_text = _normalize_source_text_for_match(raw_text)
+            if not normalized_text:
+                continue
+            if section_stack and section_stack[0] == "目 录":
+                continue
+
+            text_blocks.append(
+                {
+                    "match_text": normalized_text[:240],
+                    "page_number": page_number,
+                    "section_path": " > ".join(section_stack),
+                    "file_path": source_file_path,
+                    "is_heading": _is_heading_item(item),
+                }
+            )
+            continue
+
+        image_path = item.get("img_path")
+        if not image_path:
+            continue
+
+        image_name = os.path.basename(image_path)
+        section_path = " > ".join(section_stack)
+        page_numbers = [page_number] if page_number else []
+        image_metadata_map[image_name] = {
+            "file_path": source_file_path,
+            "page_numbers": page_numbers,
+            "page_number_start": page_numbers[0] if page_numbers else None,
+            "page_number_end": page_numbers[-1] if page_numbers else None,
+            "section_path": section_path,
+            "source_ref": _build_source_ref(source_file_path, page_numbers, section_path),
+        }
+
+    return text_blocks, image_metadata_map
+
+
+def _build_text_segment_metadata(
+    text: str,
+    source_file_path: str,
+    text_blocks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    normalized_segment = _normalize_source_text_for_match(text)
+    matched_blocks: list[dict[str, Any]] = []
+
+    if normalized_segment:
+        for block in text_blocks:
+            match_text = block.get("match_text") or ""
+            min_length = 2 if block.get("is_heading") else 6
+            if len(match_text) < min_length:
+                continue
+            if match_text in normalized_segment:
+                matched_blocks.append(
+                    {
+                        "match_text": match_text,
+                        "page_number": block.get("page_number"),
+                        "section_path": block.get("section_path", ""),
+                        "file_path": block.get("file_path", source_file_path),
+                        "is_heading": bool(block.get("is_heading")),
+                    }
+                )
+
+    if matched_blocks:
+        page_counter = Counter(
+            block["page_number"]
+            for block in matched_blocks
+            if isinstance(block.get("page_number"), int)
+        )
+        sorted_pages = sorted(page_counter)
+        if sorted_pages:
+            page_runs: list[list[int]] = []
+            current_run = [sorted_pages[0]]
+            for page in sorted_pages[1:]:
+                if page <= current_run[-1] + 2:
+                    current_run.append(page)
+                else:
+                    page_runs.append(current_run)
+                    current_run = [page]
+            page_runs.append(current_run)
+            dominant_run = max(
+                page_runs,
+                key=lambda run: (
+                    sum(page_counter[p] for p in run),
+                    len(run),
+                    -run[0],
+                ),
+            )
+            dominant_pages = set(dominant_run)
+            matched_blocks = [
+                block
+                for block in matched_blocks
+                if block.get("page_number") in dominant_pages
+            ]
+
+    page_numbers = sorted(
+        {
+            int(block["page_number"])
+            for block in matched_blocks
+            if isinstance(block.get("page_number"), int)
+        }
+    )
+    section_path = next(
+        (
+            block.get("section_path", "")
+            for block in matched_blocks
+            if block.get("section_path") and not block.get("is_heading")
+        ),
+        "",
+    )
+    if not section_path:
+        section_path = next(
+            (block.get("section_path", "") for block in matched_blocks if block.get("section_path")),
+            "",
+        )
+
+    return {
+        "file_path": source_file_path,
+        "page_numbers": page_numbers,
+        "page_number_start": page_numbers[0] if page_numbers else None,
+        "page_number_end": page_numbers[-1] if page_numbers else None,
+        "section_path": section_path,
+        "source_ref": _build_source_ref(source_file_path, page_numbers, section_path),
+        "content_blocks": matched_blocks,
+    }
 
 
 def _collect_ranked_chunks(
@@ -145,6 +397,7 @@ def _collect_final_context_chunks(
     results_file_paths: list[str],
     results_chunk_ids: list[str],
     results_source_labels: list[str],
+    results_chunk_metadata: list[dict[str, Any]] | None = None,
     limit: int | None = None,
 ):
     final_chunks = []
@@ -163,6 +416,10 @@ def _collect_final_context_chunks(
                 "preview": _preview_text(results_text[rerank_index], limit=220),
             }
         )
+        if results_chunk_metadata and rerank_index < len(results_chunk_metadata):
+            for key, value in results_chunk_metadata[rerank_index].items():
+                if value not in (None, "", [], {}):
+                    final_chunks[-1][key] = value
     return final_chunks
 
 
@@ -172,6 +429,7 @@ def _collect_rerank_results(
     results_file_paths: list[str],
     results_chunk_ids: list[str],
     results_source_labels: list[str],
+    results_chunk_metadata: list[dict[str, Any]] | None = None,
     limit: int | None = None,
 ):
     ranked = []
@@ -191,6 +449,10 @@ def _collect_rerank_results(
                 "preview": _preview_text(results_text[rerank_index], limit=220),
             }
         )
+        if results_chunk_metadata and rerank_index < len(results_chunk_metadata):
+            for key, value in results_chunk_metadata[rerank_index].items():
+                if value not in (None, "", [], {}):
+                    ranked[-1][key] = value
     return ranked
 
 
@@ -256,6 +518,7 @@ def _build_one_hop_trace(
             debug_payload["results_file_paths"],
             debug_payload["results_chunk_ids"],
             debug_payload["results_source_labels"],
+            debug_payload.get("results_chunk_metadata"),
         )
         trace["rerank_input_candidates"] = list(trace["merged_candidates"])
         trace["final_context_chunks"] = _collect_final_context_chunks(
@@ -264,6 +527,7 @@ def _build_one_hop_trace(
             debug_payload["results_file_paths"],
             debug_payload["results_chunk_ids"],
             debug_payload["results_source_labels"],
+            debug_payload.get("results_chunk_metadata"),
             limit=len(debug_payload["final_context_document_chunks"]),
         )
         trace["final_context_document_chunks"] = debug_payload["final_context_document_chunks"]
@@ -363,7 +627,14 @@ async def _run_one_hop_with_rag(
 
 async def trace_one_hop_problem(work_dir, query, mode="hybrid"):
     rag = await initialize_rag(work_dir)
-    result = await _run_one_hop_with_rag(rag, query, mode, include_trace=True)
+    with _maybe_create_usage_collector("onehop_trace") as collector:
+        result = await _run_one_hop_with_rag(rag, query, mode, include_trace=True)
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_kg_usage_report_dir(work_dir),
+        task_name="onehop",
+        metadata={"query": query, "mode": mode, "trace": True},
+    )
     return result["trace"]
 
 
@@ -461,7 +732,15 @@ async def _run_multi_hop_with_rag(
 
 async def trace_multi_hop_problem(work_dir, query):
     rag = await initialize_rag(work_dir)
-    return await _run_multi_hop_with_rag(rag, query, include_trace=True)
+    with _maybe_create_usage_collector("multihop_trace") as collector:
+        result = await _run_multi_hop_with_rag(rag, query, include_trace=True)
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_kg_usage_report_dir(work_dir),
+        task_name="multihop",
+        metadata={"query": query, "trace": True},
+    )
+    return result
 
 
 def _shorten_for_log(value: Any, limit: int = 600) -> str:
@@ -546,6 +825,12 @@ def _image_text_ping_sync(prompt: str) -> str:
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout_sec)
     resp.raise_for_status()
     data = resp.json()
+    record_model_usage(
+        "image",
+        image_model,
+        data,
+        source="integrations._image_text_ping_sync",
+    )
     return data["choices"][0]["message"]["content"]
 
 
@@ -769,7 +1054,15 @@ def multimodal_image_analysis_sync(image_path):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=timeout_sec)
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        data = response.json()
+        record_model_usage(
+            "image",
+            image_model,
+            data,
+            source="integrations.multimodal_image_analysis_sync",
+            extra={"image_path": os.path.abspath(image_path)},
+        )
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
         detail = response.text if response is not None else str(e)
         logger.warning(
@@ -786,7 +1079,14 @@ async def process_image_file(work_dir, image_file_path, doc_name):
 
 async def inference_multi_hop_problem(work_dir, query, return_all: bool = False):
     rag = await initialize_rag(work_dir)
-    result = await _run_multi_hop_with_rag(rag, query, include_trace=False)
+    with _maybe_create_usage_collector("multihop_query") as collector:
+        result = await _run_multi_hop_with_rag(rag, query, include_trace=False)
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_kg_usage_report_dir(work_dir),
+        task_name="multihop",
+        metadata={"query": query, "trace": False},
+    )
     if return_all:
         return "question:"+ query +  "answer_multi_hop:" + result["answer"] + "\nimage_list:" + str(set(result["image_list"]))
     else:
@@ -796,7 +1096,14 @@ async def inference_multi_hop_problem(work_dir, query, return_all: bool = False)
 
 async def inference_one_hop_problem(work_dir, query, mode, return_all: bool = False):
     rag = await initialize_rag(work_dir)
-    result = await _run_one_hop_with_rag(rag, query, mode, include_trace=False)
+    with _maybe_create_usage_collector("onehop_query") as collector:
+        result = await _run_one_hop_with_rag(rag, query, mode, include_trace=False)
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_kg_usage_report_dir(work_dir),
+        task_name="onehop",
+        metadata={"query": query, "mode": mode, "trace": False},
+    )
     one_hop_query_response = result["answer"]
     image_list = result["image_list"]
     if return_all:
@@ -1032,332 +1339,349 @@ def mineru_process(pdf_file_path, output_dir, keep_pdf_subdir: bool = True):
 async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: bool = True):
     """第一阶段：解析文档并产出增强后的最终 md（包含图片多模态描述回写）。"""
     await ensure_startup_model_check_once()
-    pdf_outdir = mineru_process(
-        pdf_file_path,
-        mineru_output_dir,
-        keep_pdf_subdir=keep_pdf_subdir,
-    )
-    os.makedirs(pdf_outdir, exist_ok=True)
-    image_dir = os.path.join(pdf_outdir, "images")
-    os.makedirs(image_dir, exist_ok=True)
-    md_name = pdf_file_path.split("/")[-1].split(".")[0] + ".md"
-    md_path = os.path.join(pdf_outdir, md_name)
+    with _maybe_create_usage_collector("build_enhanced_md") as collector:
+        pdf_outdir = mineru_process(
+            pdf_file_path,
+            mineru_output_dir,
+            keep_pdf_subdir=keep_pdf_subdir,
+        )
+        os.makedirs(pdf_outdir, exist_ok=True)
+        image_dir = os.path.join(pdf_outdir, "images")
+        os.makedirs(image_dir, exist_ok=True)
+        md_name = pdf_file_path.split("/")[-1].split(".")[0] + ".md"
+        md_path = os.path.join(pdf_outdir, md_name)
+        content_list_name = pdf_file_path.split("/")[-1].split(".")[0] + "_content_list.json"
+        content_list_path = os.path.join(pdf_outdir, content_list_name)
 
-    async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
-        md_text = await f.read()
-    if not md_text:
-        raise ValueError("md_text is empty")
+        async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
+            md_text = await f.read()
+        if not md_text:
+            raise ValueError("md_text is empty")
 
-    text_list = md_text.split("images/")
-    num_chars_of_behind = int(os.getenv("num_chars_of_behind") or "120")
-    num_chars_of_front = int(os.getenv("num_chars_of_front") or "120")
-    total_blocks = len(text_list)
-    total_images = max(total_blocks - 1, 0)
-    _print_pipeline_progress(
-        "build_enhanced_md_start",
-        source_pdf=os.path.abspath(pdf_file_path),
-        md_path=os.path.abspath(md_path),
-        image_dir=os.path.abspath(image_dir),
-        total_blocks=total_blocks,
-        total_images=total_images,
-    )
+        text_list = md_text.split("images/")
+        num_chars_of_behind = int(os.getenv("num_chars_of_behind") or "120")
+        num_chars_of_front = int(os.getenv("num_chars_of_front") or "120")
+        total_blocks = len(text_list)
+        total_images = max(total_blocks - 1, 0)
+        _print_pipeline_progress(
+            "build_enhanced_md_start",
+            source_pdf=os.path.abspath(pdf_file_path),
+            md_path=os.path.abspath(md_path),
+            image_dir=os.path.abspath(image_dir),
+            total_blocks=total_blocks,
+            total_images=total_images,
+        )
 
-    # 先并发处理所有图片信息：请求在线程池中执行，且并发上限固定为 16
-    image_preprocess_concurrency = 16
-    semaphore = asyncio.Semaphore(image_preprocess_concurrency)
-    image_progress_state = {"completed": 0}
-    image_progress_lock = asyncio.Lock()
+        # 先并发处理所有图片信息：请求在线程池中执行，且并发上限固定为 16
+        image_preprocess_concurrency = 16
+        semaphore = asyncio.Semaphore(image_preprocess_concurrency)
+        image_progress_state = {"completed": 0}
+        image_progress_lock = asyncio.Lock()
 
-    async def process_image(i, text):
-        if i == 0:
-            return None
-        image_match = re.match(r"^([^)]+?\.(?:jpg|jpeg|png))\)", text, re.IGNORECASE)
-        if not image_match:
-            async with image_progress_lock:
-                image_progress_state["completed"] += 1
+        async def process_image(i, text):
+            if i == 0:
+                return None
+            image_match = re.match(r"^([^)]+?\.(?:jpg|jpeg|png))\)", text, re.IGNORECASE)
+            if not image_match:
+                async with image_progress_lock:
+                    image_progress_state["completed"] += 1
+                    _print_pipeline_progress(
+                        "image_mm_skip_invalid_chunk",
+                        image_index=i,
+                        completed=image_progress_state["completed"],
+                        total_images=total_images,
+                        chunk_preview=text[:80].replace("\n", " "),
+                    )
+                return ""
+            image_name = image_match.group(1)
+            image_path = os.path.join(image_dir, image_name)
+            image_illustration_front = text_list[i - 1][-num_chars_of_front:]
+            image_illustration_behind = text[image_match.end():][:num_chars_of_behind]
+            async with semaphore:
                 _print_pipeline_progress(
-                    "image_mm_skip_invalid_chunk",
+                    "image_mm_start",
                     image_index=i,
-                    completed=image_progress_state["completed"],
                     total_images=total_images,
-                    chunk_preview=text[:80].replace("\n", " "),
+                    image_name=image_name,
+                    image_path=os.path.abspath(image_path),
                 )
-            return ""
-        image_name = image_match.group(1)
-        image_path = os.path.join(image_dir, image_name)
-        image_illustration_front = text_list[i - 1][-num_chars_of_front:]
-        image_illustration_behind = text[image_match.end():][:num_chars_of_behind]
-        async with semaphore:
-            _print_pipeline_progress(
-                "image_mm_start",
-                image_index=i,
-                total_images=total_images,
-                image_name=image_name,
-                image_path=os.path.abspath(image_path),
-            )
-            try:
-                image_description = await multimodal_image_analysis(image_path)
-                if not image_description:
+                try:
+                    image_description = await multimodal_image_analysis(image_path)
+                    if not image_description:
+                        async with image_progress_lock:
+                            image_progress_state["completed"] += 1
+                            _print_pipeline_progress(
+                                "image_mm_empty_desc",
+                                image_index=i,
+                                completed=image_progress_state["completed"],
+                                total_images=total_images,
+                                image_name=image_name,
+                            )
+                        return ""
+                    combined_desc = await env_openai_complete(
+                        prompt="image_Illustration_front:" + image_illustration_front + "image_Illustration_behind：" + image_illustration_behind + "\n" + "image_discription:" + image_description,
+                        system_prompt="请结合两端文本（分别是图片的上下文和LLM生成的描述），进行全面描述",
+                    )
                     async with image_progress_lock:
                         image_progress_state["completed"] += 1
                         _print_pipeline_progress(
-                            "image_mm_empty_desc",
+                            "image_mm_done",
                             image_index=i,
                             completed=image_progress_state["completed"],
                             total_images=total_images,
                             image_name=image_name,
+                            desc_len=len(combined_desc or ""),
+                        )
+                    return combined_desc
+                except Exception as e:
+                    logger.warning(f"Skip image post-process for {image_name}: {e}")
+                    async with image_progress_lock:
+                        image_progress_state["completed"] += 1
+                        _print_pipeline_progress(
+                            "image_mm_failed",
+                            image_index=i,
+                            completed=image_progress_state["completed"],
+                            total_images=total_images,
+                            image_name=image_name,
+                            error=str(e),
                         )
                     return ""
-                combined_desc = await env_openai_complete(
-                    prompt="image_Illustration_front:" + image_illustration_front + "image_Illustration_behind：" + image_illustration_behind + "\n" + "image_discription:" + image_description,
-                    system_prompt="请结合两端文本（分别是图片的上下文和LLM生成的描述），进行全面描述",
-                )
-                async with image_progress_lock:
-                    image_progress_state["completed"] += 1
-                    _print_pipeline_progress(
-                        "image_mm_done",
-                        image_index=i,
-                        completed=image_progress_state["completed"],
-                        total_images=total_images,
-                        image_name=image_name,
-                        desc_len=len(combined_desc or ""),
-                    )
-                return combined_desc
-            except Exception as e:
-                logger.warning(f"Skip image post-process for {image_name}: {e}")
-                async with image_progress_lock:
-                    image_progress_state["completed"] += 1
-                    _print_pipeline_progress(
-                        "image_mm_failed",
-                        image_index=i,
-                        completed=image_progress_state["completed"],
-                        total_images=total_images,
-                        image_name=image_name,
-                        error=str(e),
-                    )
-                return ""
 
-    res_dismantles = await asyncio.gather(
-        *(process_image(i, text) for i, text in enumerate(text_list))
-    )
-    non_empty_desc_count = sum(1 for x in res_dismantles[1:] if x and str(x).strip())
-    _print_pipeline_progress(
-        "image_mm_all_done",
-        total_images=total_images,
-        generated_descriptions=non_empty_desc_count,
-    )
-
-    for i, text in enumerate(text_list):
-        if i == 0:
-            continue
-        image_match = re.match(r"^([^)]+?\.(?:jpg|jpeg|png))\)", text, re.IGNORECASE)
-        if not image_match:
-            _print_pipeline_progress(
-                "image_desc_write_skip_invalid_chunk",
-                image_index=i,
-                total_images=total_images,
-            )
-            continue
-        image_stem = os.path.splitext(image_match.group(1))[0]
-        image_dismantle = os.path.join(image_dir, image_stem + ".txt")
-        async with aiofiles.open(image_dismantle, "w", encoding="utf-8") as f:
-            await f.write(res_dismantles[i] or "")
+        res_dismantles = await asyncio.gather(
+            *(process_image(i, text) for i, text in enumerate(text_list))
+        )
+        non_empty_desc_count = sum(1 for x in res_dismantles[1:] if x and str(x).strip())
         _print_pipeline_progress(
-            "image_desc_written",
-            image_index=i,
+            "image_mm_all_done",
             total_images=total_images,
-            txt_path=os.path.abspath(image_dismantle),
-            text_len=len(res_dismantles[i] or ""),
+            generated_descriptions=non_empty_desc_count,
         )
 
-    # 将图片描述回写到 md 中，并加标记避免重复注入
-    try:
-        async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
-            current_md_content = await f.read()
-
-        image_pattern = re.compile(r"!\[\]\(images/([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
-        image_matches = list(image_pattern.finditer(current_md_content))
-        total_md_images = len(image_matches)
-        _print_pipeline_progress(
-            "md_injection_start",
-            md_path=os.path.abspath(md_path),
-            total_md_images=total_md_images,
-        )
-        has_modification = False
-        new_content_parts = []
-        last_pos = 0
-        injected_count = 0
-        skipped_existing_count = 0
-
-        for idx, match in enumerate(image_matches, start=1):
-            image_file_name = match.group(1)
-            marker_start = f"<!-- image_description:{image_file_name}:start -->"
-            marker_end = f"<!-- image_description:{image_file_name}:end -->"
-
-            if marker_start in current_md_content:
-                skipped_existing_count += 1
+        for i, text in enumerate(text_list):
+            if i == 0:
+                continue
+            image_match = re.match(r"^([^)]+?\.(?:jpg|jpeg|png))\)", text, re.IGNORECASE)
+            if not image_match:
                 _print_pipeline_progress(
-                    "md_injection_skip_exists",
-                    progress=f"{idx}/{total_md_images}",
-                    image_file=image_file_name,
+                    "image_desc_write_skip_invalid_chunk",
+                    image_index=i,
+                    total_images=total_images,
                 )
                 continue
+            image_stem = os.path.splitext(image_match.group(1))[0]
+            image_dismantle = os.path.join(image_dir, image_stem + ".txt")
+            async with aiofiles.open(image_dismantle, "w", encoding="utf-8") as f:
+                await f.write(res_dismantles[i] or "")
+            _print_pipeline_progress(
+                "image_desc_written",
+                image_index=i,
+                total_images=total_images,
+                txt_path=os.path.abspath(image_dismantle),
+                text_len=len(res_dismantles[i] or ""),
+            )
 
-            new_content_parts.append(current_md_content[last_pos:match.end()])
+        # 将图片描述回写到 md 中，并加标记避免重复注入
+        try:
+            async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
+                current_md_content = await f.read()
 
-            txt_file_path = os.path.join(image_dir, os.path.splitext(image_file_name)[0] + ".txt")
-            image_desc_text = ""
-            if os.path.exists(txt_file_path):
-                try:
-                    async with aiofiles.open(txt_file_path, "r", encoding="utf-8") as tf:
-                        image_desc_text = (await tf.read()).strip()
-                except Exception:
-                    image_desc_text = ""
+            image_pattern = re.compile(r"!\[\]\(images/([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
+            image_matches = list(image_pattern.finditer(current_md_content))
+            total_md_images = len(image_matches)
+            _print_pipeline_progress(
+                "md_injection_start",
+                md_path=os.path.abspath(md_path),
+                total_md_images=total_md_images,
+            )
+            has_modification = False
+            new_content_parts = []
+            last_pos = 0
+            injected_count = 0
+            skipped_existing_count = 0
 
-            if image_desc_text:
-                insertion_block = "\n" + marker_start + "\n```image_description_start\n\n" + image_desc_text + "\n\n```\n" + marker_end + "\n"
-                new_content_parts.append(insertion_block)
-                has_modification = True
-                injected_count += 1
-                _print_pipeline_progress(
-                    "md_injection_done",
-                    progress=f"{idx}/{total_md_images}",
-                    image_file=image_file_name,
-                    desc_len=len(image_desc_text),
-                )
-            else:
-                _print_pipeline_progress(
-                    "md_injection_no_desc",
-                    progress=f"{idx}/{total_md_images}",
-                    image_file=image_file_name,
-                    txt_path=os.path.abspath(txt_file_path),
-                )
+            for idx, match in enumerate(image_matches, start=1):
+                image_file_name = match.group(1)
+                marker_start = f"<!-- image_description:{image_file_name}:start -->"
+                marker_end = f"<!-- image_description:{image_file_name}:end -->"
 
-            last_pos = match.end()
+                if marker_start in current_md_content:
+                    skipped_existing_count += 1
+                    _print_pipeline_progress(
+                        "md_injection_skip_exists",
+                        progress=f"{idx}/{total_md_images}",
+                        image_file=image_file_name,
+                    )
+                    continue
 
-        new_content_parts.append(current_md_content[last_pos:])
+                new_content_parts.append(current_md_content[last_pos:match.end()])
 
-        if has_modification:
-            async with aiofiles.open(md_path, "w", encoding="utf-8") as f:
-                await f.write("".join(new_content_parts))
-        _print_pipeline_progress(
-            "md_injection_finished",
-            md_path=os.path.abspath(md_path),
-            total_md_images=total_md_images,
-            injected_count=injected_count,
-            skipped_existing_count=skipped_existing_count,
-            modified=has_modification,
+                txt_file_path = os.path.join(image_dir, os.path.splitext(image_file_name)[0] + ".txt")
+                image_desc_text = ""
+                if os.path.exists(txt_file_path):
+                    try:
+                        async with aiofiles.open(txt_file_path, "r", encoding="utf-8") as tf:
+                            image_desc_text = (await tf.read()).strip()
+                    except Exception:
+                        image_desc_text = ""
+
+                if image_desc_text:
+                    insertion_block = "\n" + marker_start + "\n```image_description_start\n\n" + image_desc_text + "\n\n```\n" + marker_end + "\n"
+                    new_content_parts.append(insertion_block)
+                    has_modification = True
+                    injected_count += 1
+                    _print_pipeline_progress(
+                        "md_injection_done",
+                        progress=f"{idx}/{total_md_images}",
+                        image_file=image_file_name,
+                        desc_len=len(image_desc_text),
+                    )
+                else:
+                    _print_pipeline_progress(
+                        "md_injection_no_desc",
+                        progress=f"{idx}/{total_md_images}",
+                        image_file=image_file_name,
+                        txt_path=os.path.abspath(txt_file_path),
+                    )
+
+                last_pos = match.end()
+
+            new_content_parts.append(current_md_content[last_pos:])
+
+            if has_modification:
+                async with aiofiles.open(md_path, "w", encoding="utf-8") as f:
+                    await f.write("".join(new_content_parts))
+            _print_pipeline_progress(
+                "md_injection_finished",
+                md_path=os.path.abspath(md_path),
+                total_md_images=total_md_images,
+                injected_count=injected_count,
+                skipped_existing_count=skipped_existing_count,
+                modified=has_modification,
+            )
+        except Exception as e:
+            logger.exception(e)
+            _print_pipeline_progress(
+                "md_injection_error",
+                md_path=os.path.abspath(md_path),
+                error=str(e),
+            )
+
+        _print_md_ready_banner(
+            pdf_file_path=pdf_file_path,
+            md_path=md_path,
+            image_dir=image_dir,
+            pdf_outdir=pdf_outdir,
         )
-    except Exception as e:
-        logger.exception(e)
-        _print_pipeline_progress(
-            "md_injection_error",
-            md_path=os.path.abspath(md_path),
-            error=str(e),
-        )
+        artifacts = {
+            "md_path": md_path,
+            "image_dir": image_dir,
+            "pdf_outdir": pdf_outdir,
+            "content_list_path": content_list_path,
+        }
 
-    _print_md_ready_banner(
-        pdf_file_path=pdf_file_path,
-        md_path=md_path,
-        image_dir=image_dir,
-        pdf_outdir=pdf_outdir,
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_md_usage_report_dir(artifacts["pdf_outdir"]),
+        task_name="parse",
+        metadata={"pdf_file_path": os.path.abspath(pdf_file_path), "stage": "md"},
     )
-    return {"md_path": md_path, "image_dir": image_dir, "pdf_outdir": pdf_outdir}
+    return artifacts
 
 
-async def index_md_to_rag(pdf_file_path, project_dir, md_path, progress: dict[str, Any] | None = None):
+async def index_md_to_rag(
+    pdf_file_path,
+    project_dir,
+    md_path,
+    content_list_path: str | None = None,
+    progress: dict[str, Any] | None = None,
+):
     """第二阶段：基于最终 md 和图片描述文件，构建 RAG/KG 索引。"""
     rag = await initialize_rag(project_dir)
-    image_dir = os.path.join(os.path.dirname(md_path), "images")
-    source_pdf_path = os.path.abspath(pdf_file_path)
-    hard_timeout_enabled = os.getenv("RAG_INSERT_HARD_TIMEOUT", "0") == "1"
-    insert_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_SECONDS", "0")) if hard_timeout_enabled else 0
-    max_retries = int(os.getenv("RAG_INSERT_RETRIES", "2"))
-    timeout_backoff = float(os.getenv("RAG_INSERT_TIMEOUT_BACKOFF", "1.8"))
-    max_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_MAX_SECONDS", "600"))
+    with _maybe_create_usage_collector("index_md_to_rag") as collector:
+        image_dir = os.path.join(os.path.dirname(md_path), "images")
+        source_pdf_path = os.path.abspath(pdf_file_path)
+        hard_timeout_enabled = os.getenv("RAG_INSERT_HARD_TIMEOUT", "0") == "1"
+        insert_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_SECONDS", "0")) if hard_timeout_enabled else 0
+        max_retries = int(os.getenv("RAG_INSERT_RETRIES", "2"))
+        timeout_backoff = float(os.getenv("RAG_INSERT_TIMEOUT_BACKOFF", "1.8"))
+        max_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_MAX_SECONDS", "600"))
 
-    async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
-        md_text = await f.read()
-    if not md_text:
-        raise ValueError("md_text is empty")
+        async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
+            md_text = await f.read()
+        if not md_text:
+            raise ValueError("md_text is empty")
 
-    text_list = md_text.split("images/")
-    doc_name_with_ext = pdf_file_path.split("/")[-1]
-    doc_name_without_ext = pdf_file_path.split("/")[-1].split(".")[0]
-    total_chunks = len(text_list)
-    total_image_chunks = max(total_chunks - 1, 0)
-    _print_pipeline_progress(
-        "rag_index_start",
-        source_pdf=os.path.abspath(pdf_file_path),
-        md_path=os.path.abspath(md_path),
-        image_dir=os.path.abspath(image_dir),
-        total_chunks=total_chunks,
-        total_image_chunks=total_image_chunks,
-    )
-    progress_state = progress if progress is not None else {}
-    progress_state["started_monotonic"] = time.monotonic()
-    progress_state["last_update_monotonic"] = progress_state["started_monotonic"]
-    
-    def _format_err(e: Exception) -> str:
-        """格式化异常信息，TimeoutError 等异常 str() 为空，需用 type+repr 补充"""
-        s = str(e)
-        if s:
-            return s
-        return f"{type(e).__name__}({repr(e)})"
-
-    def _content_preview(text: str, max_len: int = 80) -> str:
-        t = text.strip().replace("\n", " ")
-        return (t[:max_len] + "…") if len(t) > max_len else t
-
-    def _update_progress(**kwargs):
-        now = time.monotonic()
-        progress_state.update(kwargs)
-        progress_state["last_update_monotonic"] = now
-        progress_state["elapsed_sec"] = round(now - progress_state.get("started_monotonic", now), 3)
-
-    async def safe_rag_insert(
-        text: str,
-        doc_name: str,
-        file_paths: str | None = None,
-        *,
-        chunk_index: int | None = None,
-        chunk_type: str = "text",
-    ):
-        if not text or not text.strip():
-            return
-
-        async def _ainsert_once():
-            resolved_file_path = os.path.abspath(file_paths) if file_paths else source_pdf_path
-            await rag.ainsert(text, doc_name=doc_name, file_paths=resolved_file_path)
-
-        if insert_timeout <= 0:
+        content_list: list[dict[str, Any]] = []
+        if content_list_path and os.path.exists(content_list_path):
             try:
-                await _ainsert_once()
+                async with aiofiles.open(content_list_path, "r", encoding="utf-8") as f:
+                    content_list = json.loads(await f.read())
             except Exception as e:
-                parts = [
-                    f"doc={doc_name}",
-                    f"err={_format_err(e)}",
-                    f"chunk_index={chunk_index}",
-                    f"chunk_type={chunk_type}",
-                    f"len={len(text)}",
-                    f"preview={repr(_content_preview(text))}",
-                ]
-                if file_paths:
-                    parts.append(f"file_paths={file_paths}")
-                logger.warning(f"rag insert failed, skip this chunk. " + ", ".join(parts))
-            return
+                logger.warning(f"Failed to load content_list metadata from {content_list_path}: {e}")
 
-        for attempt in range(max_retries + 1):
-            cur_timeout = min(int(insert_timeout * (timeout_backoff ** attempt)), max_timeout)
-            try:
-                await asyncio.wait_for(_ainsert_once(), timeout=cur_timeout)
-                if attempt > 0:
-                    logger.info(
-                        f"rag insert retry succeeded. doc={doc_name}, chunk_index={chunk_index}, chunk_type={chunk_type}, attempt={attempt + 1}, timeout={cur_timeout}s"
-                    )
+        text_blocks, image_metadata_map = _build_content_list_index(
+            content_list, source_pdf_path
+        )
+
+        text_list = md_text.split("images/")
+        doc_name_with_ext = pdf_file_path.split("/")[-1]
+        doc_name_without_ext = pdf_file_path.split("/")[-1].split(".")[0]
+        total_chunks = len(text_list)
+        total_image_chunks = max(total_chunks - 1, 0)
+        _print_pipeline_progress(
+            "rag_index_start",
+            source_pdf=os.path.abspath(pdf_file_path),
+            md_path=os.path.abspath(md_path),
+            image_dir=os.path.abspath(image_dir),
+            total_chunks=total_chunks,
+            total_image_chunks=total_image_chunks,
+        )
+        progress_state = progress if progress is not None else {}
+        progress_state["started_monotonic"] = time.monotonic()
+        progress_state["last_update_monotonic"] = progress_state["started_monotonic"]
+
+        def _format_err(e: Exception) -> str:
+            """格式化异常信息，TimeoutError 等异常 str() 为空，需用 type+repr 补充"""
+            s = str(e)
+            if s:
+                return s
+            return f"{type(e).__name__}({repr(e)})"
+
+        def _content_preview(text: str, max_len: int = 80) -> str:
+            t = text.strip().replace("\n", " ")
+            return (t[:max_len] + "…") if len(t) > max_len else t
+
+        def _update_progress(**kwargs):
+            now = time.monotonic()
+            progress_state.update(kwargs)
+            progress_state["last_update_monotonic"] = now
+            progress_state["elapsed_sec"] = round(now - progress_state.get("started_monotonic", now), 3)
+
+        async def safe_rag_insert(
+            text: str,
+            doc_name: str,
+            file_paths: str | None = None,
+            metadata: dict[str, Any] | None = None,
+            *,
+            chunk_index: int | None = None,
+            chunk_type: str = "text",
+        ):
+            if not text or not text.strip():
                 return
-            except asyncio.TimeoutError as e:
-                if attempt >= max_retries:
+
+            async def _ainsert_once():
+                resolved_file_path = os.path.abspath(file_paths) if file_paths else source_pdf_path
+                await rag.ainsert(
+                    text,
+                    doc_name=doc_name,
+                    file_paths=resolved_file_path,
+                    metadata=metadata,
+                )
+
+            if insert_timeout <= 0:
+                try:
+                    await _ainsert_once()
+                except Exception as e:
                     parts = [
                         f"doc={doc_name}",
                         f"err={_format_err(e)}",
@@ -1368,209 +1692,276 @@ async def index_md_to_rag(pdf_file_path, project_dir, md_path, progress: dict[st
                     ]
                     if file_paths:
                         parts.append(f"file_paths={file_paths}")
-                    logger.warning(
-                        f"rag insert timeout after retries, skip this chunk. retries={max_retries}, last_timeout={cur_timeout}s, "
-                        + ", ".join(parts)
-                    )
-                    return
-                logger.warning(
-                    f"rag insert timeout, retrying. doc={doc_name}, chunk_index={chunk_index}, chunk_type={chunk_type}, "
-                    f"attempt={attempt + 1}/{max_retries}, timeout={cur_timeout}s"
-                )
-            except Exception as e:
-                parts = [
-                    f"doc={doc_name}",
-                    f"err={_format_err(e)}",
-                    f"chunk_index={chunk_index}",
-                    f"chunk_type={chunk_type}",
-                    f"len={len(text)}",
-                    f"preview={repr(_content_preview(text))}",
-                ]
-                if file_paths:
-                    parts.append(f"file_paths={file_paths}")
-                logger.warning(f"rag insert failed, skip this chunk. " + ", ".join(parts))
+                    logger.warning(f"rag insert failed, skip this chunk. " + ", ".join(parts))
                 return
 
-    _update_progress(
-        phase="split_md",
-        total_chunks=total_chunks,
-        doc=doc_name_with_ext,
-        md_path=md_path,
-    )
+            for attempt in range(max_retries + 1):
+                cur_timeout = min(int(insert_timeout * (timeout_backoff ** attempt)), max_timeout)
+                try:
+                    await asyncio.wait_for(_ainsert_once(), timeout=cur_timeout)
+                    if attempt > 0:
+                        logger.info(
+                            f"rag insert retry succeeded. doc={doc_name}, chunk_index={chunk_index}, chunk_type={chunk_type}, attempt={attempt + 1}, timeout={cur_timeout}s"
+                        )
+                    return
+                except asyncio.TimeoutError as e:
+                    if attempt >= max_retries:
+                        parts = [
+                            f"doc={doc_name}",
+                            f"err={_format_err(e)}",
+                            f"chunk_index={chunk_index}",
+                            f"chunk_type={chunk_type}",
+                            f"len={len(text)}",
+                            f"preview={repr(_content_preview(text))}",
+                        ]
+                        if file_paths:
+                            parts.append(f"file_paths={file_paths}")
+                        logger.warning(
+                            f"rag insert timeout after retries, skip this chunk. retries={max_retries}, last_timeout={cur_timeout}s, "
+                            + ", ".join(parts)
+                        )
+                        return
+                    logger.warning(
+                        f"rag insert timeout, retrying. doc={doc_name}, chunk_index={chunk_index}, chunk_type={chunk_type}, "
+                        f"attempt={attempt + 1}/{max_retries}, timeout={cur_timeout}s"
+                    )
+                except Exception as e:
+                    parts = [
+                        f"doc={doc_name}",
+                        f"err={_format_err(e)}",
+                        f"chunk_index={chunk_index}",
+                        f"chunk_type={chunk_type}",
+                        f"len={len(text)}",
+                        f"preview={repr(_content_preview(text))}",
+                    ]
+                    if file_paths:
+                        parts.append(f"file_paths={file_paths}")
+                    logger.warning(f"rag insert failed, skip this chunk. " + ", ".join(parts))
+                    return
 
-    image_name_pattern = re.compile(r"^([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
-    for i, text in enumerate(text_list):
-        if i == 0:
+        _update_progress(
+            phase="split_md",
+            total_chunks=total_chunks,
+            doc=doc_name_with_ext,
+            md_path=md_path,
+        )
+
+        image_name_pattern = re.compile(r"^([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
+        for i, text in enumerate(text_list):
+            if i == 0:
+                _print_pipeline_progress(
+                    "rag_insert_chunk_start",
+                    progress=f"{i + 1}/{total_chunks}",
+                    chunk_index=0,
+                    chunk_type="text_first",
+                    text_len=len(text),
+                )
+                _update_progress(
+                    phase="insert_text_first",
+                    chunk_index=0,
+                    chunk_type="text_first",
+                    file_paths=source_pdf_path,
+                    text_len=len(text),
+                    preview=_content_preview(text),
+                )
+                await safe_rag_insert(
+                    text,
+                    doc_name_with_ext,
+                    file_paths=source_pdf_path,
+                    metadata=_build_text_segment_metadata(
+                        text, source_pdf_path, text_blocks
+                    ),
+                    chunk_index=0, chunk_type="text_first",
+                )
+                continue
+
+            image_match = image_name_pattern.match(text)
+            if image_match:
+                image_file_name = image_match.group(1)
+                image_path = os.path.abspath(os.path.join(image_dir, image_file_name))
+                image_dismantle = os.path.join(image_dir, os.path.splitext(image_file_name)[0] + ".txt")
+                image_desc_text = ""
+                if os.path.exists(image_dismantle):
+                    async with aiofiles.open(image_dismantle, "r", encoding="utf-8") as f:
+                        image_desc_text = (await f.read()).strip()
+                if image_desc_text:
+                    _print_pipeline_progress(
+                        "rag_insert_chunk_start",
+                        progress=f"{i + 1}/{total_chunks}",
+                        chunk_index=i,
+                        chunk_type="image_desc",
+                        image_file=image_file_name,
+                        image_path=os.path.abspath(image_path),
+                        text_len=len(image_desc_text),
+                    )
+                    _update_progress(
+                        phase="insert_image_desc",
+                        chunk_index=i,
+                        chunk_type="image_desc",
+                        image_file=image_file_name,
+                        file_paths=image_path,
+                        text_len=len(image_desc_text),
+                        preview=_content_preview(image_desc_text),
+                    )
+                    await safe_rag_insert(
+                        image_desc_text,
+                        doc_name_without_ext,
+                        file_paths=image_path,
+                        metadata=image_metadata_map.get(image_file_name, {}),
+                        chunk_index=i, chunk_type="image_desc",
+                    )
+
             _print_pipeline_progress(
                 "rag_insert_chunk_start",
                 progress=f"{i + 1}/{total_chunks}",
-                chunk_index=0,
-                chunk_type="text_first",
+                chunk_index=i,
+                chunk_type="text",
                 text_len=len(text),
             )
             _update_progress(
-                phase="insert_text_first",
-                chunk_index=0,
-                chunk_type="text_first",
+                phase="insert_text",
+                chunk_index=i,
+                chunk_type="text",
                 file_paths=source_pdf_path,
                 text_len=len(text),
                 preview=_content_preview(text),
             )
             await safe_rag_insert(
-                text, doc_name_with_ext, file_paths=source_pdf_path,
-                chunk_index=0, chunk_type="text_first",
+                text,
+                doc_name_with_ext,
+                file_paths=source_pdf_path,
+                metadata=_build_text_segment_metadata(
+                    text, source_pdf_path, text_blocks
+                ),
+                chunk_index=i, chunk_type="text",
             )
-            continue
 
-        image_match = image_name_pattern.match(text)
-        if image_match:
-            image_file_name = image_match.group(1)
-            image_path = os.path.abspath(os.path.join(image_dir, image_file_name))
-            image_dismantle = os.path.join(image_dir, os.path.splitext(image_file_name)[0] + ".txt")
-            image_desc_text = ""
-            if os.path.exists(image_dismantle):
-                async with aiofiles.open(image_dismantle, "r", encoding="utf-8") as f:
-                    image_desc_text = (await f.read()).strip()
-            if image_desc_text:
-                _print_pipeline_progress(
-                    "rag_insert_chunk_start",
-                    progress=f"{i + 1}/{total_chunks}",
-                    chunk_index=i,
-                    chunk_type="image_desc",
-                    image_file=image_file_name,
-                    image_path=os.path.abspath(image_path),
-                    text_len=len(image_desc_text),
-                )
-                _update_progress(
-                    phase="insert_image_desc",
-                    chunk_index=i,
-                    chunk_type="image_desc",
-                    image_file=image_file_name,
-                    file_paths=image_path,
-                    text_len=len(image_desc_text),
-                    preview=_content_preview(image_desc_text),
-                )
-                await safe_rag_insert(
-                    image_desc_text, doc_name_without_ext, file_paths=image_path,
-                    chunk_index=i, chunk_type="image_desc",
-                )
-
+        _update_progress(phase="completed")
         _print_pipeline_progress(
-            "rag_insert_chunk_start",
-            progress=f"{i + 1}/{total_chunks}",
-            chunk_index=i,
-            chunk_type="text",
-            text_len=len(text),
-        )
-        _update_progress(
-            phase="insert_text",
-            chunk_index=i,
-            chunk_type="text",
-            file_paths=source_pdf_path,
-            text_len=len(text),
-            preview=_content_preview(text),
-        )
-        await safe_rag_insert(
-            text, doc_name_with_ext, file_paths=source_pdf_path,
-            chunk_index=i, chunk_type="text",
+            "rag_index_completed",
+            source_pdf=os.path.abspath(pdf_file_path),
+            total_chunks=total_chunks,
         )
 
-    _update_progress(phase="completed")
-    _print_pipeline_progress(
-        "rag_index_completed",
-        source_pdf=os.path.abspath(pdf_file_path),
-        total_chunks=total_chunks,
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_kg_usage_report_dir(project_dir),
+        task_name="rag_build",
+        metadata={
+            "pdf_file_path": os.path.abspath(pdf_file_path),
+            "md_path": os.path.abspath(md_path),
+            "stage": "rag",
+        },
     )
 
 
 async def pdf_insert(pdf_file_path, mineru_output_dir, project_dir, keep_pdf_subdir: bool = True):
     """兼容入口：先生成最终 md，再执行 RAG/KG 构建。"""
-    artifacts = await build_enhanced_md(
-        pdf_file_path,
-        mineru_output_dir,
-        keep_pdf_subdir=keep_pdf_subdir,
-    )
-    logger.info(
-        "Pre-step finished: markdown artifacts are ready, start RAG/KG indexing. "
-        f"md_path={os.path.abspath(artifacts['md_path'])}"
-    )
-    rag_timeout = int(os.getenv("RAG_INDEX_TIMEOUT_SECONDS", "30"))
-    rag_progress: dict[str, Any] = {
-        "phase": "not_started",
-        "doc": os.path.basename(pdf_file_path),
-        "md_path": artifacts["md_path"],
-    }
-    allowed_progress_keys = {
-        "phase",
-        "doc",
-        "chunk_index",
-        "chunk_type",
-        "text_len",
-        "preview",
-        "image_file",
-        "file_paths",
-        "total_chunks",
-        "md_path",
-        "elapsed_sec",
-    }
+    await ensure_startup_model_check_once()
+    with _maybe_create_usage_collector("pdf_insert") as collector:
+        artifacts = await build_enhanced_md(
+            pdf_file_path,
+            mineru_output_dir,
+            keep_pdf_subdir=keep_pdf_subdir,
+        )
+        logger.info(
+            "Pre-step finished: markdown artifacts are ready, start RAG/KG indexing. "
+            f"md_path={os.path.abspath(artifacts['md_path'])}"
+        )
+        rag_timeout = int(os.getenv("RAG_INDEX_TIMEOUT_SECONDS", "30"))
+        rag_progress: dict[str, Any] = {
+            "phase": "not_started",
+            "doc": os.path.basename(pdf_file_path),
+            "md_path": artifacts["md_path"],
+        }
+        allowed_progress_keys = {
+            "phase",
+            "doc",
+            "chunk_index",
+            "chunk_type",
+            "text_len",
+            "preview",
+            "image_file",
+            "file_paths",
+            "total_chunks",
+            "md_path",
+            "elapsed_sec",
+        }
 
-    def _progress_snapshot() -> dict[str, Any]:
-        return {k: v for k, v in rag_progress.items() if k in allowed_progress_keys}
+        def _progress_snapshot() -> dict[str, Any]:
+            return {k: v for k, v in rag_progress.items() if k in allowed_progress_keys}
 
-    rag_start = time.monotonic()
-    _print_pipeline_progress(
-        "rag_index_started",
-        timeout_sec=rag_timeout,
-        source_pdf=os.path.abspath(pdf_file_path),
-        md_path=os.path.abspath(artifacts["md_path"]),
-        project_dir=os.path.abspath(project_dir),
-    )
-
-    rag_task = asyncio.create_task(
-        index_md_to_rag(pdf_file_path, project_dir, artifacts["md_path"], progress=rag_progress)
-    )
-
-    try:
-        await asyncio.wait_for(rag_task, timeout=rag_timeout)
-        total_elapsed = round(time.monotonic() - rag_start, 3)
+        rag_start = time.monotonic()
         _print_pipeline_progress(
-            "rag_index_success",
-            elapsed_sec=total_elapsed,
+            "rag_index_started",
             timeout_sec=rag_timeout,
-            last_progress=_progress_snapshot(),
+            source_pdf=os.path.abspath(pdf_file_path),
+            md_path=os.path.abspath(artifacts["md_path"]),
+            project_dir=os.path.abspath(project_dir),
         )
-    except asyncio.TimeoutError as e:
-        total_elapsed = round(time.monotonic() - rag_start, 3)
-        progress_snapshot = _progress_snapshot()
-        _print_pipeline_progress(
-            "rag_index_timeout",
-            elapsed_sec=total_elapsed,
-            timeout_sec=rag_timeout,
-            last_update_ago_sec=round(
-                max(time.monotonic() - rag_progress.get("last_update_monotonic", rag_start), 0.0), 3
-            ),
-            last_progress=progress_snapshot,
+
+        rag_task = asyncio.create_task(
+            index_md_to_rag(
+                pdf_file_path,
+                project_dir,
+                artifacts["md_path"],
+                content_list_path=artifacts.get("content_list_path"),
+                progress=rag_progress,
+            )
         )
-        err_msg = str(e) if str(e) else f"{type(e).__name__}({repr(e)})"
-        logger.warning(
-            "RAG indexing timeout, skip remainder. "
-            f"timeout={rag_timeout}s, elapsed={total_elapsed}s, err={err_msg}, last_progress: {progress_snapshot}"
-        )
-    except Exception as e:
-        total_elapsed = round(time.monotonic() - rag_start, 3)
-        progress_snapshot = _progress_snapshot()
-        err_msg = str(e) if str(e) else f"{type(e).__name__}({repr(e)})"
-        _print_pipeline_progress(
-            "rag_index_failed",
-            elapsed_sec=total_elapsed,
-            timeout_sec=rag_timeout,
-            err=err_msg,
-            last_progress=progress_snapshot,
-        )
-        logger.warning(
-            "RAG indexing failure, skip remainder. "
-            f"timeout={rag_timeout}s, elapsed={total_elapsed}s, err={err_msg}, last_progress: {progress_snapshot}"
-        )
+
+        try:
+            await asyncio.wait_for(rag_task, timeout=rag_timeout)
+            total_elapsed = round(time.monotonic() - rag_start, 3)
+            _print_pipeline_progress(
+                "rag_index_success",
+                elapsed_sec=total_elapsed,
+                timeout_sec=rag_timeout,
+                last_progress=_progress_snapshot(),
+            )
+        except asyncio.TimeoutError as e:
+            total_elapsed = round(time.monotonic() - rag_start, 3)
+            progress_snapshot = _progress_snapshot()
+            _print_pipeline_progress(
+                "rag_index_timeout",
+                elapsed_sec=total_elapsed,
+                timeout_sec=rag_timeout,
+                last_update_ago_sec=round(
+                    max(time.monotonic() - rag_progress.get("last_update_monotonic", rag_start), 0.0), 3
+                ),
+                last_progress=progress_snapshot,
+            )
+            err_msg = str(e) if str(e) else f"{type(e).__name__}({repr(e)})"
+            logger.warning(
+                "RAG indexing timeout, skip remainder. "
+                f"timeout={rag_timeout}s, elapsed={total_elapsed}s, err={err_msg}, last_progress: {progress_snapshot}"
+            )
+        except Exception as e:
+            total_elapsed = round(time.monotonic() - rag_start, 3)
+            progress_snapshot = _progress_snapshot()
+            err_msg = str(e) if str(e) else f"{type(e).__name__}({repr(e)})"
+            _print_pipeline_progress(
+                "rag_index_failed",
+                elapsed_sec=total_elapsed,
+                timeout_sec=rag_timeout,
+                err=err_msg,
+                last_progress=progress_snapshot,
+            )
+            logger.warning(
+                "RAG indexing failure, skip remainder. "
+                f"timeout={rag_timeout}s, elapsed={total_elapsed}s, err={err_msg}, last_progress: {progress_snapshot}"
+            )
+
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_md_usage_report_dir(artifacts["pdf_outdir"]),
+        task_name="parse",
+        metadata={
+            "pdf_file_path": os.path.abspath(pdf_file_path),
+            "project_dir": os.path.abspath(project_dir),
+            "stage": "all",
+        },
+    )
 
 
 async def docx2pdf(docx_path, pdf_path):

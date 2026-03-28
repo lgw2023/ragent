@@ -1,5 +1,7 @@
 from __future__ import annotations
 import weakref
+import contextvars
+import threading
 
 import asyncio
 import html
@@ -10,6 +12,7 @@ import logging.handlers
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from functools import wraps
 from hashlib import md5
 from typing import Any, Protocol, Callable, TYPE_CHECKING, List
@@ -105,6 +108,9 @@ def set_verbose_debug(enabled: bool):
 
 
 statistic_data = {"llm_call": 0, "llm_cache": 0, "embed_call": 0}
+_CURRENT_MODEL_USAGE_COLLECTOR: contextvars.ContextVar["ModelUsageCollector | None"] = (
+    contextvars.ContextVar("current_model_usage_collector", default=None)
+)
 
 _SENSITIVE_LOG_KEYS = {
     "api_key",
@@ -1390,3 +1396,304 @@ class TokenTracker:
             f"Completion tokens: {usage['completion_tokens']}, "
             f"Total tokens: {usage['total_tokens']}"
         )
+
+
+def _coerce_usage_value(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+
+def _object_to_usage_dict(raw_usage: Any) -> dict[str, Any] | None:
+    if raw_usage is None:
+        return None
+    if isinstance(raw_usage, dict):
+        return raw_usage
+    usage_dict: dict[str, Any] = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "input_token_count",
+        "output_token_count",
+    ):
+        if hasattr(raw_usage, key):
+            usage_dict[key] = getattr(raw_usage, key)
+    return usage_dict or None
+
+
+def _locate_usage_payload(raw_usage: Any) -> dict[str, Any] | None:
+    usage_dict = _object_to_usage_dict(raw_usage)
+    if usage_dict is not None:
+        return usage_dict
+    if not isinstance(raw_usage, dict):
+        return None
+
+    interesting_keys = {
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "input_token_count",
+        "output_token_count",
+    }
+    if any(key in raw_usage for key in interesting_keys):
+        return raw_usage
+
+    for key in ("usage", "token_usage", "meta", "output", "result", "data", "billed_units"):
+        value = raw_usage.get(key)
+        nested = _locate_usage_payload(value)
+        if nested is not None:
+            return nested
+
+    for value in raw_usage.values():
+        nested = _locate_usage_payload(value)
+        if nested is not None:
+            return nested
+    return None
+
+
+def normalize_token_usage(raw_usage: Any) -> dict[str, int] | None:
+    usage_payload = _locate_usage_payload(raw_usage)
+    if usage_payload is None:
+        return None
+
+    input_tokens = _coerce_usage_value(
+        usage_payload.get("prompt_tokens", usage_payload.get("input_tokens"))
+    )
+    if input_tokens is None:
+        input_tokens = _coerce_usage_value(usage_payload.get("input_token_count"))
+
+    output_tokens = _coerce_usage_value(
+        usage_payload.get("completion_tokens", usage_payload.get("output_tokens"))
+    )
+    if output_tokens is None:
+        output_tokens = _coerce_usage_value(usage_payload.get("output_token_count"))
+
+    total_tokens = _coerce_usage_value(usage_payload.get("total_tokens"))
+    if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+        total_tokens = (input_tokens or 0) + (output_tokens or 0)
+
+    if input_tokens is None and output_tokens is None and total_tokens is None:
+        return None
+
+    return {
+        "input_tokens": input_tokens or 0,
+        "output_tokens": output_tokens or 0,
+        "total_tokens": total_tokens or 0,
+    }
+
+
+class ModelUsageCollector:
+    """Collect task-scoped model token usage across chat/embed/rerank/image calls."""
+
+    def __init__(self, label: str):
+        self.label = label
+        self.started_at = datetime.now()
+        self._events: list[dict[str, Any]] = []
+        self._aggregate: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
+        self._token = None
+
+    def __enter__(self):
+        self._token = _CURRENT_MODEL_USAGE_COLLECTOR.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._token is not None:
+            _CURRENT_MODEL_USAGE_COLLECTOR.reset(self._token)
+            self._token = None
+
+    def record(
+        self,
+        model_type: str,
+        model_name: str | None,
+        usage: dict[str, int] | None,
+        *,
+        source: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        with self._lock:
+            bucket = self._aggregate.setdefault(
+                model_type,
+                {
+                    "call_count": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "missing_usage_count": 0,
+                    "models": {},
+                },
+            )
+            bucket["call_count"] += 1
+
+            model_key = model_name or "unknown_model"
+            model_bucket = bucket["models"].setdefault(
+                model_key,
+                {
+                    "call_count": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "missing_usage_count": 0,
+                },
+            )
+            model_bucket["call_count"] += 1
+
+            if usage is None:
+                bucket["missing_usage_count"] += 1
+                model_bucket["missing_usage_count"] += 1
+            else:
+                bucket["input_tokens"] += usage["input_tokens"]
+                bucket["output_tokens"] += usage["output_tokens"]
+                bucket["total_tokens"] += usage["total_tokens"]
+                model_bucket["input_tokens"] += usage["input_tokens"]
+                model_bucket["output_tokens"] += usage["output_tokens"]
+                model_bucket["total_tokens"] += usage["total_tokens"]
+
+            self._events.append(
+                {
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "model_type": model_type,
+                    "model_name": model_key,
+                    "source": source,
+                    "usage": usage,
+                    "extra": extra or {},
+                }
+            )
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "label": self.label,
+                "started_at": self.started_at.isoformat(timespec="seconds"),
+                "ended_at": datetime.now().isoformat(timespec="seconds"),
+                "aggregate": json.loads(json.dumps(self._aggregate)),
+                "events": json.loads(json.dumps(self._events, default=str)),
+            }
+
+
+def get_current_model_usage_collector() -> ModelUsageCollector | None:
+    return _CURRENT_MODEL_USAGE_COLLECTOR.get()
+
+
+def record_model_usage(
+    model_type: str,
+    model_name: str | None,
+    raw_usage: Any,
+    *,
+    source: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    collector = get_current_model_usage_collector()
+    if collector is None:
+        return
+    collector.record(
+        model_type,
+        model_name,
+        normalize_token_usage(raw_usage),
+        source=source,
+        extra=extra,
+    )
+
+
+def write_model_usage_report(
+    collector: ModelUsageCollector,
+    report_dir: str,
+    *,
+    task_name: str,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    os.makedirs(report_dir, exist_ok=True)
+    snapshot = collector.snapshot()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = os.path.join(report_dir, f"model_usage_{task_name}_{timestamp}.md")
+
+    lines = [
+        f"# Model Usage Report: {task_name}",
+        "",
+        f"- Task label: `{snapshot['label']}`",
+        f"- Started at: `{snapshot['started_at']}`",
+        f"- Ended at: `{snapshot['ended_at']}`",
+    ]
+    if metadata:
+        lines.append("- Metadata:")
+        for key, value in metadata.items():
+            lines.append(f"  - `{key}`: `{value}`")
+    lines.append("")
+    lines.append("## Summary By Model Type")
+    lines.append("")
+    lines.append("| Type | Calls | Input Tokens | Output Tokens | Total Tokens | Missing Usage |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+
+    aggregate = snapshot["aggregate"]
+    grand_input = grand_output = grand_total = grand_calls = grand_missing = 0
+    for model_type in ("chat", "embedding", "rerank", "image"):
+        bucket = aggregate.get(model_type, {})
+        grand_calls += int(bucket.get("call_count", 0))
+        grand_input += int(bucket.get("input_tokens", 0))
+        grand_output += int(bucket.get("output_tokens", 0))
+        grand_total += int(bucket.get("total_tokens", 0))
+        grand_missing += int(bucket.get("missing_usage_count", 0))
+        lines.append(
+            "| {model_type} | {call_count} | {input_tokens} | {output_tokens} | {total_tokens} | {missing_usage_count} |".format(
+                model_type=model_type,
+                call_count=bucket.get("call_count", 0),
+                input_tokens=bucket.get("input_tokens", 0),
+                output_tokens=bucket.get("output_tokens", 0),
+                total_tokens=bucket.get("total_tokens", 0),
+                missing_usage_count=bucket.get("missing_usage_count", 0),
+            )
+        )
+
+    lines.extend(
+        [
+            f"| total | {grand_calls} | {grand_input} | {grand_output} | {grand_total} | {grand_missing} |",
+            "",
+            "## Summary By Model",
+            "",
+        ]
+    )
+
+    for model_type in ("chat", "embedding", "rerank", "image"):
+        bucket = aggregate.get(model_type)
+        if not bucket:
+            continue
+        lines.append(f"### {model_type}")
+        lines.append("")
+        lines.append("| Model | Calls | Input Tokens | Output Tokens | Total Tokens | Missing Usage |")
+        lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+        for model_name, model_bucket in sorted(bucket.get("models", {}).items()):
+            lines.append(
+                "| {model_name} | {call_count} | {input_tokens} | {output_tokens} | {total_tokens} | {missing_usage_count} |".format(
+                    model_name=model_name,
+                    call_count=model_bucket.get("call_count", 0),
+                    input_tokens=model_bucket.get("input_tokens", 0),
+                    output_tokens=model_bucket.get("output_tokens", 0),
+                    total_tokens=model_bucket.get("total_tokens", 0),
+                    missing_usage_count=model_bucket.get("missing_usage_count", 0),
+                )
+            )
+        lines.append("")
+
+    lines.extend(["## Call Events", ""])
+    for index, event in enumerate(snapshot["events"], start=1):
+        usage = event.get("usage") or {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        lines.append(
+            f"{index}. `{event['timestamp']}` `{event['model_type']}` / `{event['model_name']}`"
+            f" input={usage.get('input_tokens', 0)} output={usage.get('output_tokens', 0)} total={usage.get('total_tokens', 0)}"
+            + (f" source=`{event['source']}`" if event.get("source") else "")
+        )
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return report_path

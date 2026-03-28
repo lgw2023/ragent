@@ -4,7 +4,7 @@ import os
 import aiohttp
 from typing import Any, Dict, List, Optional
 
-from .utils import logger, log_model_call
+from .utils import logger, log_model_call, record_model_usage
 
 
 def _normalize_rerank_url(base_url: str | None) -> str | None:
@@ -100,6 +100,13 @@ async def rerank_api(
                 )
 
             result = await response.json()
+            record_model_usage(
+                "rerank",
+                model,
+                result,
+                source="ragent.rerank.rerank_api",
+                extra={"document_count": len(documents), "top_k": top_k},
+            )
             results = _extract_rerank_results(result)
             if results:
                 normalized = [
