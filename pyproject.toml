@@ -27,12 +27,16 @@ dependencies = [
     "configparser",
     "dotenv",
     "future",
+    "mineru",
+    "nano-vectordb",
+    "networkx",
     "numpy",
     "pandas>=2.0.0",
     "pipmaster",
     "pydantic",
     "python-dotenv",
     "pyuca",
+    "requests",
     "setuptools",
     "tenacity",
     "tiktoken",
@@ -40,24 +44,30 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-api = [
-    # Core dependencies
-    "aiohttp",
-    "configparser",
-    "dotenv",
-    "future",
-    "numpy",
+# OpenAI / 兼容接口 LLM 提供商
+openai = [
     "openai",
-    "pandas>=2.0.0",
-    "pipmaster",
-    "pydantic",
-    "python-dotenv",
-    "pyuca",
-    "setuptools",
-    "tenacity",
-    "tiktoken",
-    "xlsxwriter>=3.1.0",
-    # API-specific dependencies
+    "httpx",
+]
+
+# HuggingFace 本地模型
+hf = [
+    "torch",
+    "transformers",
+]
+
+# Ollama 本地模型
+ollama = [
+    "ollama",
+]
+
+# 知识图谱后端（可多选）
+neo4j = ["neo4j"]
+milvus = ["pymilvus"]
+faiss = ["faiss-cpu"]
+
+# API 服务端
+api = [
     "aiofiles",
     "ascii_colors",
     "asyncpg",
@@ -66,12 +76,18 @@ api = [
     "httpcore",
     "httpx",
     "jiter",
+    "openai",
     "passlib[bcrypt]",
     "PyJWT",
     "python-jose[cryptography]",
     "python-multipart",
     "pytz",
     "uvicorn",
+]
+
+# 安装全部可选依赖
+all = [
+    "ragent[openai,hf,ollama,neo4j,milvus,faiss,api]",
 ]
 
 [tool.setuptools.packages.find]
@@ -82,6 +98,9 @@ include-package-data = true
 
 [tool.setuptools.dynamic]
 version = {attr = "ragent.__version__"}
+
+[tool.uv.sources]
+mineru = { path = "MinerU-master", editable = true }
 
 [tool.ruff]
 target-version = "py310"

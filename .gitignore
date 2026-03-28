@@ -7,6 +7,10 @@ env/
 venv/
 .venv/
 
+# uv cache
+.uv/
+requirements.txt.bak
+
 # Python 编译文件
 __pycache__/
 *.py[cod]
@@ -18,6 +22,7 @@ dist/
 build/
 *.egg-info/
 *.egg
+MinerU-master.zip
 
 # 单元测试 / 覆盖率
 .pytest_cache/
@@ -32,3 +37,6 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# sample
+example/
