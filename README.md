@@ -103,37 +103,41 @@ sudo apt update && sudo apt install libreoffice libreoffice-writer
 
 ```.env
 # ========== LLM（必需）==========
-LLM_API_KEY="sk-..."
-LLM_API_URL="https://api.example.com/v1"
-LLM_API_MODEL="gpt-4o-mini"
+LLM_API_KEY=""
+LLM_API_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_API_MODEL="qwen3-max"
+LLM_API_TIMEOUT_SECONDS="180"
 
 # ========== Embedding（必需）==========
 # 当前实现不会复用 LLM_API_*，而是单独读取这组变量
-EMBEDDING_BINDING_API_KEY="sk-..."
-EMBEDDING_BINDING_URL="https://api.example.com/v1"
-EMBEDDING_MODEL="text-embedding-3-large"
-EMBEDDING_DIMENSIONS="1024"
+EMBEDDING_BINDING_API_KEY=""
+EMBEDDING_BINDING_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+EMBEDDING_MODEL="text-embedding-v3"
+EMBEDDING_DIMENSIONS="256"
 
 # ========== Rerank（默认推荐）==========
 # 当前启动检查会验证 rerank；如果不配置 rerank，请看下面的“关闭开关”
-RERANK_API_KEY="sk-..."
-RERANK_URL="https://api.example.com/v1/reranks"
-RERANK_MODEL="rerank-v1"
+RERANK_API_KEY=""
+RERANK_URL="https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
+RERANK_MODEL="qwen3-rerank"
 
 # ========== 图像模型（可选）==========
 # 不配置时，图片描述会被跳过
-IMAGE_MODEL_KEY="sk-..."
-IMAGE_MODEL_URL="https://api.example.com/v1"
-IMAGE_MODEL="gpt-4o"
-IMAGE_MODEL_TIMEOUT="90"
+IMAGE_MODEL_KEY=""
+IMAGE_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+IMAGE_MODEL="qwen3-vl-flash"
+IMAGE_MODEL_TIMEOUT="300"
 
 # ========== 可选开关 / 调优 ==========
 MODEL_STARTUP_CHECK_ENABLED="1"
 ENABLE_RERANK="true"
-num_chars_of_front="120"
-num_chars_of_behind="120"
-chunk_size="1200"
-overlap_size="100"
+num_chars_of_front="512"
+num_chars_of_behind="512"
+chunk_size="1024"
+overlap_size="128"
+RAG_INSERT_TIMEOUT_SECONDS="30"
+RAG_INSERT_TIMEOUT_MAX_SECONDS="60"
+RAG_INDEX_TIMEOUT_SECONDS="1800"
 ```
 
 如果你暂时不打算接 rerank 服务，至少同时设置：
