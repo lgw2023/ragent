@@ -24,77 +24,97 @@ Ragent的流程遵循一个清晰的多阶段过程：
 
 ## 安装与设置
 
-1.  **代码解压**
+### 前置要求
 
-    ```bash
-    unzip ragent_master.zip
-    cd ragent_master
-    ```
+- Python 3.13
+- [uv](https://docs.astral.sh/uv/)（推荐）或 pip
 
-2.  **创建虚拟环境**
+### 1. 获取代码
 
-    ```bash
-    python -m venv env
-    # 在Windows上，使用 `env\Scripts\activate`
-    source env/bin/activate  
-    ```
+```bash
+unzip ragent_master.zip
+cd ragent_master
+```
 
-3.  **安装依赖**
+### 2. 安装依赖
 
-    该项目需要`pyproject.toml`和`requirements.txt`中列出的依赖项。它还依赖`mineru`库进行PDF解析。
+**使用 uv（推荐）：**
 
-    ```bash
-    # 以可编辑模式安装ragent及其依赖
-    pip install -e . 
-    # 安装mineru包
-    unzip Mineru-master.zip
-    cd MinerU-master
-    pip install -e ".[core]" -i https://mirrors.aliyun.com/pypi/simple
-    # 安装 libreoffice(doc2pdf)
-    sudo apt update && sudo apt install libreoffice
-    sudo apt install libreoffice-writer
-    ```
+```bash
+# 安装 uv（如未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-4.  **下载解析模型**
+# 创建虚拟环境并安装核心依赖
+uv sync
 
-    集成的`MinerU`工具需要本地模型来进行文档解析。我们提供了一个脚本来下载它们。
+# 按需安装可选依赖（可组合）
+uv sync --extra openai    # OpenAI / 兼容接口 LLM
+uv sync --extra hf        # HuggingFace 本地模型（torch + transformers）
+uv sync --extra ollama    # Ollama 本地模型
+uv sync --extra api       # FastAPI 服务端
+uv sync --extra neo4j     # Neo4j 知识图谱后端
+uv sync --extra milvus    # Milvus 向量数据库后端
+uv sync --extra faiss     # FAISS 向量数据库后端
 
-    ```bash
-    python models_download.py
-    ```
+# 或一次性安装全部
+uv sync --all-extras
+```
 
-    这将下载必要的模型，并在您的主目录中创建一个`mineru.json`配置文件。
+**使用 pip：**
 
-5.  **配置环境变量**
+```bash
+python -m venv env
+source env/bin/activate   # Windows: env\Scripts\activate
 
-    在项目根目录中创建一个`.env`文件。此文件应包含您的API密钥和其他配置详细信息。`integrations.py`文件显示了需要哪些变量。
+pip install -e .
+pip install -e ".[openai,api]"   # 安装所需可选依赖
+```
 
-    ```.env
-    # 您的OpenAI API密钥
-    LLM_API_KEY="sk-..."
+### 3. 安装 MinerU 模型
 
-    # 用于多模态模型（图像分析）的API详细信息
-    IMAGE_MODEL_KEY="your-vlm-api-key"
-    IMAGE_MODEL_URL="https://api.example.com/v1/chat/completions"
-    IMAGE_MODEL="gpt-4o"
+集成的`MinerU`工具需要本地模型来进行文档解析，运行以下脚本下载：
 
-    # 图像描述的上下文窗口大小
-    num_chars_of_front=500
-    num_chars_of_behind=500
-    ```
+```bash
+python models_download.py
+```
 
-##核心模块指南
+这将下载必要的模型，并在主目录中创建`mineru.json`配置文件。
+
+### 4. 安装 LibreOffice（处理 DOCX 时需要）
+
+```bash
+sudo apt update && sudo apt install libreoffice libreoffice-writer
+```
+
+### 5. 配置环境变量
+
+在项目根目录创建`.env`文件：
+
+```.env
+# LLM API 密钥
+LLM_API_KEY="sk-..."
+
+# 多模态模型（图像分析）配置
+IMAGE_MODEL_KEY="your-vlm-api-key"
+IMAGE_MODEL_URL="https://api.example.com/v1/chat/completions"
+IMAGE_MODEL="gpt-4o"
+
+# 图像描述的上下文窗口大小
+num_chars_of_front=500
+num_chars_of_behind=500
+```
+
+## 核心模块指南
 
 -   **`ragent.ragent.Ragent`**：主要的编排类。它通过LLM/嵌入函数和工作目录进行初始化。其`ainsert`和`aquery`方法是与框架交互的主要入口点。
--   **`integrations.py`**：主要的应用程序逻辑文件。它包含了如何使用`Ragent`框架的实际示例，包括：
-    -   `process_image_file`：单张图片的提取流程，使用多模态模型对指定图片生成描述信息后将文本信息数据插入Ragent。
-    -   `inference_multi_hop_problem`：一个演示如何通过将复杂问题拆解为子问题来解决它们的函数。
-    -   `pdf_insert`：一个完整的PDF处理流程，使用`MinerU`解析到将文本和图像数据插入Ragent。
-    -   `docx_insert`：一个完整的DOCX处理流程，使用`libreoffice`将DOCX格式文件转换为PDF文件，再使用`MinerU`解析到将文本和图像数据插入Ragent。
-    -   `inference_one_hop_problem`：一个用于处理简单、直接问题的函数。
-    -   `inference_multi_hop_problem`：一个演示如何通过将复杂问题拆解为子问题来解决它们的函数。
--   **`ragent.operate.Operate`**：这个类负责知识提取。它使用LLM提示来识别和结构化文本中的实体和关系。
--   **`ragent.kg/`**：此目录包含数据存储的实现。默认情况下，它使用`nano_vector_db_impl.py`处理向量，`networkx_impl.py`处理图，所有这些都存储在本地。
+-   **`integrations.py`**：主要的应用程序逻辑文件，包含使用`Ragent`框架的实际示例：
+    -   `process_image_file`：单张图片的提取流程，使用多模态模型生成描述后将文本数据插入Ragent。
+    -   `pdf_insert`：完整的PDF处理流程，使用`MinerU`解析并将文本和图像数据插入Ragent。
+    -   `docx_insert`：完整的DOCX处理流程，先用`libreoffice`转换为PDF，再通过`MinerU`解析插入Ragent。
+    -   `inference_one_hop_problem`：处理简单、直接问题的函数。
+    -   `inference_multi_hop_problem`：通过将复杂问题拆解为子问题来解决多跳推理的函数。
+-   **`ragent.operate.Operate`**：负责知识提取，使用LLM提示识别和结构化文本中的实体和关系。
+-   **`ragent/kg/`**：数据存储的实现目录。默认使用`nano_vector_db_impl.py`处理向量、`networkx_impl.py`处理图，所有数据本地存储。
 
 ## 用法示例
 
@@ -104,14 +124,12 @@ Ragent的流程遵循一个清晰的多阶段过程：
 import asyncio
 from integrations import pdf_insert, inference_one_hop_problem, inference_multi_hop_problem
 
-# 定义项目路径
 PDF_FILE_PATH = "path/to/your/document.pdf"
-MINERU_OUTPUT_DIR = "mineru_out" # 存储解析结果的目录
-PROJECT_DIR = "my_ragent_project" # 存储知识库的目录
+MINERU_OUTPUT_DIR = "mineru_out"   # 存储解析结果的目录
+PROJECT_DIR = "my_ragent_project"  # 存储知识库的目录
 
 async def main():
     # 1. 将PDF文档提取到知识库中
-    # 这将解析PDF，处理文本和图像，并构建知识图谱。
     print("开始提取PDF...")
     await pdf_insert(PDF_FILE_PATH, MINERU_OUTPUT_DIR, PROJECT_DIR)
     print("PDF提取完成。")
@@ -132,33 +150,30 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 ```
 
-## 命令行用法（singlefile.py，自动推断）
+## 命令行用法（singlefile.py）
 
-`singlefile.py parse` 现支持自动推断阶段，无需再手动区分 `all/md/rag`。
+`singlefile.py parse` 支持自动推断处理阶段，无需手动区分 `all/md/rag`。
 
-- 自动规则：
-  - 只给 `<mineru_output_dir>`（不传 `<project_dir>`）时：执行 `md`
-  - 传了 `<project_dir>` 且已存在对应 md 结果时：执行 `rag`
-  - 传了 `<project_dir>` 但不存在对应 md 结果时：执行 `all`
+**自动推断规则：**
+- 只传 `<mineru_output_dir>`（不传 `<project_dir>`）：执行 `md`
+- 传了 `<project_dir>` 且已存在对应 md 结果：执行 `rag`
+- 传了 `<project_dir>` 但不存在对应 md 结果：执行 `all`
 
 ```bash
-# 1) 单文件：仅生成 md（自动推断为 md）
+# 单文件：仅生成 md
 python singlefile.py parse SCAPTURE.pdf SCAPTURE_md
 
-# 2) 单文件：自动在 all/rag 之间选择
-#    - 若 SCAPTURE_md 中已有该文件的 md 结果 -> rag
-#    - 否则 -> all
+# 单文件：自动在 all/rag 之间选择
 python singlefile.py parse SCAPTURE.pdf SCAPTURE_md SCAPTURE_kg
 
-# 3) 目录：递归处理目录下所有 PDF，并按每个文件分别自动推断
+# 目录：递归处理目录下所有 PDF
 python singlefile.py parse ./pdfs SCAPTURE_md
 python singlefile.py parse ./pdfs SCAPTURE_md SCAPTURE_kg
 ```
 
-如需手动覆盖自动推断，也可显式传入 `stage`：
+如需手动覆盖自动推断：
 
 ```bash
 python singlefile.py parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage]
@@ -167,6 +182,6 @@ python singlefile.py parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage
 
 ## 定制化
 
--   **LLM和嵌入模型**：LLM和嵌入模型作为函数传递给`Ragent`的构造函数。您可以通过提供符合所需签名的自己的函数来轻松替换它们。有关示例，请参见`ragent/llm/`（例如`ollama.py`，`hf.py`）。
--   **存储后端**：存储层基于`ragent/base.py`中定义的抽象基类。您可以通过子类化相应的基类并更新`Ragent`类以使用您的新实现来部署自己的存储后端（例如，用于不同的向量数据库如Milvus或图数据库如Neo4j）。
--   **提示**：用于提取、问答和推理的所有提示都在`ragent/prompt.py`中定义。您可以修改这些提示以更好地适应您的特定领域或任务。
+-   **LLM和嵌入模型**：LLM和嵌入模型作为函数传递给`Ragent`的构造函数，可以通过提供符合所需签名的自定义函数来替换。参见`ragent/llm/`（如`ollama.py`、`hf.py`）。
+-   **存储后端**：存储层基于`ragent/base.py`中定义的抽象基类，可通过子类化相应基类并更新`Ragent`类来部署自己的存储后端（如Milvus、Neo4j等）。
+-   **提示**：所有用于提取、问答和推理的提示都在`ragent/prompt.py`中定义，可修改以适应特定领域或任务。
