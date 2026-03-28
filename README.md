@@ -26,8 +26,9 @@ Ragent的流程遵循一个清晰的多阶段过程：
 
 ### 前置要求
 
-- Python 3.13
+- Python `>=3.10`（仓库当前 `.python-version` 为 `3.13`）
 - [uv](https://docs.astral.sh/uv/)（推荐）或 pip
+- 如需处理 DOCX，还需要 LibreOffice
 
 ### 1. 获取代码
 
@@ -38,23 +39,26 @@ cd ragent_master
 
 ### 2. 安装依赖
 
+`README` 中下面的命令按当前代码入口整理过：
+
+- 如果你要直接运行 `integrations.py` / `singlefile.py` 的主流程，建议至少安装 `openai` 和 `api` 两组 extra。
+- `api` 这个名字虽然偏服务端，但当前文档解析主流程里实际用到了其中的 `aiofiles` 依赖。
+
 **使用 uv（推荐）：**
 
 ```bash
 # 安装 uv（如未安装）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 创建虚拟环境并安装核心依赖
-uv sync
+# 推荐：可直接跑当前 README 中的完整流程
+uv sync --extra openai --extra api
 
-# 按需安装可选依赖（可组合）
-uv sync --extra openai    # OpenAI / 兼容接口 LLM
-uv sync --extra hf        # HuggingFace 本地模型（torch + transformers）
+# 其他可选依赖
+uv sync --extra hf        # HuggingFace 本地模型
 uv sync --extra ollama    # Ollama 本地模型
-uv sync --extra api       # FastAPI 服务端
-uv sync --extra neo4j     # Neo4j 知识图谱后端
-uv sync --extra milvus    # Milvus 向量数据库后端
-uv sync --extra faiss     # FAISS 向量数据库后端
+uv sync --extra neo4j     # Neo4j 图后端
+uv sync --extra milvus    # Milvus 向量库后端
+uv sync --extra faiss     # FAISS 向量库后端
 
 # 或一次性安装全部
 uv sync --all-extras
@@ -66,19 +70,26 @@ uv sync --all-extras
 python -m venv env
 source env/bin/activate   # Windows: env\Scripts\activate
 
-pip install -e .
-pip install -e ".[openai,api]"   # 安装所需可选依赖
+# 先安装随仓库附带的 MinerU 源码
+pip install -e ./MinerU-master
+
+# 再安装当前项目及推荐 extra
+pip install -e ".[openai,api]"
 ```
 
 ### 3. 安装 MinerU 模型
 
-集成的`MinerU`工具需要本地模型来进行文档解析，运行以下脚本下载：
+当前仓库中用于解析 PDF 的是 `MinerU`。推荐使用 `MinerU` 自带的 CLI 下载模型，而不是根目录下的 `models_download.py`。
 
 ```bash
-python models_download.py
+# 推荐：下载 pipeline 模型
+uv run mineru-models-download --source modelscope --model_type pipeline
+
+# 如果你用的是 pip 虚拟环境，也可以这样执行
+python -m mineru.cli.models_download --source modelscope --model_type pipeline
 ```
 
-这将下载必要的模型，并在主目录中创建`mineru.json`配置文件。
+执行完成后，`MinerU` 会在用户目录下生成或更新 `~/mineru.json` 配置文件。
 
 ### 4. 安装 LibreOffice（处理 DOCX 时需要）
 
@@ -88,65 +99,159 @@ sudo apt update && sudo apt install libreoffice libreoffice-writer
 
 ### 5. 配置环境变量
 
-在项目根目录创建`.env`文件：
+在项目根目录创建 `.env` 文件。下面这些变量是当前代码路径里实际会读取到的关键配置：
 
 ```.env
-# LLM API 密钥
+# ========== LLM（必需）==========
 LLM_API_KEY="sk-..."
+LLM_API_URL="https://api.example.com/v1"
+LLM_API_MODEL="gpt-4o-mini"
 
-# 多模态模型（图像分析）配置
-IMAGE_MODEL_KEY="your-vlm-api-key"
-IMAGE_MODEL_URL="https://api.example.com/v1/chat/completions"
+# ========== Embedding（必需）==========
+# 当前实现不会复用 LLM_API_*，而是单独读取这组变量
+EMBEDDING_BINDING_API_KEY="sk-..."
+EMBEDDING_BINDING_URL="https://api.example.com/v1"
+EMBEDDING_MODEL="text-embedding-3-large"
+EMBEDDING_DIMENSIONS="1024"
+
+# ========== Rerank（默认推荐）==========
+# 当前启动检查会验证 rerank；如果不配置 rerank，请看下面的“关闭开关”
+RERANK_API_KEY="sk-..."
+RERANK_URL="https://api.example.com/v1/reranks"
+RERANK_MODEL="rerank-v1"
+
+# ========== 图像模型（可选）==========
+# 不配置时，图片描述会被跳过
+IMAGE_MODEL_KEY="sk-..."
+IMAGE_MODEL_URL="https://api.example.com/v1"
 IMAGE_MODEL="gpt-4o"
+IMAGE_MODEL_TIMEOUT="90"
 
-# 图像描述的上下文窗口大小
-num_chars_of_front=500
-num_chars_of_behind=500
+# ========== 可选开关 / 调优 ==========
+MODEL_STARTUP_CHECK_ENABLED="1"
+ENABLE_RERANK="true"
+num_chars_of_front="120"
+num_chars_of_behind="120"
+chunk_size="1200"
+overlap_size="100"
 ```
+
+如果你暂时不打算接 rerank 服务，至少同时设置：
+
+```.env
+MODEL_STARTUP_CHECK_ENABLED="0"
+ENABLE_RERANK="false"
+```
+
+否则当前实现会在启动检查或混合检索阶段直接因为缺少 `RERANK_*` 配置而失败。
 
 ## 核心模块指南
 
--   **`ragent.ragent.Ragent`**：主要的编排类。它通过LLM/嵌入函数和工作目录进行初始化。其`ainsert`和`aquery`方法是与框架交互的主要入口点。
--   **`integrations.py`**：主要的应用程序逻辑文件，包含使用`Ragent`框架的实际示例：
-    -   `process_image_file`：单张图片的提取流程，使用多模态模型生成描述后将文本数据插入Ragent。
-    -   `pdf_insert`：完整的PDF处理流程，使用`MinerU`解析并将文本和图像数据插入Ragent。
-    -   `docx_insert`：完整的DOCX处理流程，先用`libreoffice`转换为PDF，再通过`MinerU`解析插入Ragent。
-    -   `inference_one_hop_problem`：处理简单、直接问题的函数。
-    -   `inference_multi_hop_problem`：通过将复杂问题拆解为子问题来解决多跳推理的函数。
--   **`ragent.operate.Operate`**：负责知识提取，使用LLM提示识别和结构化文本中的实体和关系。
--   **`ragent/kg/`**：数据存储的实现目录。默认使用`nano_vector_db_impl.py`处理向量、`networkx_impl.py`处理图，所有数据本地存储。
+- **`ragent.ragent.Ragent`**：底层编排类。直接使用时，至少要提供 `embedding_func`、`llm_model_func` 和 `llm_model_name`。
+- **`integrations.py`**：当前仓库的主入口封装，建议优先从这里开始：
+  - `build_enhanced_md`：第一阶段，只做 PDF 解析和图片描述回写，产出最终 Markdown。
+  - `index_md_to_rag`：第二阶段，只基于已生成的 Markdown 构建 RAG / KG 索引。
+  - `pdf_insert`：串联执行上面两个阶段。
+  - `docx_insert`：先将 DOCX 转 PDF，再走同样流程。
+  - `inference_one_hop_problem`：单跳问答。
+  - `inference_multi_hop_problem`：多跳问答。
+- **`singlefile.py`**：当前最方便的命令行入口，支持 `parse`、`onehop`、`multihop`。
+- **`ragent/kg/`**：存储实现目录。默认使用本地 `nano_vector_db` 和 `NetworkX`。
 
-## 用法示例
+## 快速开始
 
-以下示例演示了一个完整的工作流程：处理一个PDF，询问一个简单问题，以及询问一个复杂的多跳问题。
+仓库已经附带一个可直接复现的样例 PDF：`example/成人高血压食养指南.pdf`。
+
+### 1. 只生成增强 Markdown
+
+```bash
+uv run python singlefile.py parse \
+  example/成人高血压食养指南.pdf \
+  demo_md
+```
+
+这一步会调用 `build_enhanced_md`，在 `demo_md/txt/` 下生成：
+
+- 最终 Markdown
+- `content_list.json`
+- `images/` 目录
+- 每张图对应的描述 `.txt`
+
+### 2. 继续构建知识库
+
+```bash
+uv run python singlefile.py parse \
+  example/成人高血压食养指南.pdf \
+  demo_md \
+  demo_kg
+```
+
+如果对应 Markdown 已存在，上面的命令会自动只执行 `rag` 阶段；如果不存在，则会自动走完整 `all` 流程。
+
+### 3. 提问
+
+```bash
+uv run python singlefile.py onehop \
+  demo_kg \
+  "文档推荐的限盐原则是什么？"
+
+uv run python singlefile.py multihop \
+  demo_kg \
+  "比较文档中不同血压分级对应的食养建议，有哪些关键区别？"
+```
+
+当前 CLI 默认会打印较完整的检索/推理 trace，而不只是最终答案。
+
+## Python 用法示例
+
+### 一体化流程
 
 ```python
 import asyncio
 from integrations import pdf_insert, inference_one_hop_problem, inference_multi_hop_problem
 
 PDF_FILE_PATH = "path/to/your/document.pdf"
-MINERU_OUTPUT_DIR = "mineru_out"   # 存储解析结果的目录
-PROJECT_DIR = "my_ragent_project"  # 存储知识库的目录
+MINERU_OUTPUT_DIR = "mineru_out"
+PROJECT_DIR = "my_ragent_project"
 
 async def main():
-    # 1. 将PDF文档提取到知识库中
-    print("开始提取PDF...")
     await pdf_insert(PDF_FILE_PATH, MINERU_OUTPUT_DIR, PROJECT_DIR)
-    print("PDF提取完成。")
 
-    # 2. 问一个简单的单跳问题
-    print("\n--- 询问一个简单问题 ---")
-    simple_query = "文档的主要主题是什么？"
-    simple_answer = await inference_one_hop_problem(PROJECT_DIR, simple_query, mode="hybrid")
-    print(f"查询: {simple_query}")
-    print(f"答案: {simple_answer}")
+    answer1 = await inference_one_hop_problem(
+        PROJECT_DIR,
+        "文档的主要主题是什么？",
+        mode="hybrid",
+    )
+    print(answer1)
 
-    # 3. 问一个复杂的多跳问题
-    print("\n--- 询问一个多跳问题 ---")
-    complex_query = "比较第2节和第3节中描述的方法，它们的主要区别是什么？"
-    complex_answer = await inference_multi_hop_problem(PROJECT_DIR, complex_query)
-    print(f"查询: {complex_query}")
-    print(f"答案: {complex_answer}")
+    answer2 = await inference_multi_hop_problem(
+        PROJECT_DIR,
+        "比较第2节和第3节中描述的方法，它们的主要区别是什么？",
+    )
+    print(answer2)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### 两阶段流程
+
+```python
+import asyncio
+from integrations import build_enhanced_md, index_md_to_rag
+
+PDF_FILE_PATH = "path/to/your/document.pdf"
+MINERU_OUTPUT_DIR = "mineru_out"
+PROJECT_DIR = "my_ragent_project"
+
+async def main():
+    artifacts = await build_enhanced_md(PDF_FILE_PATH, MINERU_OUTPUT_DIR)
+    await index_md_to_rag(
+        PDF_FILE_PATH,
+        PROJECT_DIR,
+        artifacts["md_path"],
+        content_list_path=artifacts["content_list_path"],
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -154,9 +259,12 @@ if __name__ == "__main__":
 
 ## 命令行用法（singlefile.py）
 
-`singlefile.py parse` 支持自动推断处理阶段，无需手动区分 `all/md/rag`。
+### `parse`
+
+`singlefile.py parse` 支持自动推断处理阶段，无需手动区分 `all` / `md` / `rag`。
 
 **自动推断规则：**
+
 - 只传 `<mineru_output_dir>`（不传 `<project_dir>`）：执行 `md`
 - 传了 `<project_dir>` 且已存在对应 md 结果：执行 `rag`
 - 传了 `<project_dir>` 但不存在对应 md 结果：执行 `all`
@@ -165,7 +273,7 @@ if __name__ == "__main__":
 # 单文件：仅生成 md
 python singlefile.py parse SCAPTURE.pdf SCAPTURE_md
 
-# 单文件：自动在 all/rag 之间选择
+# 单文件：自动在 all / rag 之间选择
 python singlefile.py parse SCAPTURE.pdf SCAPTURE_md SCAPTURE_kg
 
 # 目录：递归处理目录下所有 PDF
@@ -180,8 +288,20 @@ python singlefile.py parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage
 # stage: auto | all | md | rag
 ```
 
+### `onehop`
+
+```bash
+python singlefile.py onehop <project_dir> "<query>"
+```
+
+### `multihop`
+
+```bash
+python singlefile.py multihop <project_dir> "<query>"
+```
+
 ## 定制化
 
--   **LLM和嵌入模型**：LLM和嵌入模型作为函数传递给`Ragent`的构造函数，可以通过提供符合所需签名的自定义函数来替换。参见`ragent/llm/`（如`ollama.py`、`hf.py`）。
--   **存储后端**：存储层基于`ragent/base.py`中定义的抽象基类，可通过子类化相应基类并更新`Ragent`类来部署自己的存储后端（如Milvus、Neo4j等）。
--   **提示**：所有用于提取、问答和推理的提示都在`ragent/prompt.py`中定义，可修改以适应特定领域或任务。
+- **LLM 和 Embedding 模型**：可替换 `Ragent` 构造参数中的 `llm_model_func`、`embedding_func`。参考 `ragent/llm/`。
+- **存储后端**：可基于 `ragent/base.py` 中的抽象基类扩展自己的向量库 / 图数据库实现。
+- **提示词**：抽取、问答、拆解等提示词定义在 `ragent/prompt.py`。
