@@ -27,7 +27,7 @@ dependencies = [
     "configparser",
     "dotenv",
     "future",
-    "mineru",
+    "mineru[pipeline]",
     "nano-vectordb",
     "networkx",
     "numpy",

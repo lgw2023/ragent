@@ -404,6 +404,99 @@ def _truncate_console(text: str, limit: int = 240) -> str:
         return text
     return text[: limit - 3] + "..."
 
+
+def _normalize_query_mode(mode: str | None) -> str:
+    normalized_mode = (mode or "hybrid").strip().lower()
+    if normalized_mode not in {"graph", "hybrid"}:
+        raise ValueError("Invalid mode. Use one of: graph | hybrid")
+    return normalized_mode
+
+
+def _parse_history_turns(raw_value: str | None) -> int | None:
+    if raw_value is None:
+        return None
+    history_turns = int(raw_value)
+    if history_turns <= 0:
+        raise ValueError("history_turns must be a positive integer")
+    return history_turns
+
+
+def _normalize_conversation_history(
+    payload: Any,
+    history_path: str,
+) -> list[dict[str, str]]:
+    if isinstance(payload, dict):
+        if "conversation_history" not in payload:
+            raise ValueError(
+                f"Invalid conversation history file: {history_path}. "
+                "Expected a JSON list or an object with conversation_history."
+            )
+        payload = payload.get("conversation_history")
+
+    if payload is None:
+        return []
+    if not isinstance(payload, list):
+        raise ValueError(
+            f"Invalid conversation history file: {history_path}. Expected a JSON list."
+        )
+
+    conversation_history = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"Invalid conversation history entry at index {index}: expected an object."
+            )
+        role = item.get("role")
+        content = item.get("content")
+        if not isinstance(role, str) or not isinstance(content, str):
+            raise ValueError(
+                f"Invalid conversation history entry at index {index}: "
+                "role/content must both be strings."
+            )
+        conversation_history.append({"role": role, "content": content})
+    return conversation_history
+
+
+def _load_conversation_history(history_path: str) -> list[dict[str, str]]:
+    if not history_path:
+        raise ValueError("Missing required argument: history_path")
+    if not os.path.exists(history_path):
+        return []
+    with open(history_path, encoding="utf-8") as history_file:
+        raw_text = history_file.read()
+    if not raw_text.strip():
+        return []
+    payload = json.loads(raw_text)
+    return _normalize_conversation_history(payload, history_path)
+
+
+def _write_conversation_history(
+    history_path: str,
+    conversation_history: list[dict[str, str]],
+) -> None:
+    history_dir = os.path.dirname(os.path.abspath(history_path))
+    if history_dir:
+        os.makedirs(history_dir, exist_ok=True)
+    with open(history_path, "w", encoding="utf-8") as history_file:
+        json.dump(conversation_history, history_file, ensure_ascii=False, indent=2)
+        history_file.write("\n")
+
+
+def _append_conversation_turn(
+    history_path: str,
+    conversation_history: list[dict[str, str]],
+    query: str,
+    answer: str,
+) -> list[dict[str, str]]:
+    updated_history = [
+        *conversation_history,
+        {"role": "user", "content": query},
+        {"role": "assistant", "content": answer},
+    ]
+    _write_conversation_history(history_path, updated_history)
+    return updated_history
+
+
 class RagentApp:
     def __init__(self, project_dir: str | None = None, mineru_output_dir: str | None = None):
         self.project_dir = project_dir
@@ -516,30 +609,90 @@ class RagentApp:
         simple_query: str | None = None,
         project_dir: str | None = None,
         mode: str = "hybrid",
+        conversation_history: list[dict[str, str]] | None = None,
+        history_turns: int | None = None,
         quiet: bool = True,
         show_trace: bool = True,
     ):
         target_project_dir = project_dir or self.project_dir
         if not target_project_dir:
             raise ValueError("Missing required argument: project_dir")
+        resolved_mode = _normalize_query_mode(mode)
         query = "文档的主要主题是什么？" if not simple_query else simple_query
         if show_trace:
             if quiet:
                 with _temporary_log_level(["ragent", "nano-vectordb"], logging.WARNING):
-                    trace = await trace_one_hop_problem(target_project_dir, query, mode=mode)
+                    trace = await trace_one_hop_problem(
+                        target_project_dir,
+                        query,
+                        mode=resolved_mode,
+                        conversation_history=conversation_history,
+                        history_turns=history_turns,
+                    )
             else:
-                trace = await trace_one_hop_problem(target_project_dir, query, mode=mode)
+                trace = await trace_one_hop_problem(
+                    target_project_dir,
+                    query,
+                    mode=resolved_mode,
+                    conversation_history=conversation_history,
+                    history_turns=history_turns,
+                )
             _print_onehop_trace(trace)
             return trace["answer"]
 
         if quiet:
             with _temporary_log_level(["ragent", "nano-vectordb"], logging.WARNING):
                 answer = await inference_one_hop_problem(
-                    target_project_dir, query, mode=mode
+                    target_project_dir,
+                    query,
+                    mode=resolved_mode,
+                    conversation_history=conversation_history,
+                    history_turns=history_turns,
                 )
         else:
-            answer = await inference_one_hop_problem(target_project_dir, query, mode=mode)
+            answer = await inference_one_hop_problem(
+                target_project_dir,
+                query,
+                mode=resolved_mode,
+                conversation_history=conversation_history,
+                history_turns=history_turns,
+            )
         print(answer)
+        return answer
+
+    async def chat(
+        self,
+        query: str,
+        history_path: str,
+        project_dir: str | None = None,
+        mode: str = "hybrid",
+        history_turns: int | None = None,
+        quiet: bool = True,
+        show_trace: bool = True,
+    ):
+        target_project_dir = project_dir or self.project_dir
+        if not target_project_dir:
+            raise ValueError("Missing required argument: project_dir")
+        if not query:
+            raise ValueError("Missing required argument: query")
+
+        resolved_mode = _normalize_query_mode(mode)
+        conversation_history = _load_conversation_history(history_path)
+        answer = await self.onehop(
+            query,
+            project_dir=target_project_dir,
+            mode=resolved_mode,
+            conversation_history=conversation_history,
+            history_turns=history_turns,
+            quiet=quiet,
+            show_trace=show_trace,
+        )
+        _append_conversation_turn(history_path, conversation_history, query, answer)
+        logger.info(
+            "会话历史已更新: %s (messages=%d)",
+            os.path.abspath(history_path),
+            len(conversation_history) + 2,
+        )
         return answer
 
     async def multihop(
@@ -578,7 +731,10 @@ async def main(
     PROJECT_DIR: str | None = None,
     simple_query: str | None = None,
     complex_query: str | None = None,
+    history_path: str | None = None,
     stage: str = "auto",
+    mode: str = "hybrid",
+    history_turns: int | None = None,
     keep_pdf_subdir: bool = True,
 ):
     app = RagentApp(PROJECT_DIR, MINERU_OUTPUT_DIR)
@@ -586,17 +742,26 @@ async def main(
         await app.parse(PDF_FILE_PATH, stage=stage, keep_pdf_subdir=keep_pdf_subdir)
         return
     elif MODULE == "onehop":
-        return await app.onehop(simple_query)
+        return await app.onehop(simple_query, mode=mode)
+    elif MODULE == "chat":
+        return await app.chat(
+            simple_query or "",
+            history_path or "",
+            mode=mode,
+            history_turns=history_turns,
+        )
     elif MODULE == "multihop":
         return await app.multihop(complex_query)
     else:
         raise ValueError(f"Invalid module: {MODULE}")
 
 if __name__ == "__main__":
-    MODULE, PDF_FILE_PATH, MINERU_OUTPUT_DIR, PROJECT_DIR, simple_query, complex_query, stage = None, None, None, None, None, None, "auto"
+    MODULE, PDF_FILE_PATH, MINERU_OUTPUT_DIR, PROJECT_DIR, simple_query, complex_query, history_path, stage = None, None, None, None, None, None, None, "auto"
     BATCH_PARSE = False
     KEEP_PDF_SUBDIR = True
-    MODULE = sys.argv[1] # : "parse" | "onehop" | "multihop"
+    MODE = "hybrid"
+    HISTORY_TURNS = None
+    MODULE = sys.argv[1] # : "parse" | "onehop" | "multihop" | "chat"
     if MODULE == "parse":
         # 支持：
         # 1) parse <pdf_or_dir> <mineru_output_dir>
@@ -661,9 +826,7 @@ if __name__ == "__main__":
                             fp,
                             MINERU_OUTPUT_DIR,
                             PROJECT_DIR,
-                            None,
-                            None,
-                            per_file_stage,
+                            stage=per_file_stage,
                             keep_pdf_subdir=True,
                         )
                     )
@@ -672,9 +835,24 @@ if __name__ == "__main__":
         else:
             KEEP_PDF_SUBDIR = False
     elif MODULE == "onehop":
+        if len(sys.argv) < 4:
+            raise ValueError("Usage: onehop <project_dir> <query> [mode]")
         PROJECT_DIR = sys.argv[2] # "my_ragent_project"  # 存储知识库的目录
         simple_query = sys.argv[3] # "文档的主要主题是什么？"
+        MODE = _normalize_query_mode(sys.argv[4] if len(sys.argv) > 4 else "hybrid")
+    elif MODULE == "chat":
+        if len(sys.argv) < 5:
+            raise ValueError(
+                "Usage: chat <project_dir> <history_json> <query> [mode] [history_turns]"
+            )
+        PROJECT_DIR = sys.argv[2]
+        history_path = sys.argv[3]
+        simple_query = sys.argv[4]
+        MODE = _normalize_query_mode(sys.argv[5] if len(sys.argv) > 5 else "hybrid")
+        HISTORY_TURNS = _parse_history_turns(sys.argv[6] if len(sys.argv) > 6 else None)
     elif MODULE == "multihop":
+        if len(sys.argv) < 4:
+            raise ValueError("Usage: multihop <project_dir> <query>")
         PROJECT_DIR = sys.argv[2] # "my_ragent_project"  # 存储知识库的目录
         complex_query = sys.argv[3] # "比较第2节和第3节中描述的方法，它们的主要区别是什么？"
     else:
@@ -689,7 +867,10 @@ if __name__ == "__main__":
                 PROJECT_DIR,
                 simple_query,
                 complex_query,
+                history_path,
                 stage,
+                MODE,
+                HISTORY_TURNS,
                 keep_pdf_subdir=KEEP_PDF_SUBDIR,
             )
         )

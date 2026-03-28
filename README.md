@@ -41,6 +41,8 @@ cd ragent_master
 
 `README` 中下面的命令按当前代码入口整理过：
 
+- 当前 `integrations.py` / `singlefile.py` 会在导入阶段直接加载 `MinerU pipeline` 相关模块，所以即使只跑 `onehop` / `multihop` / `chat`，环境里也必须具备 `MinerU` 的 `pipeline` 依赖（如 `torch`、`torchvision`、`transformers`、`doclayout_yolo`）。
+- 仓库的 `pyproject.toml` 已将根依赖切换为 `mineru[pipeline]`，因此 `uv sync` 会一并安装这组依赖。
 - 如果你要直接运行 `integrations.py` / `singlefile.py` 的主流程，建议至少安装 `openai` 和 `api` 两组 extra。
 - `api` 这个名字虽然偏服务端，但当前文档解析主流程里实际用到了其中的 `aiofiles` 依赖。
 
@@ -50,7 +52,8 @@ cd ragent_master
 # 安装 uv（如未安装）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 推荐：可直接跑当前 README 中的完整流程
+# 推荐：可直接跑当前 README 中的 parse / onehop / multihop / chat 全流程
+# 其中会自动带上本地 MinerU 的 pipeline 依赖
 uv sync --extra openai --extra api
 
 # 其他可选依赖
@@ -70,11 +73,22 @@ uv sync --all-extras
 python -m venv env
 source env/bin/activate   # Windows: env\Scripts\activate
 
-# 先安装随仓库附带的 MinerU 源码
-pip install -e ./MinerU-master
+# 先安装随仓库附带的 MinerU 源码及 pipeline 依赖
+pip install -e "./MinerU-master[pipeline]"
 
 # 再安装当前项目及推荐 extra
 pip install -e ".[openai,api]"
+```
+
+如果你之前已经执行过 `uv sync --extra openai --extra api`，但运行 `singlefile.py` 时仍出现下面这类错误：
+
+- `ModuleNotFoundError: No module named 'torch'`
+- `ModuleNotFoundError: No module named 'doclayout_yolo'`
+
+请在更新代码后重新执行一次：
+
+```bash
+uv sync --extra openai --extra api
 ```
 
 ### 3. 安装 MinerU 模型
@@ -159,7 +173,7 @@ ENABLE_RERANK="false"
   - `docx_insert`：先将 DOCX 转 PDF，再走同样流程。
   - `inference_one_hop_problem`：单跳问答。
   - `inference_multi_hop_problem`：多跳问答。
-- **`singlefile.py`**：当前最方便的命令行入口，支持 `parse`、`onehop`、`multihop`。
+- **`singlefile.py`**：当前最方便的命令行入口，支持 `parse`、`onehop`、`multihop`、`chat`。
 - **`ragent/kg/`**：存储实现目录。默认使用本地 `nano_vector_db` 和 `NetworkX`。
 
 ## 快速开始
@@ -205,6 +219,31 @@ uv run python singlefile.py multihop \
 ```
 
 当前 CLI 默认会打印较完整的检索/推理 trace，而不只是最终答案。
+
+### 4. 连续追问（多轮 chat）
+
+```bash
+uv run python singlefile.py chat \
+  demo_kg \
+  demo_kg/conversation_history.json \
+  "文档推荐的限盐原则是什么？"
+
+uv run python singlefile.py chat \
+  demo_kg \
+  demo_kg/conversation_history.json \
+  "那老人群体还有什么补充建议？" \
+  graph \
+  3
+```
+
+`chat` 会从本地 JSON 读取已有 `conversation_history`，把当前轮问答追加回同一个文件，并在检索时透传给底层 `QueryParam`。历史文件格式兼容 `QueryParam.conversation_history`，即：
+
+```json
+[
+  {"role": "user", "content": "上一轮问题"},
+  {"role": "assistant", "content": "上一轮回答"}
+]
+```
 
 ## Python 用法示例
 
@@ -295,7 +334,8 @@ python singlefile.py parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage
 ### `onehop`
 
 ```bash
-python singlefile.py onehop <project_dir> "<query>"
+python singlefile.py onehop <project_dir> "<query>" [mode]
+# mode: hybrid | graph
 ```
 
 ### `multihop`
@@ -303,6 +343,15 @@ python singlefile.py onehop <project_dir> "<query>"
 ```bash
 python singlefile.py multihop <project_dir> "<query>"
 ```
+
+### `chat`
+
+```bash
+python singlefile.py chat <project_dir> <history_json> "<query>" [mode] [history_turns]
+# mode: hybrid | graph
+```
+
+`history_json` 不存在时会自动创建；存在时应为 `conversation_history` 原生格式（JSON 列表），或者形如 `{"conversation_history": [...]}` 的对象。
 
 ## 定制化
 

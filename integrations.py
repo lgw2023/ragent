@@ -545,9 +545,21 @@ async def _run_one_hop_with_rag(
     rag: Ragent,
     query: str,
     mode: str,
+    conversation_history: list[dict[str, Any]] | None = None,
+    history_turns: int | None = None,
     include_trace: bool = False,
 ):
     query_param = QueryParam(mode=mode)
+    if conversation_history:
+        query_param.conversation_history = [
+            {
+                "role": str(item["role"]),
+                "content": str(item["content"]),
+            }
+            for item in conversation_history
+        ]
+    if history_turns is not None:
+        query_param.history_turns = history_turns
     global_config = asdict(rag)
     normalized_query = query.strip()
 
@@ -625,15 +637,34 @@ async def _run_one_hop_with_rag(
     }
 
 
-async def trace_one_hop_problem(work_dir, query, mode="hybrid"):
+async def trace_one_hop_problem(
+    work_dir,
+    query,
+    mode="hybrid",
+    conversation_history: list[dict[str, Any]] | None = None,
+    history_turns: int | None = None,
+):
     rag = await initialize_rag(work_dir)
     with _maybe_create_usage_collector("onehop_trace") as collector:
-        result = await _run_one_hop_with_rag(rag, query, mode, include_trace=True)
+        result = await _run_one_hop_with_rag(
+            rag,
+            query,
+            mode,
+            conversation_history=conversation_history,
+            history_turns=history_turns,
+            include_trace=True,
+        )
     _write_usage_report_if_needed(
         collector,
         _resolve_kg_usage_report_dir(work_dir),
         task_name="onehop",
-        metadata={"query": query, "mode": mode, "trace": True},
+        metadata={
+            "query": query,
+            "mode": mode,
+            "trace": True,
+            "history_messages": len(conversation_history or []),
+            "history_turns": history_turns,
+        },
     )
     return result["trace"]
 
@@ -1094,15 +1125,35 @@ async def inference_multi_hop_problem(work_dir, query, return_all: bool = False)
 
 
 
-async def inference_one_hop_problem(work_dir, query, mode, return_all: bool = False):
+async def inference_one_hop_problem(
+    work_dir,
+    query,
+    mode,
+    return_all: bool = False,
+    conversation_history: list[dict[str, Any]] | None = None,
+    history_turns: int | None = None,
+):
     rag = await initialize_rag(work_dir)
     with _maybe_create_usage_collector("onehop_query") as collector:
-        result = await _run_one_hop_with_rag(rag, query, mode, include_trace=False)
+        result = await _run_one_hop_with_rag(
+            rag,
+            query,
+            mode,
+            conversation_history=conversation_history,
+            history_turns=history_turns,
+            include_trace=False,
+        )
     _write_usage_report_if_needed(
         collector,
         _resolve_kg_usage_report_dir(work_dir),
         task_name="onehop",
-        metadata={"query": query, "mode": mode, "trace": False},
+        metadata={
+            "query": query,
+            "mode": mode,
+            "trace": False,
+            "history_messages": len(conversation_history or []),
+            "history_turns": history_turns,
+        },
     )
     one_hop_query_response = result["answer"]
     image_list = result["image_list"]
