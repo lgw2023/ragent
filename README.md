@@ -80,16 +80,6 @@ pip install -e "./MinerU-master[pipeline]"
 pip install -e ".[openai,api]"
 ```
 
-如果你之前已经执行过 `uv sync --extra openai --extra api`，但运行 `singlefile.py` 时仍出现下面这类错误：
-
-- `ModuleNotFoundError: No module named 'torch'`
-- `ModuleNotFoundError: No module named 'doclayout_yolo'`
-
-请在更新代码后重新执行一次：
-
-```bash
-uv sync --extra openai --extra api
-```
 
 ### 3. 安装 MinerU 模型
 
