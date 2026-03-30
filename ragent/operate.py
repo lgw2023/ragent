@@ -243,6 +243,56 @@ def chunking_by_token_size(
     return results
 
 
+async def apply_rerank_if_enabled(
+    query: str,
+    retrieved_docs: list[dict[str, Any]],
+    global_config: dict[str, Any],
+    enable_rerank: bool = True,
+    top_k: int | None = None,
+) -> list[dict[str, Any]]:
+    """Rerank retrieved chunk dicts while preserving metadata and safe fallback."""
+    if not enable_rerank or not query or not retrieved_docs:
+        return retrieved_docs
+
+    documents = [str(doc.get("content", "")) for doc in retrieved_docs]
+    if not any(documents):
+        return retrieved_docs
+
+    try:
+        rerank_results = await rerank_from_env(
+            query=query,
+            documents=documents,
+            top_k=top_k,
+        )
+    except Exception as exc:
+        logger.warning("Rerank failed, fallback to original chunk order: %s", exc)
+        return retrieved_docs
+
+    if not rerank_results:
+        return retrieved_docs
+
+    reranked_docs: list[dict[str, Any]] = []
+    seen_indexes: set[int] = set()
+
+    for item in rerank_results:
+        index = item.get("index")
+        if not isinstance(index, int) or not (0 <= index < len(retrieved_docs)):
+            continue
+        if index in seen_indexes:
+            continue
+        reranked_docs.append(retrieved_docs[index])
+        seen_indexes.add(index)
+
+    if not reranked_docs:
+        return retrieved_docs
+
+    for index, doc in enumerate(retrieved_docs):
+        if index not in seen_indexes:
+            reranked_docs.append(doc)
+
+    return reranked_docs
+
+
 async def _handle_entity_relation_summary(
     entity_or_relation_name: str,
     description: str,
