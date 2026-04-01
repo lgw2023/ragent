@@ -6,7 +6,7 @@ import json
 import re
 from contextlib import contextmanager
 from typing import Any
-try:
+if __package__:
     # Package execution (e.g., python -m ragent.singlefile)
     from .integrations import (
         pdf_insert,
@@ -17,8 +17,8 @@ try:
         trace_multi_hop_problem,
         trace_one_hop_problem,
     )
-    from .ragent.utils import logger
-except ImportError:
+    from .ragent.utils import is_exception_logged, log_exception, logger
+else:
     # Script execution (e.g., python singlefile.py ...)
     from integrations import (
         pdf_insert,
@@ -29,7 +29,7 @@ except ImportError:
         trace_multi_hop_problem,
         trace_one_hop_problem,
     )
-    from ragent.utils import logger
+    from ragent.utils import is_exception_logged, log_exception, logger
 
 
 _USE_COLOR = sys.stdout.isatty() and os.getenv("NO_COLOR") is None
@@ -72,6 +72,14 @@ def _warn(text: str) -> str:
 
 def _section_rule(char: str = "=") -> str:
     return _style(char * 78, _DIM, _WHITE)
+
+
+def _cli_excepthook(exc_type, exc, tb):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc, tb)
+        return
+    if not is_exception_logged(exc):
+        log_exception(None, exc)
 
 
 @contextmanager
@@ -314,10 +322,27 @@ def _print_structured_text_sections(text: str):
         _print_structured_section(title, body)
 
 
+def _print_stage_timing_summary(trace: dict):
+    stage_timings = trace.get("stage_timings", [])
+    if not stage_timings:
+        print(_muted("(未记录阶段耗时)"))
+        return
+    for item in stage_timings:
+        label = item.get("label") or item.get("stage") or "unknown"
+        seconds = item.get("seconds")
+        if isinstance(seconds, (int, float)):
+            print(f"  - {label}: {_style(f'{seconds:.3f}s', _BOLD, _CYAN)}")
+        else:
+            print(f"  - {label}: {_muted('n/a')}")
+
+
 def _print_onehop_trace(trace: dict, header: str = "OneHop 图谱检索推理过程"):
     _print_stage_header(header)
     print(f"{_label('[输入问题]')} {trace['query']}")
     print(f"{_label('[检索模式]')} {_style(trace['mode'], _BOLD, _GREEN)}")
+
+    _print_stage_header("阶段 0 / 耗时概览")
+    _print_stage_timing_summary(trace)
 
     _print_stage_header("阶段 1 / 关键词提取")
     _print_trace_list("高层关键词", trace.get("high_level_keywords", []), "keyword")
@@ -542,6 +567,14 @@ class RagentApp:
                 resolved_stage = "rag" if md_path else "all"
             logger.info(f"自动推断阶段: {resolved_stage}")
 
+        logger.info(
+            "parse 执行阶段: %s (pdf=%s, mineru_output_dir=%s, project_dir=%s)",
+            resolved_stage,
+            os.path.abspath(pdf_file_path),
+            os.path.abspath(target_output_dir) if target_output_dir else None,
+            os.path.abspath(target_project_dir) if target_project_dir else None,
+        )
+
         if resolved_stage == "all":
             logger.info("开始提取PDF并构建知识库...")
             await pdf_insert(
@@ -756,6 +789,7 @@ async def main(
         raise ValueError(f"Invalid module: {MODULE}")
 
 if __name__ == "__main__":
+    sys.excepthook = _cli_excepthook
     MODULE, PDF_FILE_PATH, MINERU_OUTPUT_DIR, PROJECT_DIR, simple_query, complex_query, history_path, stage = None, None, None, None, None, None, None, "auto"
     BATCH_PARSE = False
     KEEP_PDF_SUBDIR = True
@@ -831,7 +865,7 @@ if __name__ == "__main__":
                         )
                     )
                 except Exception as e:
-                    logger.error(f"解析失败: {fp} - {e}")
+                    log_exception(f"解析失败: {fp}", e)
         else:
             KEEP_PDF_SUBDIR = False
     elif MODULE == "onehop":

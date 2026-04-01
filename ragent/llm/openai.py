@@ -1,48 +1,169 @@
 from ..utils import verbose_debug, VERBOSE_DEBUG
 import sys
 import os
+import json
 import logging
 import time
+from urllib.parse import unquote, urlsplit
 
 if sys.version_info < (3, 9):
-    from typing import AsyncIterator
+    from typing import AsyncIterator, Iterator
 else:
-    from collections.abc import AsyncIterator
-import pipmaster as pm  # Pipmaster for dynamic library install
-
-# install specific modules
-if not pm.is_installed("openai"):
-    pm.install("openai")
-
-from openai import (
-    AsyncOpenAI,
+    from collections.abc import AsyncIterator, Iterator
+try:
+    from litellm import (
+    acompletion,
+    aembedding,
     APIConnectionError,
+    InternalServerError,
     RateLimitError,
-    APITimeoutError,
-)
+    Timeout as APITimeoutError,
+    get_llm_provider,
+    get_supported_openai_params,
+    supports_response_schema,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "litellm":
+        raise
+    raise ModuleNotFoundError(
+        "缺少依赖 `litellm`。请先运行 `uv sync`（或重新执行 `uv run ...` 让 uv 按 `pyproject.toml` 安装基础依赖）。"
+    ) from exc
+# LiteLLM attaches handlers at import time; re-apply after import in case load order differed.
+for _litellm_log_name in ("LiteLLM", "LiteLLM Router", "LiteLLM Proxy"):
+    logging.getLogger(_litellm_log_name).propagate = False
 from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
+    retry_if_exception,
     retry_if_exception_type,
 )
+from pydantic import BaseModel
 from ragent.utils import (
     wrap_embedding_func_with_attrs,
     locate_json_string_body_from_string,
     safe_unicode_decode,
     logger,
+    log_exception,
     log_model_call,
     record_model_usage,
+    is_verbose_error_logging_enabled,
 )
 from ragent.types import GPTKeywordExtractionFormat
 
 import numpy as np
 from typing import Any, Union
+import httpx
 
 
 class InvalidResponseError(Exception):
     """Custom exception class for triggering retry mechanism"""
+
     pass
+
+
+_TRANSIENT_HTTPX_EXCEPTIONS = (
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.RemoteProtocolError,
+    httpx.TimeoutException,
+    httpx.WriteError,
+)
+
+_TRANSIENT_ERROR_MARKERS = (
+    "connection error",
+    "server disconnected",
+    "read error",
+    "readerror",
+    "connect error",
+    "connecterror",
+    "timed out",
+    "timeout",
+)
+
+_PROVIDER_API_BASE_HINTS: dict[str, tuple[str, ...]] = {
+    "dashscope": (
+        "dashscope.aliyuncs.com/compatible-mode",
+        "dashscope-intl.aliyuncs.com/compatible-mode",
+        "dashscope.aliyuncs.com/compatible-api",
+        "dashscope-intl.aliyuncs.com/compatible-api",
+    ),
+    "deepinfra": (
+        "api.deepinfra.com/v1/openai",
+    ),
+}
+
+_PROVIDER_DEFAULT_API_BASES: dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "deepinfra": "https://api.deepinfra.com/v1/openai",
+}
+
+_PROVIDER_API_KEY_ENV_VARS: dict[str, tuple[str, ...]] = {
+    "dashscope": ("DASHSCOPE_API_KEY",),
+    "deepinfra": ("DEEPINFRA_API_KEY",),
+}
+
+_PLACEHOLDER_REQUEST_URLS = {
+    "https://cloud.google.com/vertex-ai/",
+    "https://openai.com/",
+    "https://api.openai.com/v1",
+    "https://api.openai.com/v1/",
+}
+
+
+def _iter_exception_chain(exc: BaseException | None):
+    seen: set[int] = set()
+    current = exc
+    while current is not None and id(current) not in seen:
+        yield current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+
+
+def _has_transient_error_marker(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSIENT_ERROR_MARKERS)
+
+
+def _is_retryable_transport_error(exc: BaseException) -> bool:
+    for chained_exc in _iter_exception_chain(exc):
+        if isinstance(
+            chained_exc,
+            (
+                APIConnectionError,
+                APITimeoutError,
+                *_TRANSIENT_HTTPX_EXCEPTIONS,
+            ),
+        ):
+            return True
+        if isinstance(chained_exc, InternalServerError) and _has_transient_error_marker(
+            chained_exc
+        ):
+            return True
+    return False
+
+
+def _parse_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _normalize_provider_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() in {"auto", "detect"}:
+        return None
+    return normalized
 
 
 def _trace_model(msg: str) -> None:
@@ -55,55 +176,590 @@ def _trace_model(msg: str) -> None:
         logger.debug(f"[MODEL-TRACE] {msg}")
 
 
-def create_openai_async_client(
-    api_key: str | None = None,
-    base_url: str | None = None,
-    client_configs: dict[str, Any] = None,
-) -> AsyncOpenAI:
-    """Create an AsyncOpenAI client with the given configuration.
+def _truncate_for_log(text: str, max_len: int = 300) -> str:
+    if len(text) <= max_len:
+        return text
+    return f"{text[:max_len]}... (truncated, len={len(text)})"
 
-    Args:
-        api_key: OpenAI API key. If None, uses the LLM_API_KEY environment variable.
-        base_url: Base URL for the OpenAI API. If None, uses the default OpenAI API URL.
-        client_configs: Additional configuration options for the AsyncOpenAI client.
-            These will override any default configurations but will be overridden by
-            explicit parameters (api_key, base_url).
 
-    Returns:
-        An AsyncOpenAI client instance.
-    """
-    if not api_key:
-        api_key = os.environ["LLM_API_KEY"]
+def _mask_secret(value: str | None) -> str | None:
+    if not value:
+        return value
+    if len(value) <= 8:
+        return "***"
+    return f"{value[:4]}...{value[-4:]}"
 
-    if client_configs is None:
-        client_configs = {}
 
-    # Create a merged config dict with precedence: explicit params > client_configs > defaults
-    merged_configs = {
-        **client_configs,
-        "api_key": api_key,
+def _safe_serialize_for_log(value: Any, max_len: int = 4000) -> str:
+    try:
+        serialized = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        serialized = repr(value)
+    return _truncate_for_log(serialized, max_len=max_len)
+
+
+def _summarize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summarized_messages: list[dict[str, Any]] = []
+    for index, message in enumerate(messages[:8]):
+        summary: dict[str, Any] = {
+            "index": index,
+            "role": message.get("role"),
+        }
+        content = message.get("content")
+        if isinstance(content, str):
+            summary["content_len"] = len(content)
+            summary["content_preview"] = _truncate_for_log(content, max_len=160)
+        elif isinstance(content, list):
+            summary["content_items"] = len(content)
+            summary["content_types"] = [
+                item.get("type", type(item).__name__)
+                if isinstance(item, dict)
+                else type(item).__name__
+                for item in content[:8]
+            ]
+        elif content is not None:
+            summary["content_type"] = type(content).__name__
+            summary["content_preview"] = _truncate_for_log(
+                repr(content), max_len=160
+            )
+        summarized_messages.append(summary)
+
+    if len(messages) > 8:
+        summarized_messages.append({"omitted_messages": len(messages) - 8})
+    return summarized_messages
+
+
+def _normalize_url_for_logging(url: httpx.URL | str | None) -> str | None:
+    if url is None:
+        return None
+    normalized = str(url).strip()
+    return normalized or None
+
+
+def _is_placeholder_request_url(url: httpx.URL | str | None) -> bool:
+    normalized = _normalize_url_for_logging(url)
+    if not normalized:
+        return False
+    decoded = unquote(normalized).strip().lower()
+    return decoded in _PLACEHOLDER_REQUEST_URLS
+
+
+def _iter_request_candidates_from_exception(
+    exc: BaseException,
+) -> Iterator[httpx.Request]:
+    for chained_exc in _iter_exception_chain(exc):
+        request = getattr(chained_exc, "request", None)
+        if isinstance(request, httpx.Request):
+            yield request
+
+        response = getattr(chained_exc, "response", None)
+        response_request = getattr(response, "request", None)
+        if isinstance(response_request, httpx.Request):
+            yield response_request
+
+        for arg in getattr(chained_exc, "args", ()):
+            if isinstance(arg, httpx.Request):
+                yield arg
+
+
+def _extract_request_from_exception(exc: BaseException) -> httpx.Request | None:
+    fallback_request: httpx.Request | None = None
+    for request in _iter_request_candidates_from_exception(exc):
+        if fallback_request is None:
+            fallback_request = request
+        if not _is_placeholder_request_url(request.url):
+            return request
+    return fallback_request
+
+
+def _extract_url_parts(url: httpx.URL | str | None) -> dict[str, Any]:
+    normalized_url = _normalize_url_for_logging(url)
+    if normalized_url is None:
+        return {
+            "scheme": None,
+            "host": None,
+            "port": None,
+            "path": None,
+            "query": None,
+        }
+
+    if isinstance(url, httpx.URL):
+        scheme = url.scheme
+        host = url.host
+        port = url.port
+        path = url.path
+        query = str(url.query.decode()) if url.query else None
+    else:
+        parsed = urlsplit(normalized_url)
+        scheme = parsed.scheme or None
+        host = parsed.hostname
+        port = parsed.port
+        path = parsed.path or None
+        query = parsed.query or None
+
+    if port is None:
+        if scheme == "https":
+            port = 443
+        elif scheme == "http":
+            port = 80
+
+    return {
+        "scheme": scheme,
+        "host": host,
+        "port": port,
+        "path": path,
+        "query": query,
     }
 
-    if base_url is not None:
-        merged_configs["base_url"] = base_url
-    else:
-        merged_configs["base_url"] = os.environ.get(
-            "LLM_API_BASE", "https://api.openai.com/v1"
+
+def _resolve_timeout(
+    client_configs: dict[str, Any],
+    env_var: str = "LLM_API_TIMEOUT_SECONDS",
+) -> float | None:
+    timeout = client_configs.get("timeout")
+    if timeout is not None:
+        return timeout
+
+    timeout_env = os.getenv(env_var)
+    if timeout_env:
+        try:
+            return float(timeout_env)
+        except ValueError:
+            logger.warning(
+                "Invalid %s value: %s. Ignore timeout override.",
+                env_var,
+                timeout_env,
+            )
+    return None
+
+
+def _resolve_num_retries(client_configs: dict[str, Any]) -> int:
+    if "num_retries" in client_configs:
+        try:
+            return int(client_configs["num_retries"])
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid client_configs['num_retries'] value: %r. Use 0.",
+                client_configs["num_retries"],
+            )
+            return 0
+
+    if "max_retries" in client_configs:
+        try:
+            return int(client_configs["max_retries"])
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid client_configs['max_retries'] value: %r. Use 0.",
+                client_configs["max_retries"],
+            )
+            return 0
+
+    max_retries_env = os.getenv("LLM_API_CLIENT_MAX_RETRIES")
+    if max_retries_env:
+        try:
+            return int(max_retries_env)
+        except ValueError:
+            logger.warning(
+                "Invalid LLM_API_CLIENT_MAX_RETRIES value: %s. Use 0.",
+                max_retries_env,
+            )
+    return 0
+
+
+def _is_openai_default_base(api_base: str | None) -> bool:
+    if not api_base:
+        return True
+    normalized = api_base.rstrip("/").lower()
+    return normalized in {
+        "https://api.openai.com",
+        "https://api.openai.com/v1",
+    }
+
+
+def _infer_provider_from_api_base(api_base: str | None) -> str | None:
+    normalized_api_base = (api_base or "").strip().lower()
+    if not normalized_api_base:
+        return None
+    for provider, hints in _PROVIDER_API_BASE_HINTS.items():
+        if any(hint in normalized_api_base for hint in hints):
+            return provider
+    return None
+
+
+def _infer_provider_with_litellm(
+    model: str,
+    *,
+    api_base: str | None,
+    api_key: str | None,
+) -> str | None:
+    try:
+        _, detected_provider, _, _ = get_llm_provider(
+            model=model,
+            api_base=api_base,
+            api_key=api_key,
         )
+    except Exception:
+        return None
+    return _normalize_provider_name(detected_provider)
 
-    # Keep request timeout configurable for slower third-party OpenAI-compatible gateways.
-    # If caller already provided timeout in client_configs, keep caller value.
-    if "timeout" not in merged_configs:
-        timeout_env = os.getenv("LLM_API_TIMEOUT_SECONDS")
-        if timeout_env:
-            try:
-                merged_configs["timeout"] = float(timeout_env)
-            except ValueError:
-                logger.warning(
-                    f"Invalid LLM_API_TIMEOUT_SECONDS value: {timeout_env}. Ignore timeout override."
-                )
 
-    return AsyncOpenAI(**merged_configs)
+def _resolve_api_key_for_provider(
+    api_key: str | None,
+    *,
+    provider: str | None,
+) -> str | None:
+    if api_key:
+        return api_key
+    if not provider:
+        return None
+    for env_var in _PROVIDER_API_KEY_ENV_VARS.get(provider, ()):
+        env_value = os.getenv(env_var)
+        if env_value:
+            return env_value
+    return None
+
+
+def _resolve_api_base_for_provider(
+    *,
+    model: str,
+    provider: str | None,
+    api_base: str | None,
+    api_key: str | None,
+) -> str | None:
+    resolved_api_base = api_base
+    if provider:
+        try:
+            _, detected_provider, _, detected_api_base = get_llm_provider(
+                model=model,
+                custom_llm_provider=provider,
+                api_base=api_base,
+                api_key=api_key,
+            )
+            normalized_detected_provider = _normalize_provider_name(detected_provider)
+            if normalized_detected_provider:
+                provider = normalized_detected_provider
+            if detected_api_base:
+                resolved_api_base = detected_api_base
+        except Exception:
+            pass
+    if resolved_api_base:
+        return resolved_api_base
+    if provider:
+        return _PROVIDER_DEFAULT_API_BASES.get(provider)
+    return None
+
+
+def _resolve_provider(
+    model: str,
+    *,
+    api_base: str | None,
+    api_key: str | None,
+    provider_env_var: str,
+    default_provider: str = "openai",
+) -> str | None:
+    explicit_provider = _normalize_provider_name(os.getenv(provider_env_var))
+    if explicit_provider:
+        return explicit_provider
+    inferred_provider = _infer_provider_from_api_base(api_base)
+    if inferred_provider:
+        return inferred_provider
+    inferred_provider = _infer_provider_with_litellm(
+        model,
+        api_base=api_base,
+        api_key=api_key,
+    )
+    if inferred_provider:
+        return inferred_provider
+    if "/" in model:
+        return None
+    if api_base and not _is_openai_default_base(api_base):
+        return "custom_openai"
+    return default_provider
+
+
+def _supports_openai_param(
+    *,
+    model: str,
+    provider: str | None,
+    request_type: str = "chat_completion",
+    param_name: str,
+) -> bool:
+    try:
+        supported = get_supported_openai_params(
+            model=model,
+            custom_llm_provider=provider,
+            request_type=request_type,
+        )
+    except Exception:
+        return False
+    return bool(supported and param_name in supported)
+
+
+def _normalize_response_format(
+    *,
+    model: str,
+    provider: str | None,
+    response_format: Any,
+) -> Any:
+    if response_format is None:
+        return None
+
+    if response_format == "json":
+        return {"type": "json_object"}
+
+    if isinstance(response_format, dict):
+        return response_format
+
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        if supports_response_schema(model=model, custom_llm_provider=provider):
+            return response_format
+        if _supports_openai_param(
+            model=model,
+            provider=provider,
+            param_name="response_format",
+        ):
+            return {"type": "json_object"}
+        return None
+
+    return response_format
+
+
+def _apply_dashscope_qwen3_compat(
+    model_name: str | None,
+    base_url: str | None,
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Normalize request params for DashScope Qwen3 chat-completions compatibility."""
+    resolved_model = (model_name or "").lower()
+    resolved_base_url = (
+        base_url or os.getenv("LLM_MODEL_URL") or os.getenv("LLM_API_BASE") or ""
+    ).lower()
+    if "dashscope.aliyuncs.com" not in resolved_base_url:
+        return kwargs
+    if not resolved_model.startswith("qwen3"):
+        return kwargs
+
+    normalized_kwargs = dict(kwargs)
+    stream = bool(normalized_kwargs.get("stream", False))
+    extra_body = normalized_kwargs.get("extra_body")
+    if extra_body is None:
+        extra_body = {}
+    elif isinstance(extra_body, dict):
+        extra_body = dict(extra_body)
+    else:
+        logger.warning(
+            "Ignore non-dict extra_body while applying DashScope Qwen3 compatibility: %r",
+            extra_body,
+        )
+        extra_body = {}
+
+    env_thinking = _parse_optional_bool(os.getenv("LLM_API_ENABLE_THINKING"))
+    if env_thinking is not None and "enable_thinking" not in extra_body:
+        extra_body["enable_thinking"] = env_thinking
+
+    if not stream and extra_body.get("enable_thinking") is not False:
+        extra_body["enable_thinking"] = False
+
+    if extra_body:
+        normalized_kwargs["extra_body"] = extra_body
+    return normalized_kwargs
+
+
+def _build_error_context(
+    *,
+    model: str,
+    provider: str | None,
+    prompt: str,
+    system_prompt: str | None,
+    api_base: str | None,
+    api_key: str | None,
+    client_configs: dict[str, Any],
+    kwargs: dict[str, Any],
+    messages: list[dict[str, Any]],
+    exc: BaseException,
+) -> dict[str, Any]:
+    request = _extract_request_from_exception(exc)
+    raw_request_url = _normalize_url_for_logging(request.url) if request else None
+    ignored_request_url = (
+        raw_request_url if _is_placeholder_request_url(raw_request_url) else None
+    )
+    request_url = None if ignored_request_url else raw_request_url
+    request_url_parts = _extract_url_parts(request_url)
+    base_url_parts = _extract_url_parts(api_base)
+
+    return {
+        "model": model,
+        "provider": provider,
+        "request_method": request.method if request else "POST",
+        "request_url": request_url,
+        "request_host": request_url_parts["host"] or base_url_parts["host"],
+        "request_port": request_url_parts["port"] or base_url_parts["port"],
+        "request_path": request_url_parts["path"] or base_url_parts["path"],
+        "request_query": request_url_parts["query"] or base_url_parts["query"],
+        "ignored_exception_request_url": ignored_request_url,
+        "request_url_source": "exception_request" if request_url else "api_base_fallback",
+        "api_base": api_base,
+        "api_key_hint": _mask_secret(api_key),
+        "prompt_len": len(prompt) if prompt else 0,
+        "system_prompt_len": len(system_prompt) if system_prompt else 0,
+        "message_count": len(messages),
+        "message_roles": [message.get("role") for message in messages],
+        "messages_preview": _summarize_messages(messages),
+        "request_kwargs": kwargs,
+        "client_configs": client_configs,
+        "exception_type": type(exc).__name__,
+        "exception_message": str(exc),
+        "cause_type": type(exc.__cause__).__name__ if exc.__cause__ else None,
+        "cause_message": str(exc.__cause__) if exc.__cause__ else None,
+    }
+
+
+def _extract_text_from_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                elif (
+                    item.get("type") == "text"
+                    and isinstance(item.get("content"), str)
+                ):
+                    parts.append(item["content"])
+        return "".join(parts)
+
+    if isinstance(content, dict):
+        if isinstance(content.get("text"), str):
+            return content["text"]
+        return json.dumps(content, ensure_ascii=False)
+
+    if content is None:
+        return ""
+
+    return str(content)
+
+
+def _extract_completion_content(response: Any) -> str:
+    if not response or not getattr(response, "choices", None):
+        raise InvalidResponseError("Invalid response from LiteLLM")
+
+    message = getattr(response.choices[0], "message", None)
+    if message is None:
+        raise InvalidResponseError("Missing message in LiteLLM response")
+
+    content = _extract_text_from_content(getattr(message, "content", None))
+    if not content:
+        parsed = getattr(message, "parsed", None)
+        if parsed is not None:
+            if isinstance(parsed, BaseModel):
+                content = parsed.model_dump_json()
+            elif isinstance(parsed, (dict, list)):
+                content = json.dumps(parsed, ensure_ascii=False)
+            else:
+                content = str(parsed)
+
+    if not content or content.strip() == "":
+        raise InvalidResponseError("Received empty content from LiteLLM")
+
+    if r"\u" in content:
+        content = safe_unicode_decode(content.encode("utf-8"))
+    return content
+
+
+def _usage_to_token_counts(usage: Any) -> dict[str, int]:
+    if usage is None:
+        return {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+
+    def _read(obj: Any, *keys: str) -> int:
+        for key in keys:
+            if isinstance(obj, dict) and key in obj:
+                try:
+                    return int(obj[key] or 0)
+                except (TypeError, ValueError):
+                    return 0
+            if hasattr(obj, key):
+                try:
+                    return int(getattr(obj, key) or 0)
+                except (TypeError, ValueError):
+                    return 0
+        return 0
+
+    prompt_tokens = _read(usage, "prompt_tokens", "input_tokens")
+    completion_tokens = _read(usage, "completion_tokens", "output_tokens")
+    total_tokens = _read(usage, "total_tokens")
+    if total_tokens == 0:
+        total_tokens = prompt_tokens + completion_tokens
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _build_litellm_request(
+    *,
+    model: str,
+    api_key: str | None,
+    api_base: str | None,
+    client_configs: dict[str, Any],
+    provider_env_var: str,
+    default_provider: str = "openai",
+) -> tuple[str, str | None, dict[str, Any]]:
+    provider = _resolve_provider(
+        model,
+        api_base=api_base,
+        api_key=api_key,
+        provider_env_var=provider_env_var,
+        default_provider=default_provider,
+    )
+    resolved_api_key = _resolve_api_key_for_provider(api_key, provider=provider)
+    resolved_api_base = _resolve_api_base_for_provider(
+        model=model,
+        provider=provider,
+        api_base=api_base,
+        api_key=resolved_api_key,
+    )
+    timeout = _resolve_timeout(client_configs)
+    num_retries = _resolve_num_retries(client_configs)
+    request_kwargs: dict[str, Any] = {
+        "api_key": resolved_api_key,
+        "api_base": resolved_api_base,
+        "custom_llm_provider": provider,
+        "drop_params": True,
+        "num_retries": num_retries,
+    }
+
+    if timeout is not None:
+        request_kwargs["timeout"] = timeout
+    extra_headers = client_configs.get("extra_headers")
+    if extra_headers is not None:
+        request_kwargs["extra_headers"] = extra_headers
+
+    for key, value in client_configs.items():
+        if key in {"timeout", "max_retries", "num_retries"}:
+            continue
+        request_kwargs.setdefault(key, value)
+
+    return model, provider, request_kwargs
+
+
+def _normalize_openai_embeddings_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/embeddings"):
+        return normalized
+    if normalized.endswith("/v1"):
+        return f"{normalized}/embeddings"
+    return f"{normalized}/embeddings"
 
 
 @retry(
@@ -111,9 +767,8 @@ def create_openai_async_client(
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry=(
         retry_if_exception_type(RateLimitError)
-        | retry_if_exception_type(APIConnectionError)
-        | retry_if_exception_type(APITimeoutError)
         | retry_if_exception_type(InvalidResponseError)
+        | retry_if_exception(_is_retryable_transport_error)
     ),
 )
 async def openai_complete_if_cache(
@@ -125,284 +780,280 @@ async def openai_complete_if_cache(
     api_key: str | None = None,
     token_tracker: Any | None = None,
     **kwargs: Any,
-) -> str:
-    """Complete a prompt using OpenAI's API with caching support.
-
-    Args:
-        model: The OpenAI model to use.
-        prompt: The prompt to complete.
-        system_prompt: Optional system prompt to include.
-        history_messages: Optional list of previous messages in the conversation.
-        base_url: Optional base URL for the OpenAI API.
-        api_key: Optional OpenAI API key. If None, uses the LLM_API_KEY environment variable.
-        **kwargs: Additional keyword arguments to pass to the OpenAI API.
-            Special kwargs:
-            - openai_client_configs: Dict of configuration options for the AsyncOpenAI client.
-                These will be passed to the client constructor but will be overridden by
-                explicit parameters (api_key, base_url).
-            - hashing_kv: Will be removed from kwargs before passing to OpenAI.
-            - keyword_extraction: Will be removed from kwargs before passing to OpenAI.
-
-    Returns:
-        The completed text or an async iterator of text chunks if streaming.
-
-    Raises:
-        InvalidResponseError: If the response from OpenAI is invalid or empty.
-        APIConnectionError: If there is a connection error with the OpenAI API.
-        RateLimitError: If the OpenAI API rate limit is exceeded.
-        APITimeoutError: If the OpenAI API request times out.
-    """
+) -> Union[str, AsyncIterator[str]]:
     if history_messages is None:
         history_messages = []
 
-    # Set openai logger level to INFO when VERBOSE_DEBUG is off
-    if not VERBOSE_DEBUG and logger.level == logging.DEBUG:
-        logging.getLogger("openai").setLevel(logging.INFO)
-
-    # Extract client configuration options
-    client_configs = kwargs.pop("openai_client_configs", {})
-    # Create the OpenAI client
-    openai_async_client = create_openai_async_client(
-        api_key=api_key or os.getenv("LLM_API_KEY"),
-        base_url=base_url or os.getenv("LLM_API_URL"),
-        client_configs=client_configs,
-    )
-
-    # Remove special kwargs that shouldn't be passed to OpenAI
+    client_configs = kwargs.pop("openai_client_configs", {}) or {}
     kwargs.pop("hashing_kv", None)
     kwargs.pop("keyword_extraction", None)
 
-    # Prepare messages
+    resolved_model = os.environ.get("LLM_MODEL") or model
+    resolved_api_base = (
+        base_url
+        or os.getenv("LLM_MODEL_URL")
+        or os.getenv("LLM_API_BASE")
+    )
+    resolved_api_key = api_key or os.getenv("LLM_MODEL_KEY")
+
+    request_model, request_provider, litellm_request_kwargs = _build_litellm_request(
+        model=resolved_model,
+        api_key=resolved_api_key,
+        api_base=resolved_api_base,
+        client_configs=client_configs,
+        provider_env_var="LLM_API_PROVIDER",
+        default_provider="openai",
+    )
+    resolved_api_base = litellm_request_kwargs.get("api_base") or resolved_api_base
+    resolved_api_key = litellm_request_kwargs.get("api_key") or resolved_api_key
+
+    kwargs = _apply_dashscope_qwen3_compat(
+        model_name=request_model,
+        base_url=resolved_api_base,
+        kwargs=kwargs,
+    )
+
+    response_format = _normalize_response_format(
+        model=request_model,
+        provider=request_provider,
+        response_format=kwargs.get("response_format"),
+    )
+    if response_format is None:
+        kwargs.pop("response_format", None)
+    else:
+        kwargs["response_format"] = response_format
+
+    if kwargs.get("stream") and "stream_options" not in kwargs:
+        kwargs["stream_options"] = {"include_usage": True}
+
     messages: list[dict[str, Any]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.extend(history_messages)
     messages.append({"role": "user", "content": prompt})
+    messages = kwargs.pop("messages", messages)
 
     logger.debug("===== Entering func of LLM =====")
-    logger.debug(f"Model: {model}   Base URL: {base_url}")
-    logger.debug(f"Additional kwargs: {kwargs}")
-    logger.debug(f"Num of history messages: {len(history_messages)}")
+    logger.debug(
+        "Model: %s   Provider: %s   API Base: %s",
+        request_model,
+        request_provider,
+        resolved_api_base,
+    )
+    logger.debug("Additional kwargs: %s", kwargs)
+    logger.debug("Num of history messages: %s", len(history_messages))
     verbose_debug(f"System prompt: {system_prompt}")
     verbose_debug(f"Query: {prompt}")
     logger.debug("===== Sending Query to LLM =====")
 
-    messages = kwargs.pop("messages", messages)
     log_model_call(
         "ragent.llm.openai.openai_complete_if_cache",
         {
             "model_arg": model,
-            "resolved_model": os.environ.get("LLM_API_MODEL"),
+            "resolved_model": request_model,
+            "provider": request_provider,
             "base_url_arg": base_url,
-            "resolved_base_url": os.environ.get("LLM_API_URL"),
+            "resolved_base_url": resolved_api_base,
             "prompt": prompt,
             "system_prompt": system_prompt,
             "history_messages": history_messages,
             "messages": messages,
-            "api_key": api_key if api_key is not None else os.environ.get("LLM_API_KEY"),
+            "api_key": resolved_api_key,
             "client_configs": client_configs,
             "kwargs": kwargs,
+            "litellm_request_kwargs": {
+                k: v for k, v in litellm_request_kwargs.items() if k != "api_key"
+            },
         },
     )
 
     llm_req_start = time.perf_counter()
     _trace_model(
-        f"llm.request.start model={os.environ.get('LLM_API_MODEL')} message_count={len(messages)} prompt_len={len(prompt) if prompt else 0}"
+        f"llm.request.start model={request_model} provider={request_provider} message_count={len(messages)} prompt_len={len(prompt) if prompt else 0}"
     )
+
+    request_kwargs = {
+        **litellm_request_kwargs,
+        "model": request_model,
+        "messages": messages,
+        **kwargs,
+    }
+
     try:
-        # Don't use async with context manager, use client directly
-        if "response_format" in kwargs:
-            response = await openai_async_client.beta.chat.completions.parse(
-                model=os.environ["LLM_API_MODEL"], messages=messages, **kwargs
-            )
-        else:
-            response = await openai_async_client.chat.completions.create(
-                model=os.environ["LLM_API_MODEL"], messages=messages, **kwargs
-            )
+        response = await acompletion(**request_kwargs)
         _trace_model(
-            f"llm.request.done model={os.environ.get('LLM_API_MODEL')} elapsed={time.perf_counter() - llm_req_start:.2f}s"
+            f"llm.request.done model={request_model} provider={request_provider} elapsed={time.perf_counter() - llm_req_start:.2f}s"
         )
     except APIConnectionError as e:
         _trace_model(
-            f"llm.request.failed model={os.environ.get('LLM_API_MODEL')} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
+            f"llm.request.failed model={request_model} provider={request_provider} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
         )
-        logger.error(f"OpenAI API Connection Error: {e}")
-        await openai_async_client.close()  # Ensure client is closed
+        error_context = None
+        if is_verbose_error_logging_enabled():
+            error_context = _safe_serialize_for_log(
+                _build_error_context(
+                    model=request_model,
+                    provider=request_provider,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    api_base=resolved_api_base,
+                    api_key=resolved_api_key,
+                    client_configs=client_configs,
+                    kwargs=kwargs,
+                    messages=messages,
+                    exc=e,
+                )
+            )
+        log_exception(None, e, context=error_context)
         raise
     except RateLimitError as e:
         _trace_model(
-            f"llm.request.failed model={os.environ.get('LLM_API_MODEL')} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
+            f"llm.request.failed model={request_model} provider={request_provider} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
         )
-        logger.error(f"OpenAI API Rate Limit Error: {e}")
-        await openai_async_client.close()  # Ensure client is closed
+        error_context = None
+        if is_verbose_error_logging_enabled():
+            error_context = _safe_serialize_for_log(
+                _build_error_context(
+                    model=request_model,
+                    provider=request_provider,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    api_base=resolved_api_base,
+                    api_key=resolved_api_key,
+                    client_configs=client_configs,
+                    kwargs=kwargs,
+                    messages=messages,
+                    exc=e,
+                )
+            )
+        log_exception(None, e, context=error_context)
         raise
     except APITimeoutError as e:
         _trace_model(
-            f"llm.request.failed model={os.environ.get('LLM_API_MODEL')} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
+            f"llm.request.failed model={request_model} provider={request_provider} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
         )
-        logger.error(f"OpenAI API Timeout Error: {e}")
-        await openai_async_client.close()  # Ensure client is closed
+        error_context = None
+        if is_verbose_error_logging_enabled():
+            error_context = _safe_serialize_for_log(
+                _build_error_context(
+                    model=request_model,
+                    provider=request_provider,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    api_base=resolved_api_base,
+                    api_key=resolved_api_key,
+                    client_configs=client_configs,
+                    kwargs=kwargs,
+                    messages=messages,
+                    exc=e,
+                )
+            )
+        log_exception(None, e, context=error_context)
         raise
     except Exception as e:
         _trace_model(
-            f"llm.request.failed model={os.environ.get('LLM_API_MODEL')} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
+            f"llm.request.failed model={request_model} provider={request_provider} elapsed={time.perf_counter() - llm_req_start:.2f}s err={type(e).__name__}({repr(e)})"
         )
-        logger.error(
-            f"OpenAI API Call Failed,\nModel: {model},\nParams: {kwargs}, Got: {e}"
-        )
-        await openai_async_client.close()  # Ensure client is closed
+        error_context = None
+        if is_verbose_error_logging_enabled():
+            error_context = _safe_serialize_for_log(
+                _build_error_context(
+                    model=request_model,
+                    provider=request_provider,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    api_base=resolved_api_base,
+                    api_key=resolved_api_key,
+                    client_configs=client_configs,
+                    kwargs=kwargs,
+                    messages=messages,
+                    exc=e,
+                )
+            )
+        log_exception(None, e, context=error_context)
         raise
 
     if hasattr(response, "__aiter__"):
 
         async def inner():
-            # Track if we've started iterating
-            iteration_started = False
             final_chunk_usage = None
 
             try:
-                iteration_started = True
                 async for chunk in response:
-                    # Check if this chunk has usage information (final chunk)
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        final_chunk_usage = chunk.usage
+                    usage = getattr(chunk, "usage", None)
+                    if usage:
+                        final_chunk_usage = usage
                         logger.debug(
-                            f"Received usage info in streaming chunk: {chunk.usage}"
+                            "Received usage info in streaming chunk: %s", usage
                         )
 
-                    # Check if choices exists and is not empty
-                    if not hasattr(chunk, "choices") or not chunk.choices:
-                        logger.warning(f"Received chunk without choices: {chunk}")
+                    choices = getattr(chunk, "choices", None)
+                    if not choices:
+                        logger.warning("Received chunk without choices: %s", chunk)
                         continue
 
-                    # Check if delta exists and has content
-                    if not hasattr(chunk.choices[0], "delta") or not hasattr(
-                        chunk.choices[0].delta, "content"
-                    ):
-                        # This might be the final chunk, continue to check for usage
+                    delta = getattr(choices[0], "delta", None)
+                    if delta is None:
                         continue
 
-                    content = chunk.choices[0].delta.content
-                    if content is None:
+                    content = _extract_text_from_content(getattr(delta, "content", None))
+                    if not content:
                         continue
                     if r"\u" in content:
                         content = safe_unicode_decode(content.encode("utf-8"))
-
                     yield content
 
-                # After streaming is complete, track token usage
                 if token_tracker and final_chunk_usage:
-                    # Use actual usage from the API
-                    token_counts = {
-                        "prompt_tokens": getattr(final_chunk_usage, "prompt_tokens", 0),
-                        "completion_tokens": getattr(
-                            final_chunk_usage, "completion_tokens", 0
-                        ),
-                        "total_tokens": getattr(final_chunk_usage, "total_tokens", 0),
-                    }
+                    token_counts = _usage_to_token_counts(final_chunk_usage)
                     token_tracker.add_usage(token_counts)
-                    logger.debug(f"Streaming token usage (from API): {token_counts}")
+                    logger.debug("Streaming token usage (from API): %s", token_counts)
                 if final_chunk_usage:
                     record_model_usage(
                         "chat",
-                        os.environ.get("LLM_API_MODEL") or model,
+                        os.environ.get("LLM_MODEL") or model,
                         final_chunk_usage,
                         source="ragent.llm.openai.openai_complete_if_cache.stream",
                     )
                 elif token_tracker:
                     logger.debug("No usage information available in streaming response")
             except Exception as e:
-                logger.error(f"Error in stream response: {str(e)}")
-                # Try to clean up resources if possible
-                if (
-                    iteration_started
-                    and hasattr(response, "aclose")
-                    and callable(getattr(response, "aclose", None))
-                ):
+                logger.error("Error in stream response: %s", str(e))
+                if hasattr(response, "aclose") and callable(getattr(response, "aclose")):
                     try:
                         await response.aclose()
-                        logger.debug("Successfully closed stream response after error")
                     except Exception as close_error:
                         logger.warning(
-                            f"Failed to close stream response: {close_error}"
+                            "Failed to close stream response after error: %s",
+                            close_error,
                         )
-                # Ensure client is closed in case of exception
-                await openai_async_client.close()
                 raise
             finally:
-                # Ensure resources are released even if no exception occurs
-                if (
-                    iteration_started
-                    and hasattr(response, "aclose")
-                    and callable(getattr(response, "aclose", None))
-                ):
+                if hasattr(response, "aclose") and callable(getattr(response, "aclose")):
                     try:
                         await response.aclose()
-                        logger.debug("Successfully closed stream response")
                     except Exception as close_error:
                         logger.warning(
-                            f"Failed to close stream response in finally block: {close_error}"
+                            "Failed to close stream response in finally block: %s",
+                            close_error,
                         )
-
-                # This prevents resource leaks since the caller doesn't handle closing
-                try:
-                    await openai_async_client.close()
-                    logger.debug(
-                        "Successfully closed OpenAI client for streaming response"
-                    )
-                except Exception as client_close_error:
-                    logger.warning(
-                        f"Failed to close OpenAI client in streaming finally block: {client_close_error}"
-                    )
 
         return inner()
 
-    else:
-        try:
-            if (
-                not response
-                or not response.choices
-                or not hasattr(response.choices[0], "message")
-                or not hasattr(response.choices[0].message, "content")
-            ):
-                logger.error("Invalid response from OpenAI API")
-                await openai_async_client.close()  # Ensure client is closed
-                raise InvalidResponseError("Invalid response from OpenAI API")
+    content = _extract_completion_content(response)
+    usage = getattr(response, "usage", None)
+    if token_tracker and usage:
+        token_tracker.add_usage(_usage_to_token_counts(usage))
+    if usage:
+        record_model_usage(
+            "chat",
+            os.environ.get("LLM_MODEL") or model,
+            usage,
+            source="ragent.llm.openai.openai_complete_if_cache",
+        )
 
-            content = response.choices[0].message.content
-
-            if not content or content.strip() == "":
-                logger.error("Received empty content from OpenAI API")
-                await openai_async_client.close()  # Ensure client is closed
-                raise InvalidResponseError("Received empty content from OpenAI API")
-
-            if r"\u" in content:
-                content = safe_unicode_decode(content.encode("utf-8"))
-
-            if token_tracker and hasattr(response, "usage"):
-                token_counts = {
-                    "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
-                    "completion_tokens": getattr(
-                        response.usage, "completion_tokens", 0
-                    ),
-                    "total_tokens": getattr(response.usage, "total_tokens", 0),
-                }
-                token_tracker.add_usage(token_counts)
-            if hasattr(response, "usage"):
-                record_model_usage(
-                    "chat",
-                    os.environ.get("LLM_API_MODEL") or model,
-                    response.usage,
-                    source="ragent.llm.openai.openai_complete_if_cache",
-                )
-
-            logger.debug(f"Response content len: {len(content)}")
-            verbose_debug(f"Response: {response}")
-
-            return content
-        finally:
-            # Ensure client is closed in all cases for non-streaming responses
-            await openai_async_client.close()
+    logger.debug("Response content len: %s", len(content))
+    verbose_debug(f"Response: {response}")
+    return content
 
 
 async def openai_complete(
@@ -414,7 +1065,7 @@ async def openai_complete(
 ) -> Union[str, AsyncIterator[str]]:
     if history_messages is None:
         history_messages = []
-    keyword_extraction = kwargs.pop("keyword_extraction", None)
+    keyword_extraction = kwargs.pop("keyword_extraction", keyword_extraction)
     if keyword_extraction:
         kwargs["response_format"] = "json"
     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
@@ -436,7 +1087,7 @@ async def gpt_4o_complete(
 ) -> str:
     if history_messages is None:
         history_messages = []
-    keyword_extraction = kwargs.pop("keyword_extraction", None)
+    keyword_extraction = kwargs.pop("keyword_extraction", keyword_extraction)
     if keyword_extraction:
         kwargs["response_format"] = GPTKeywordExtractionFormat
     return await openai_complete_if_cache(
@@ -457,11 +1108,11 @@ async def env_openai_complete(
 ) -> str:
     if history_messages is None:
         history_messages = []
-    keyword_extraction = kwargs.pop("keyword_extraction", None)
+    keyword_extraction = kwargs.pop("keyword_extraction", keyword_extraction)
     if keyword_extraction:
         kwargs["response_format"] = GPTKeywordExtractionFormat
     return await openai_complete_if_cache(
-        os.environ["LLM_API_MODEL"],
+        os.environ["LLM_MODEL"],
         prompt,
         system_prompt=system_prompt,
         history_messages=history_messages,
@@ -476,7 +1127,6 @@ async def gpt_4o_mini_complete(
     keyword_extraction=False,
     **kwargs,
 ) -> str:
-    # Backward-compatible alias: actual model is resolved by env in openai_complete_if_cache.
     return await env_openai_complete(
         prompt,
         system_prompt=system_prompt,
@@ -495,22 +1145,24 @@ async def nvidia_openai_complete(
 ) -> str:
     if history_messages is None:
         history_messages = []
-    keyword_extraction = kwargs.pop("keyword_extraction", None)
+    keyword_extraction = kwargs.pop("keyword_extraction", keyword_extraction)
     result = await openai_complete_if_cache(
-        "nvidia/llama-3.1-nemotron-70b-instruct",  # context length 128k
+        "nvidia_nim/llama-3.1-nemotron-70b-instruct",
         prompt,
         system_prompt=system_prompt,
         history_messages=history_messages,
         base_url="https://integrate.api.nvidia.com/v1",
         **kwargs,
     )
-    if keyword_extraction:  
+    if keyword_extraction:
         return locate_json_string_body_from_string(result)
     return result
 
 
 @wrap_embedding_func_with_attrs(
-    embedding_dim=int(os.getenv("EMBEDDING_DIM", os.getenv("EMBEDDING_DIMENSIONS", "1024"))),
+    embedding_dim=int(
+        os.getenv("EMBEDDING_DIM", os.getenv("EMBEDDING_DIMENSIONS", "1024"))
+    ),
     max_token_size=8192,
 )
 @retry(
@@ -518,8 +1170,7 @@ async def nvidia_openai_complete(
     wait=wait_exponential(multiplier=1, min=4, max=60),
     retry=(
         retry_if_exception_type(RateLimitError)
-        | retry_if_exception_type(APIConnectionError)
-        | retry_if_exception_type(APITimeoutError)
+        | retry_if_exception(_is_retryable_transport_error)
     ),
 )
 async def openai_embed(
@@ -529,94 +1180,209 @@ async def openai_embed(
     api_key: str = None,
     client_configs: dict[str, Any] = None,
 ) -> np.ndarray:
-    """Generate embeddings for a list of texts using OpenAI's API.
-
-    Args:
-        texts: List of texts to embed.
-        model: The OpenAI embedding model to use.
-        base_url: Optional base URL for the OpenAI API.
-        api_key: Optional OpenAI API key. If None, uses the LLM_API_KEY environment variable.
-        client_configs: Additional configuration options for the AsyncOpenAI client.
-            These will override any default configurations but will be overridden by
-            explicit parameters (api_key, base_url).
-
-    Returns:
-        A numpy array of embeddings, one per input text.
-
-    Raises:
-        APIConnectionError: If there is a connection error with the OpenAI API.
-        RateLimitError: If the OpenAI API rate limit is exceeded.
-        APITimeoutError: If the OpenAI API request times out.
-    """
     embedding_api_key = (
-        api_key if api_key is not None else os.getenv("EMBEDDING_BINDING_API_KEY")
+        api_key if api_key is not None else os.getenv("EMBEDDING_MODEL_KEY")
     )
     embedding_base_url = (
-        base_url if base_url is not None else os.getenv("EMBEDDING_BINDING_URL")
+        base_url if base_url is not None else os.getenv("EMBEDDING_MODEL_URL")
     )
-    embedding_model = os.getenv("EMBEDDING_MODEL")
+    embedding_model = os.getenv("EMBEDDING_MODEL") or model
 
-    if not embedding_api_key:
-        raise ValueError("Missing required env/config: EMBEDDING_BINDING_API_KEY")
-    if not embedding_base_url:
-        raise ValueError("Missing required env/config: EMBEDDING_BINDING_URL")
     if not embedding_model:
         raise ValueError("Missing required env/config: EMBEDDING_MODEL")
 
-    # Create the OpenAI client
-    openai_async_client = create_openai_async_client(
+    client_configs = client_configs or {}
+    dimensions = os.getenv("EMBEDDING_DIMENSIONS")
+    resolved_provider = _resolve_provider(
+        embedding_model,
+        api_base=embedding_base_url,
         api_key=embedding_api_key,
-        base_url=embedding_base_url,
-        client_configs=client_configs,
+        provider_env_var="EMBEDDING_PROVIDER",
+        default_provider="openai",
+    )
+    embedding_api_key = _resolve_api_key_for_provider(
+        embedding_api_key,
+        provider=resolved_provider,
+    )
+    embedding_base_url = _resolve_api_base_for_provider(
+        model=embedding_model,
+        provider=resolved_provider,
+        api_base=embedding_base_url,
+        api_key=embedding_api_key,
     )
 
-    request_kwargs: dict[str, Any] = {
-        "model": embedding_model,
-        "input": texts,
-        "encoding_format": "float",
-    }
-    dimensions = os.getenv("EMBEDDING_DIMENSIONS")
-    if dimensions:
-        try:
-            request_kwargs["dimensions"] = int(dimensions)
-        except ValueError:
-            logger.warning(
-                f"Invalid EMBEDDING_DIMENSIONS value: {dimensions}. Ignore dimensions override."
-            )
+    if not embedding_api_key:
+        raise ValueError("Missing required env/config: EMBEDDING_MODEL_KEY")
+    if not embedding_base_url:
+        raise ValueError("Missing required env/config: EMBEDDING_MODEL_URL")
 
-    async with openai_async_client:
+    use_openai_compatible_http = resolved_provider in {
+        None,
+        "openai",
+        "custom_openai",
+        "dashscope",
+        "deepinfra",
+    }
+
+    if use_openai_compatible_http:
+        resolved_dimensions: int | None = None
+        if dimensions:
+            try:
+                resolved_dimensions = int(dimensions)
+            except ValueError:
+                logger.warning(
+                    "Invalid EMBEDDING_DIMENSIONS value: %s. Ignore dimensions override.",
+                    dimensions,
+                )
+
+        timeout = _resolve_timeout(client_configs)
+        extra_headers = client_configs.get("extra_headers")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {embedding_api_key}",
+        }
+        if isinstance(extra_headers, dict):
+            headers.update(extra_headers)
+
+        request_url = _normalize_openai_embeddings_url(embedding_base_url)
+        payload: dict[str, Any] = {
+            "model": embedding_model,
+            "input": texts,
+            "encoding_format": "float",
+        }
+        if resolved_dimensions is not None:
+            payload["dimensions"] = resolved_dimensions
+
         log_model_call(
             "ragent.llm.openai.openai_embed",
             {
+                "transport": "openai-compatible-http",
                 "texts": texts,
                 "model_arg": model,
                 "resolved_model": embedding_model,
+                "provider": resolved_provider or "openai-compatible",
                 "base_url_arg": base_url,
                 "resolved_base_url": embedding_base_url,
+                "request_url": request_url,
                 "api_key": embedding_api_key,
                 "client_configs": client_configs,
-                "request_kwargs": request_kwargs,
+                "payload": payload,
+                "headers": {k: v for k, v in headers.items() if k.lower() != "authorization"},
             },
         )
+
         emb_req_start = time.perf_counter()
         _trace_model(
-            f"embed.request.start model={embedding_model} batch_size={len(texts)}"
+            f"embed.request.start model={embedding_model} provider={resolved_provider or 'openai-compatible'} batch_size={len(texts)}"
         )
-        try:
-            response = await openai_async_client.embeddings.create(**request_kwargs)
-            record_model_usage(
-                "embedding",
-                embedding_model,
-                getattr(response, "usage", None),
-                source="ragent.llm.openai.openai_embed",
-                extra={"batch_size": len(texts)},
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(request_url, headers=headers, json=payload)
+            response.raise_for_status()
+            response_payload = response.json()
+        record_model_usage(
+            "embedding",
+            embedding_model,
+            response_payload.get("usage"),
+            source="ragent.llm.openai.openai_embed",
+            extra={"batch_size": len(texts)},
+        )
+        _trace_model(
+            f"embed.request.done model={embedding_model} provider={resolved_provider or 'openai-compatible'} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s"
+        )
+
+        data = response_payload.get("data") or []
+        embeddings: list[list[float]] = []
+        for item in data:
+            if isinstance(item, dict):
+                embeddings.append(item["embedding"])
+            else:
+                embeddings.append(getattr(item, "embedding"))
+        return np.array(embeddings)
+
+    request_model, request_provider, litellm_request_kwargs = _build_litellm_request(
+        model=embedding_model,
+        api_key=embedding_api_key,
+        api_base=embedding_base_url,
+        client_configs=client_configs,
+        provider_env_var="EMBEDDING_PROVIDER",
+        default_provider="openai",
+    )
+    embedding_base_url = litellm_request_kwargs.get("api_base") or embedding_base_url
+    embedding_api_key = litellm_request_kwargs.get("api_key") or embedding_api_key
+
+    request_kwargs: dict[str, Any] = {
+        **litellm_request_kwargs,
+        "model": request_model,
+        "input": texts,
+        "encoding_format": "float",
+    }
+    if dimensions:
+        supports_dimensions = _supports_openai_param(
+            model=request_model,
+            provider=request_provider,
+            request_type="embeddings",
+            param_name="dimensions",
+        )
+        if supports_dimensions:
+            try:
+                request_kwargs["dimensions"] = int(dimensions)
+            except ValueError:
+                logger.warning(
+                    "Invalid EMBEDDING_DIMENSIONS value: %s. Ignore dimensions override.",
+                    dimensions,
+                )
+        else:
+            logger.info(
+                "Skip EMBEDDING_DIMENSIONS for provider=%s model=%s because the embeddings endpoint does not advertise dimensions support.",
+                request_provider,
+                request_model,
             )
-            _trace_model(
-                f"embed.request.done model={embedding_model} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s"
-            )
-            return np.array([dp.embedding for dp in response.data])
-        except Exception as e:
-            _trace_model(
-                f"embed.request.failed model={embedding_model} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s err={type(e).__name__}({repr(e)})"
-            )
-            raise
+
+    log_model_call(
+        "ragent.llm.openai.openai_embed",
+        {
+            "transport": "litellm",
+            "texts": texts,
+            "model_arg": model,
+            "resolved_model": request_model,
+            "provider": request_provider,
+            "base_url_arg": base_url,
+            "resolved_base_url": embedding_base_url,
+            "api_key": embedding_api_key,
+            "client_configs": client_configs,
+            "request_kwargs": {
+                k: v for k, v in request_kwargs.items() if k != "api_key"
+            },
+        },
+    )
+
+    emb_req_start = time.perf_counter()
+    _trace_model(
+        f"embed.request.start model={request_model} provider={request_provider} batch_size={len(texts)}"
+    )
+    try:
+        response = await aembedding(**request_kwargs)
+        record_model_usage(
+            "embedding",
+            request_model,
+            getattr(response, "usage", None),
+            source="ragent.llm.openai.openai_embed",
+            extra={"batch_size": len(texts)},
+        )
+        _trace_model(
+            f"embed.request.done model={request_model} provider={request_provider} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s"
+        )
+    except Exception as e:
+        _trace_model(
+            f"embed.request.failed model={request_model} provider={request_provider} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s err={type(e).__name__}({repr(e)})"
+        )
+        raise
+
+    data = getattr(response, "data", None) or []
+    embeddings: list[list[float]] = []
+    for item in data:
+        if isinstance(item, dict):
+            embeddings.append(item["embedding"])
+        else:
+            embeddings.append(getattr(item, "embedding"))
+    return np.array(embeddings)

@@ -46,6 +46,30 @@ from .constants import (
 from .kg.shared_storage import get_storage_keyed_lock
 import time
 
+
+def _append_stage_timing(
+    stage_timings: list[dict[str, Any]],
+    stage: str,
+    label: str,
+    seconds: float,
+):
+    stage_timings.append(
+        {
+            "stage": stage,
+            "label": label,
+            "seconds": round(max(seconds, 0.0), 3),
+        }
+    )
+
+
+def _record_stage_timing(
+    stage_timings: list[dict[str, Any]],
+    stage: str,
+    label: str,
+    started_at: float,
+):
+    _append_stage_timing(stage_timings, stage, label, time.perf_counter() - started_at)
+
 def _normalize_source_text_for_match(text: str) -> str:
     if not text:
         return ""
@@ -1148,6 +1172,8 @@ async def graph_query(
     chunks_vdb: BaseVectorStorage = None,
     return_debug: bool = False,
 ):
+    stage_timings: list[dict[str, Any]] = []
+    query_total_started_at = time.perf_counter()
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
@@ -1157,11 +1183,25 @@ async def graph_query(
 
     # Handle cache
     args_hash = compute_args_hash(query_param.mode, query)
+    stage_started_at = time.perf_counter()
     cached_response, quantized, min_val, max_val = await handle_cache(
         hashing_kv, args_hash, query, query_param.mode, cache_type="query"
     )
+    _record_stage_timing(
+        stage_timings,
+        "query_cache_lookup",
+        "查询缓存检查",
+        stage_started_at,
+    )
+    stage_started_at = time.perf_counter()
     hl_keywords, ll_keywords = await get_keywords_from_query(
         query, query_param, global_config, hashing_kv
+    )
+    _record_stage_timing(
+        stage_timings,
+        "keyword_extraction",
+        "关键词提取",
+        stage_started_at,
     )
 
     logger.debug(f"High-level keywords: {hl_keywords}")
@@ -1170,17 +1210,31 @@ async def graph_query(
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
 
+    stage_started_at = time.perf_counter()
     ll_entities_context, ll_relations_context, _, _ = await _get_node_data(
         ll_keywords_str,
         knowledge_graph_inst,
         entities_vdb,
         query_param,
     )
+    _record_stage_timing(
+        stage_timings,
+        "graph_entity_hits",
+        "图谱命中 / 实体",
+        stage_started_at,
+    )
+    stage_started_at = time.perf_counter()
     hl_entities_context, hl_relations_context, _, _ = await _get_edge_data(
         hl_keywords_str,
         knowledge_graph_inst,
         relationships_vdb,
         query_param,
+    )
+    _record_stage_timing(
+        stage_timings,
+        "graph_relation_hits",
+        "图谱命中 / 关系",
+        stage_started_at,
     )
     graph_entities = process_combine_contexts(
         ll_entities_context, hl_entities_context
@@ -1200,6 +1254,7 @@ async def graph_query(
         text_chunks_db,
         query_param,
         chunks_vdb,
+        timing_collector=stage_timings,
     )
 
     debug_payload = {
@@ -1209,6 +1264,7 @@ async def graph_query(
         "graph_relations": graph_relations,
         "final_context_text": context if context is not None else "",
         "final_prompt_text": "",
+        "stage_timings": stage_timings,
     }
 
     if query_param.only_need_context:
@@ -1245,6 +1301,12 @@ async def graph_query(
         user_prompt=user_prompt,
     )
     debug_payload["final_prompt_text"] = sys_prompt
+    _append_stage_timing(
+        stage_timings,
+        "prompt_assembly",
+        "回答提示词拼装",
+        0.0,
+    )
 
     if query_param.only_need_prompt:
         if return_debug:
@@ -1259,11 +1321,24 @@ async def graph_query(
 
     if cached_response is not None:
         response = cached_response
+        _append_stage_timing(
+            stage_timings,
+            "answer_cache_hit",
+            "最终答案缓存命中",
+            0.0,
+        )
     else:
+        stage_started_at = time.perf_counter()
         response = await use_model_func(
             query,
             system_prompt=sys_prompt,
             stream=query_param.stream,
+        )
+        _record_stage_timing(
+            stage_timings,
+            "answer_generation",
+            "回答生成 / 第一轮 LLM",
+            stage_started_at,
         )
         if isinstance(response, str) and len(response) > len(sys_prompt):
             response = (
@@ -1275,10 +1350,17 @@ async def graph_query(
                 .replace("</system>", "")
                 .strip()
             )
+        stage_started_at = time.perf_counter()
         response = await use_model_func(
             response,
             system_prompt=PROMPTS["rag_response_new"],
             stream=query_param.stream,
+        )
+        _record_stage_timing(
+            stage_timings,
+            "answer_polish",
+            "回答润色 / 第二轮 LLM",
+            stage_started_at,
         )
     image_file_path_list = []
     if cached_response is None and hashing_kv.global_config.get("enable_llm_cache"):
@@ -1296,6 +1378,12 @@ async def graph_query(
                 cache_type="query",
             ),
         )
+    _record_stage_timing(
+        stage_timings,
+        "onehop_total",
+        "OneHop 查询总耗时",
+        query_total_started_at,
+    )
 
     if return_debug:
         return response, image_file_path_list, debug_payload
@@ -1545,8 +1633,11 @@ async def _build_query_context(
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
     chunks_vdb: BaseVectorStorage = None,
+    timing_collector: list[dict[str, Any]] | None = None,
 ):
     logger.info(f"Process {os.getpid()} building query context...")
+    stage_timings = timing_collector if timing_collector is not None else []
+    context_total_started_at = time.perf_counter()
 
     # Collect all chunks from different sources
     all_chunks = []
@@ -1559,19 +1650,34 @@ async def _build_query_context(
 
     # Handle local and global modes
     if query_param.mode == "graph":
-        
+        stage_started_at = time.perf_counter()
         ll_data = await _get_node_data(
             ll_keywords,
             knowledge_graph_inst,
             entities_vdb,
             query_param,
         )
+        if timing_collector is not None:
+            _record_stage_timing(
+                stage_timings,
+                "graph_context_entities",
+                "图谱上下文补召回 / 实体",
+                stage_started_at,
+            )
+        stage_started_at = time.perf_counter()
         hl_data = await _get_edge_data(
             hl_keywords,
             knowledge_graph_inst,
             relationships_vdb,
             query_param,
         )
+        if timing_collector is not None:
+            _record_stage_timing(
+                stage_timings,
+                "graph_context_relations",
+                "图谱上下文补召回 / 关系",
+                stage_started_at,
+            )
 
         (ll_entities_context, ll_relations_context, ll_node_datas, ll_edge_datas) = (
             ll_data
@@ -1596,6 +1702,7 @@ async def _build_query_context(
     )
 
     # Unified token control system - Apply precise token limits to entities and relations
+    stage_started_at = time.perf_counter()
     tokenizer = text_chunks_db.global_config.get("tokenizer")
     if tokenizer:
         # Get new token limits from query_param (with fallback to global_config)
@@ -1664,6 +1771,13 @@ async def _build_query_context(
                 logger.debug(
                     f"Truncated relations: {original_relation_count} -> {len(relations_context)} (relation max tokens: {max_relation_tokens})"
                 )
+    if timing_collector is not None:
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_structured_pruning",
+            "图谱上下文整理 / 实体关系裁剪",
+            stage_started_at,
+        )
 
     # After truncation, get text chunks based on final entities and relations
     logger.info("Getting text chunks based on truncated entities and relations...")
@@ -1716,14 +1830,23 @@ async def _build_query_context(
         )
 
     # Execute text chunk retrieval in parallel
+    stage_started_at = time.perf_counter()
     if text_chunk_tasks:
         text_chunk_results = await asyncio.gather(*text_chunk_tasks)
         for chunks in text_chunk_results:
             if chunks:
                 all_chunks.extend(chunks)
+    if timing_collector is not None:
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_chunk_lookup",
+            "图谱上下文补召回 / 文档块",
+            stage_started_at,
+        )
 
     # Apply token processing to chunks if tokenizer is available
     text_units_context = []
+    stage_started_at = time.perf_counter()
     if tokenizer and all_chunks:
         # Calculate dynamic token limit for text chunks
         entities_str = json.dumps(entities_context, ensure_ascii=False)
@@ -1823,6 +1946,13 @@ async def _build_query_context(
             logger.debug(
                 f"Re-truncated chunks for dynamic token limit: {len(temp_chunks)} -> {len(text_units_context)} (chunk available tokens: {available_chunk_tokens})"
             )
+    if timing_collector is not None:
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_chunk_postprocess",
+            "图谱上下文整理 / Chunk 重排与截断",
+            stage_started_at,
+        )
 
     logger.info(
         f"Final context: {len(entities_context)} entities, {len(relations_context)} relations, {len(text_units_context)} chunks"
@@ -1830,8 +1960,16 @@ async def _build_query_context(
 
     # not necessary to use LLM to generate a response
     if not entities_context and not relations_context:
+        if timing_collector is not None:
+            _record_stage_timing(
+                stage_timings,
+                "graph_context_total",
+                "图谱上下文构建总耗时",
+                context_total_started_at,
+            )
         return None
 
+    stage_started_at = time.perf_counter()
     entities_str = json.dumps(entities_context, ensure_ascii=False)
     relations_str = json.dumps(relations_context, ensure_ascii=False)
     text_units_str = json.dumps(text_units_context, ensure_ascii=False)
@@ -1855,6 +1993,19 @@ async def _build_query_context(
 ```
 
 """
+    if timing_collector is not None:
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_serialize",
+            "图谱上下文整理 / 序列化",
+            stage_started_at,
+        )
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_total",
+            "图谱上下文构建总耗时",
+            context_total_started_at,
+        )
     return result
 
 
@@ -2439,12 +2590,28 @@ async def _build_hybrid_retrieval_debug_data(
     global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
 ) -> dict[str, Any]:
+    stage_timings: list[dict[str, Any]] = []
+    retrieval_total_started_at = time.perf_counter()
+    stage_started_at = time.perf_counter()
     vector_weights, vector_texts, vector_file_paths, vector_metadata_map = await _get_vector_context_new(
         query, chunks_vdb, query_param
     )
+    _record_stage_timing(
+        stage_timings,
+        "vector_retrieval",
+        "混合召回 / Chunk 向量检索",
+        stage_started_at,
+    )
 
+    stage_started_at = time.perf_counter()
     hl_keywords, ll_keywords = await get_keywords_from_query(
         query, query_param, global_config, hashing_kv
+    )
+    _record_stage_timing(
+        stage_timings,
+        "keyword_extraction",
+        "关键词提取",
+        stage_started_at,
     )
 
     logger.debug(f"High-level keywords: {hl_keywords}")
@@ -2453,17 +2620,31 @@ async def _build_hybrid_retrieval_debug_data(
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
 
+    stage_started_at = time.perf_counter()
     ll_entities_context, ll_relations_context, ll_node_datas, _ = await _get_node_data(
         ll_keywords_str,
         knowledge_graph_inst,
         entities_vdb,
         query_param,
     )
+    _record_stage_timing(
+        stage_timings,
+        "graph_entity_hits",
+        "图谱命中 / 实体",
+        stage_started_at,
+    )
+    stage_started_at = time.perf_counter()
     hl_entities_context, hl_relations_context, _, hl_use_entities = await _get_edge_data(
         hl_keywords_str,
         knowledge_graph_inst,
         relationships_vdb,
         query_param,
+    )
+    _record_stage_timing(
+        stage_timings,
+        "graph_relation_hits",
+        "图谱命中 / 关系",
+        stage_started_at,
     )
 
     graph_entities = process_combine_contexts(
@@ -2526,6 +2707,7 @@ async def _build_hybrid_retrieval_debug_data(
         graph_file_path_map[chunk_id] = file_path
         graph_metadata_map[chunk_id] = chunk_metadata
 
+    stage_started_at = time.perf_counter()
     if valid_chunk_embeddings:
         query_embedding = await openai_embed([query])
         similarity_scores = cosine_similarity(
@@ -2533,7 +2715,14 @@ async def _build_hybrid_retrieval_debug_data(
         )
         for chunk_id, score in zip(valid_chunk_ids, similarity_scores):
             graph_weights[chunk_id] = score
+    _record_stage_timing(
+        stage_timings,
+        "graph_chunk_rescoring",
+        "混合召回 / 图谱候选重打分",
+        stage_started_at,
+    )
 
+    stage_started_at = time.perf_counter()
     merge_weight = weightd_merge(vector_weights, graph_weights)
     sorted_items = sorted(merge_weight.items(), key=lambda x: x[1], reverse=True)
     topk_text = sorted_items[:20]
@@ -2575,16 +2764,30 @@ async def _build_hybrid_retrieval_debug_data(
         }
         merged_candidate.update(chunk_metadata)
         merged_candidates.append(merged_candidate)
+    _record_stage_timing(
+        stage_timings,
+        "candidate_merge",
+        "混合召回 / 候选融合",
+        stage_started_at,
+    )
 
     rerank_results = []
+    stage_started_at = time.perf_counter()
     if results_text:
         rerank_results = await rerank_from_env(
             query=query,
             documents=results_text,
             top_k=10,
         )
+    _record_stage_timing(
+        stage_timings,
+        "rerank",
+        "Rerank 重排",
+        stage_started_at,
+    )
 
     text_units_context = []
+    stage_started_at = time.perf_counter()
     top_k_l = min(len(rerank_results), 10)
     for i in range(top_k_l):
         rerank_index = rerank_results[i]["index"]
@@ -2596,9 +2799,21 @@ async def _build_hybrid_retrieval_debug_data(
         }
         chunk_entry.update(results_chunk_metadata[rerank_index])
         text_units_context.append(_build_chunk_context_entry(i + 1, chunk_entry))
+    _record_stage_timing(
+        stage_timings,
+        "final_context_selection",
+        "最终证据选择",
+        stage_started_at,
+    )
 
     image_file_path_list = set(image_file_path_list)
     image_file_path_list.discard("unknown_source")
+    _record_stage_timing(
+        stage_timings,
+        "hybrid_retrieval_total",
+        "混合检索总耗时",
+        retrieval_total_started_at,
+    )
 
     return {
         "high_level_keywords": hl_keywords,
@@ -2625,6 +2840,7 @@ async def _build_hybrid_retrieval_debug_data(
         "results_chunk_metadata": results_chunk_metadata,
         "text_units_context": text_units_context,
         "image_file_path_list": image_file_path_list,
+        "stage_timings": stage_timings,
     }
 
 async def hybrid_query(
@@ -2639,6 +2855,8 @@ async def hybrid_query(
     system_prompt: str | None = None,
     return_debug: bool = False,
 ):
+    stage_timings: list[dict[str, Any]] = []
+    query_total_started_at = time.perf_counter()
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
@@ -2646,8 +2864,15 @@ async def hybrid_query(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
     args_hash = compute_args_hash(query_param.mode, query)
+    stage_started_at = time.perf_counter()
     cached_response, quantized, min_val, max_val = await handle_cache(
         hashing_kv, args_hash, query, query_param.mode, cache_type="query"
+    )
+    _record_stage_timing(
+        stage_timings,
+        "query_cache_lookup",
+        "查询缓存检查",
+        stage_started_at,
     )
 
     retrieval_debug = await _build_hybrid_retrieval_debug_data(
@@ -2660,6 +2885,7 @@ async def hybrid_query(
         global_config=global_config,
         hashing_kv=hashing_kv,
     )
+    stage_timings.extend(retrieval_debug.get("stage_timings", []))
 
     image_file_path_list = retrieval_debug["image_file_path_list"]
     results_text = retrieval_debug["results_text"]
@@ -2698,6 +2924,7 @@ async def hybrid_query(
                 "final_context_document_chunks": text_units_context,
                 "final_context_text": context_text,
                 "final_prompt_text": "",
+                "stage_timings": stage_timings,
             }
             return context_text, image_file_path_list, debug_payload
         return context_text
@@ -2721,6 +2948,12 @@ async def hybrid_query(
         history=history_context,
         user_prompt=user_prompt,
     )
+    _append_stage_timing(
+        stage_timings,
+        "prompt_assembly",
+        "回答提示词拼装",
+        0.0,
+    )
     if query_param.only_need_prompt:
         if return_debug:
             debug_payload = {
@@ -2728,6 +2961,7 @@ async def hybrid_query(
                 "final_context_document_chunks": text_units_context,
                 "final_context_text": context_text,
                 "final_prompt_text": sys_prompt,
+                "stage_timings": stage_timings,
             }
             return sys_prompt, image_file_path_list, debug_payload
         return sys_prompt
@@ -2737,10 +2971,17 @@ async def hybrid_query(
         f"[naive_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})"
     )
 
+    stage_started_at = time.perf_counter()
     response = await use_model_func(
         query,
         system_prompt=sys_prompt,
         stream=query_param.stream,
+    )
+    _record_stage_timing(
+        stage_timings,
+        "answer_generation",
+        "回答生成 / 第一轮 LLM",
+        stage_started_at,
     )
 
     if isinstance(response, str) and len(response) > len(sys_prompt):
@@ -2754,10 +2995,17 @@ async def hybrid_query(
             .replace("</system>", "")
             .strip()
         )
+    stage_started_at = time.perf_counter()
     response = await use_model_func(
         response,
         system_prompt=PROMPTS["naive_rag_response_new"],
         stream=query_param.stream,
+    )
+    _record_stage_timing(
+        stage_timings,
+        "answer_polish",
+        "回答润色 / 第二轮 LLM",
+        stage_started_at,
     )
     if hashing_kv.global_config.get("enable_llm_cache"):
         # Save to cache
@@ -2774,6 +3022,12 @@ async def hybrid_query(
                 cache_type="query",
             ),
         )
+    _record_stage_timing(
+        stage_timings,
+        "onehop_total",
+        "OneHop 查询总耗时",
+        query_total_started_at,
+    )
 
     if return_debug:
         debug_payload = {
@@ -2781,6 +3035,7 @@ async def hybrid_query(
             "final_context_document_chunks": text_units_context,
             "final_context_text": context_text,
             "final_prompt_text": sys_prompt,
+            "stage_timings": stage_timings,
         }
         return response, image_file_path_list, debug_payload
 

@@ -11,6 +11,10 @@ import logging
 import logging.handlers
 import os
 import re
+
+# Before `litellm` is imported (see ragent.llm.openai): default to quiet SDK logs.
+# Override with e.g. LITELLM_LOG=DEBUG in the environment when diagnosing calls.
+os.environ.setdefault("LITELLM_LOG", "WARNING")
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
@@ -136,6 +140,67 @@ if not logger.handlers:
 
 # Set httpx logging level to WARNING
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def is_verbose_error_logging_enabled() -> bool:
+    """Detailed exception logs are opt-in by default.
+
+    Env override:
+    - RAG_VERBOSE_ERRORS=1: force enable traceback/context logs
+    - RAG_VERBOSE_ERRORS=0: force disable traceback/context logs
+    """
+    env_value = os.getenv("RAG_VERBOSE_ERRORS")
+    if env_value is not None:
+        return env_value.lower() in ("1", "true", "yes", "on")
+    return VERBOSE_DEBUG or logger.isEnabledFor(logging.DEBUG)
+
+
+def format_exception_brief(exc: BaseException) -> str:
+    """Format exceptions as `module.ExceptionName: message`."""
+    exc_type = type(exc)
+    module = exc_type.__module__
+    qualname = getattr(exc_type, "__qualname__", exc_type.__name__)
+    type_name = qualname if module in {"builtins", "__main__"} else f"{module}.{qualname}"
+    message = str(exc).strip()
+    return f"{type_name}: {message}" if message else type_name
+
+
+def mark_exception_logged(exc: BaseException) -> None:
+    try:
+        setattr(exc, "_ragent_logged", True)
+    except Exception:
+        pass
+
+
+def is_exception_logged(exc: BaseException) -> bool:
+    return bool(getattr(exc, "_ragent_logged", False))
+
+
+def log_exception(
+    message: str | None,
+    exc: BaseException,
+    *,
+    context: Any | None = None,
+    level: int = logging.ERROR,
+) -> None:
+    """Log a short exception by default; include traceback/context in debug mode."""
+    brief = format_exception_brief(exc)
+    detailed = is_verbose_error_logging_enabled()
+    log_kwargs = {}
+    if detailed:
+        log_kwargs["exc_info"] = (type(exc), exc, exc.__traceback__)
+
+    if context is not None and detailed:
+        if message:
+            logger.log(level, "%s: %s\nContext: %s", message, brief, context, **log_kwargs)
+        else:
+            logger.log(level, "%s\nContext: %s", brief, context, **log_kwargs)
+    elif message:
+        logger.log(level, "%s: %s", message, brief, **log_kwargs)
+    else:
+        logger.log(level, "%s", brief, **log_kwargs)
+
+    mark_exception_logged(exc)
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -354,7 +419,9 @@ class QueueFullError(Exception):
     pass
 
 
-def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
+def priority_limit_async_func_call(
+    max_size: int, max_queue_size: int = 1000, label: str | None = None
+):
     """
     Enhanced priority-limited asynchronous function call decorator
 
@@ -369,6 +436,7 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
         # Ensure func is callable
         if not callable(func):
             raise TypeError(f"Expected a callable object, got {type(func)}")
+        log_prefix = f"limit_async[{label}]" if label else "limit_async"
         queue = asyncio.PriorityQueue(maxsize=max_queue_size)
         tasks = set()
         initialization_lock = asyncio.Lock()
@@ -414,10 +482,10 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                         except asyncio.CancelledError:
                             if not future.done():
                                 future.cancel()
-                            logger.debug("limit_async: Task cancelled during execution")
+                            logger.debug(f"{log_prefix}: Task cancelled during execution")
                         except Exception as e:
                             logger.error(
-                                f"limit_async: Error in decorated function: {str(e)}"
+                                f"{log_prefix}: Error in decorated function: {str(e)}"
                             )
                             if not future.done():
                                 future.set_exception(e)
@@ -425,10 +493,10 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                             queue.task_done()
                     except Exception as e:
                         # Catch all exceptions in worker loop to prevent worker termination
-                        logger.error(f"limit_async: Critical error in worker: {str(e)}")
+                        logger.error(f"{log_prefix}: Critical error in worker: {str(e)}")
                         await asyncio.sleep(0.1)  # Prevent high CPU usage
             finally:
-                logger.debug("limit_async: Worker exiting")
+                logger.debug(f"{log_prefix}: Worker exiting")
 
         async def health_check():
             """Periodically check worker health status and recover"""
@@ -448,9 +516,7 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                     workers_needed = max_size - active_tasks_count
 
                     if workers_needed > 0:
-                        logger.info(
-                            f"limit_async: Creating {workers_needed} new workers"
-                        )
+                        logger.info(f"{log_prefix}: Creating {workers_needed} new workers")
                         new_tasks = set()
                         for _ in range(workers_needed):
                             task = asyncio.create_task(worker())
@@ -459,9 +525,9 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                         # Update task set in one operation
                         tasks.update(new_tasks)
             except Exception as e:
-                logger.error(f"limit_async: Error in health check: {str(e)}")
+                logger.error(f"{log_prefix}: Error in health check: {str(e)}")
             finally:
-                logger.debug("limit_async: Health check task exiting")
+                logger.debug(f"{log_prefix}: Health check task exiting")
                 initialized = False
 
         async def ensure_workers():
@@ -484,7 +550,7 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                 if reinit_count > 0:
                     reinit_count += 1
                     logger.warning(
-                        f"limit_async: Reinitializing needed (count: {reinit_count})"
+                        f"{log_prefix}: Reinitializing needed (count: {reinit_count})"
                     )
                 else:
                     reinit_count = 1  # First initialization
@@ -498,7 +564,7 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                 active_tasks_count = len(tasks)
                 if active_tasks_count > 0 and reinit_count > 1:
                     logger.warning(
-                        f"limit_async: {active_tasks_count} tasks still running during reinitialization"
+                        f"{log_prefix}: {active_tasks_count} tasks still running during reinitialization"
                     )
 
                 # Create initial worker tasks, only adding the number needed
@@ -512,11 +578,11 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                 worker_health_check_task = asyncio.create_task(health_check())
 
                 initialized = True
-                logger.info(f"limit_async: {workers_needed} new workers initialized")
+                logger.info(f"{log_prefix}: {workers_needed} new workers initialized")
 
         async def shutdown():
             """Gracefully shut down all workers and the queue"""
-            logger.info("limit_async: Shutting down priority queue workers")
+            logger.info(f"{log_prefix}: Shutting down priority queue workers")
 
             # Set the shutdown event
             shutdown_event.set()
@@ -531,7 +597,7 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                 await asyncio.wait_for(queue.join(), timeout=5.0)
             except asyncio.TimeoutError:
                 logger.warning(
-                    "limit_async: Timeout waiting for queue to empty during shutdown"
+                    f"{log_prefix}: Timeout waiting for queue to empty during shutdown"
                 )
 
             # Cancel all worker tasks
@@ -551,7 +617,7 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                 except asyncio.CancelledError:
                     pass
 
-            logger.info("limit_async: Priority queue workers shutdown complete")
+            logger.info(f"{log_prefix}: Priority queue workers shutdown complete")
 
         @wraps(func)
         async def wait_func(
@@ -619,7 +685,7 @@ def priority_limit_async_func_call(max_size: int, max_queue_size: int = 1000):
                         if not future.done():
                             future.cancel()
                         raise TimeoutError(
-                            f"limit_async: Task timed out after {_timeout} seconds"
+                            f"{log_prefix}: Task timed out after {_timeout} seconds"
                         )
                 else:
                     # Wait for the result without timeout
