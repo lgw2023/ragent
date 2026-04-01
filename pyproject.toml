@@ -24,9 +24,12 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp",
+    "aiofiles",
     "configparser",
     "dotenv",
     "future",
+    "httpx",
+    "litellm",
     "mineru[pipeline]",
     "nano-vectordb",
     "networkx",
@@ -44,8 +47,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# OpenAI / 兼容接口 LLM 提供商
+# LiteLLM / OpenAI-compatible LLM 提供商
 openai = [
+    "litellm",
     "openai",
     "httpx",
 ]
@@ -76,6 +80,7 @@ api = [
     "httpcore",
     "httpx",
     "jiter",
+    "litellm",
     "openai",
     "passlib[bcrypt]",
     "PyJWT",

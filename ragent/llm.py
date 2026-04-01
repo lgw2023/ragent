@@ -15,7 +15,7 @@ class Model(BaseModel):
             This could include parameters such as the model name, API key, etc.
 
     Example usage:
-        Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_API_KEY_1"]})
+        Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_MODEL_KEY_1"]})
 
     In this example, 'openai_complete_if_cache' is the callable function that generates the response from the OpenAI model.
     The 'kwargs' dictionary contains the model name and API key to be passed to the function.
@@ -45,11 +45,11 @@ class MultiModel:
     Usage example:
         ```python
         models = [
-            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_API_KEY_1"]}),
-            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_API_KEY_2"]}),
-            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_API_KEY_3"]}),
-            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_API_KEY_4"]}),
-            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_API_KEY_5"]}),
+            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_MODEL_KEY_1"]}),
+            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_MODEL_KEY_2"]}),
+            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_MODEL_KEY_3"]}),
+            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_MODEL_KEY_4"]}),
+            Model(gen_func=openai_complete_if_cache, kwargs={"model": "gpt-4", "api_key": os.environ["LLM_MODEL_KEY_5"]}),
         ]
         multi_model = MultiModel(models)
         rag = Ragent(

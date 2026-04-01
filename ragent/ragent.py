@@ -30,7 +30,12 @@ from ragent.constants import (
     DEFAULT_COSINE_THRESHOLD,
     DEFAULT_RELATED_CHUNK_NUMBER,
 )
-from ragent.utils import get_env_value
+from ragent.utils import (
+    format_exception_brief,
+    get_env_value,
+    is_verbose_error_logging_enabled,
+    log_exception,
+)
 
 from ragent.kg import (
     STORAGES,
@@ -490,7 +495,8 @@ class Ragent:
 
         # Init Embedding
         self.embedding_func = priority_limit_async_func_call(
-            self.embedding_func_max_async
+            self.embedding_func_max_async,
+            label="embedding",
         )(self.embedding_func)
 
         # Initialize all storages
@@ -580,7 +586,10 @@ class Ragent:
         # Directly use llm_response_cache, don't create a new object
         hashing_kv = self.llm_response_cache
 
-        self.llm_model_func = priority_limit_async_func_call(self.llm_model_max_async)(
+        self.llm_model_func = priority_limit_async_func_call(
+            self.llm_model_max_async,
+            label="llm",
+        )(
             partial(
                 self.llm_model_func,  # type: ignore
                 hashing_kv=hashing_kv,
@@ -1156,14 +1165,17 @@ class Ragent:
                             file_extraction_stage_ok = True
 
                         except Exception as e:
-                            # Log error and update pipeline status
-                            logger.error(traceback.format_exc())
                             error_msg = f"Failed to extract document {current_file_number}/{total_files}: {file_path}"
-                            logger.error(error_msg)
+                            log_exception(error_msg, e)
                             async with pipeline_status_lock:
                                 pipeline_status["latest_message"] = error_msg
+                                error_detail = (
+                                    traceback.format_exc().rstrip()
+                                    if is_verbose_error_logging_enabled()
+                                    else f"{error_msg}: {format_exception_brief(e)}"
+                                )
                                 pipeline_status["history_messages"].append(
-                                    traceback.format_exc()
+                                    error_detail
                                 )
                                 pipeline_status["history_messages"].append(error_msg)
 
@@ -1258,14 +1270,17 @@ class Ragent:
                                     )
 
                             except Exception as e:
-                                # Log error and update pipeline status
-                                logger.error(traceback.format_exc())
                                 error_msg = f"Merging stage failed in document {current_file_number}/{total_files}: {file_path}"
-                                logger.error(error_msg)
+                                log_exception(error_msg, e)
                                 async with pipeline_status_lock:
                                     pipeline_status["latest_message"] = error_msg
+                                    error_detail = (
+                                        traceback.format_exc().rstrip()
+                                        if is_verbose_error_logging_enabled()
+                                        else f"{error_msg}: {format_exception_brief(e)}"
+                                    )
                                     pipeline_status["history_messages"].append(
-                                        traceback.format_exc()
+                                        error_detail
                                     )
                                     pipeline_status["history_messages"].append(
                                         error_msg

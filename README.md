@@ -39,6 +39,13 @@ cd ragent_master
 
 ### 2. 安装依赖
 
+`README` 中下面的命令按当前代码入口整理过：
+
+- 当前 `integrations.py` / `singlefile.py` 会在导入阶段直接加载 `MinerU pipeline` 相关模块，所以即使只跑 `onehop` / `multihop` / `chat`，环境里也必须具备 `MinerU` 的 `pipeline` 依赖（如 `torch`、`torchvision`、`transformers`、`doclayout_yolo`）。
+- 仓库的 `pyproject.toml` 已将根依赖切换为 `mineru[pipeline]`，因此 `uv sync` 会一并安装这组依赖。
+- 如果你要直接运行 `integrations.py` / `singlefile.py` 的主流程，建议至少安装 `openai` 和 `api` 两组 extra。
+  这里的 `openai` extra 现在实际包含 `litellm`，用于统一适配 OpenAI-compatible / 多提供商模型调用。
+- `api` 这个名字虽然偏服务端，但当前文档解析主流程里实际用到了其中的 `aiofiles` 依赖。
 **使用 uv（推荐）：**
 
 ```bash
@@ -100,22 +107,28 @@ sudo apt update && sudo apt install libreoffice libreoffice-writer
 
 ```.env
 # ========== LLM（必需）==========
-LLM_API_KEY=""
-LLM_API_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
-LLM_API_MODEL="qwen3-max"
+LLM_MODEL_KEY=""
+LLM_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_MODEL="qwen3-max"
+# 可选：显式指定 LiteLLM provider；不填时会自动推断
+# 例如 openai / custom_openai / anthropic / openrouter / ollama
+# LLM_API_PROVIDER="custom_openai"
 LLM_API_TIMEOUT_SECONDS="180"
+LLM_API_CLIENT_MAX_RETRIES="0"
 
 # ========== Embedding（必需）==========
 # 当前实现不会复用 LLM_API_*，而是单独读取这组变量
-EMBEDDING_BINDING_API_KEY=""
-EMBEDDING_BINDING_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+EMBEDDING_MODEL_KEY=""
+EMBEDDING_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 EMBEDDING_MODEL="text-embedding-v3"
+# 可选：显式指定 LiteLLM provider；不填时会自动推断
+# EMBEDDING_PROVIDER="custom_openai"
 EMBEDDING_DIMENSIONS="256"
 
 # ========== Rerank（默认推荐）==========
 # 当前启动检查会验证 rerank；如果不配置 rerank，请看下面的“关闭开关”
-RERANK_API_KEY=""
-RERANK_URL="https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
+RERANK_MODEL_KEY=""
+RERANK_MODEL_URL="https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
 RERANK_MODEL="qwen3-rerank"
 
 # ========== 图像模型（可选）==========
@@ -127,6 +140,9 @@ IMAGE_MODEL_TIMEOUT="300"
 
 # ========== 可选开关 / 调优 ==========
 MODEL_STARTUP_CHECK_ENABLED="1"
+# 可选：不设置时，启动健康检查超时会自动跟随 LLM_API_TIMEOUT_SECONDS
+# 若配置了图片模型，则也会参考 IMAGE_MODEL_TIMEOUT；需要更大值时可显式覆盖
+# MODEL_STARTUP_CHECK_TIMEOUT_SECONDS="180"
 ENABLE_RERANK="true"
 num_chars_of_front="512"
 num_chars_of_behind="512"
@@ -135,6 +151,7 @@ overlap_size="128"
 RAG_INSERT_TIMEOUT_SECONDS="30"
 RAG_INSERT_TIMEOUT_MAX_SECONDS="60"
 RAG_INDEX_TIMEOUT_SECONDS="1800"
+RAG_PROGRESS_BAR="1"
 ```
 
 如果你暂时不打算接 rerank 服务，至少同时设置：
@@ -312,6 +329,9 @@ python singlefile.py parse ./pdfs SCAPTURE_md SCAPTURE_kg
 ```bash
 python singlefile.py parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage]
 # stage: auto | all | md | rag
+
+# 即使传了 <project_dir>，也可以强制只做 md
+python singlefile.py parse SCAPTURE.pdf SCAPTURE_md SCAPTURE_kg md
 ```
 
 ### `onehop`
