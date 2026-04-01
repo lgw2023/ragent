@@ -5,6 +5,22 @@ from modelscope import snapshot_download as ms_snapshot_download
 from mineru.utils.config_reader import get_local_models_dir
 from mineru.utils.enum_class import ModelPath
 
+
+def _raise_local_model_config_error(repo_mode: str) -> None:
+    config_name = os.getenv("MINERU_TOOLS_CONFIG_JSON", "mineru.json")
+    if os.path.isabs(config_name):
+        config_path = config_name
+    else:
+        config_path = os.path.join(os.path.expanduser("~"), config_name)
+
+    raise RuntimeError(
+        "MINERU_MODEL_SOURCE=local but MinerU local model config is missing or incomplete. "
+        f"Expected '{config_path}' to contain 'models-dir.{repo_mode}'. "
+        "Initialize it with `uv run mineru-models-download --source modelscope --model_type pipeline` "
+        "or update the config to point at an existing local model directory."
+    )
+
+
 def auto_download_and_get_model_root_path(relative_path: str, repo_mode='pipeline') -> str:
     """
     支持文件或目录的可靠下载。
@@ -18,9 +34,11 @@ def auto_download_and_get_model_root_path(relative_path: str, repo_mode='pipelin
 
     if model_source == 'local':
         local_models_config = get_local_models_dir()
+        if not isinstance(local_models_config, dict):
+            _raise_local_model_config_error(repo_mode)
         root_path = local_models_config.get(repo_mode, None)
         if not root_path:
-            raise ValueError(f"Local path for repo_mode '{repo_mode}' is not configured.")
+            _raise_local_model_config_error(repo_mode)
         return root_path
 
     # 建立仓库模式到路径的映射
