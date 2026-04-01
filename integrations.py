@@ -44,6 +44,7 @@ import aiofiles
 from typing import Any
 
 from mineru.cli.common import convert_pdf_bytes_to_bytes_by_pypdfium2, prepare_env, read_fn
+from mineru.utils.config_reader import get_local_models_dir
 
 
 def _prepare_env_flat(output_dir, parse_method):
@@ -1728,6 +1729,25 @@ def parse_doc(
 def mineru_process(pdf_file_path, output_dir, keep_pdf_subdir: bool = True):
     pdf_path_list = [pdf_file_path]
     os.environ['MINERU_MODEL_SOURCE'] = "local"
+    local_models_dir = get_local_models_dir()
+    pipeline_model_root = (
+        local_models_dir.get("pipeline")
+        if isinstance(local_models_dir, dict)
+        else None
+    )
+    if not pipeline_model_root:
+        config_name = os.getenv("MINERU_TOOLS_CONFIG_JSON", "mineru.json")
+        config_path = (
+            config_name
+            if os.path.isabs(config_name)
+            else os.path.join(os.path.expanduser("~"), config_name)
+        )
+        raise RuntimeError(
+            "MinerU pipeline local model is not configured. "
+            f"Expected '{config_path}' to contain 'models-dir.pipeline'. "
+            "Run `uv run mineru-models-download --source modelscope --model_type pipeline` "
+            "in this environment first, or update the config to the existing model path."
+        )
     pdf_name = pdf_file_path.split("/")[-1].split(".")[0]
 
     if keep_pdf_subdir:
