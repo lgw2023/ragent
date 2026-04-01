@@ -15,7 +15,7 @@ import subprocess
 from ragent import Ragent, QueryParam
 from ragent.llm.openai import env_openai_complete, openai_embed
 from ragent.rerank import rerank_from_env
-from ragent.kg.shared_storage import initialize_pipeline_status
+from ragent.kg.shared_storage import initialize_pipeline_status, finalize_share_data
 from ragent.utils import (
     log_model_call,
     logger,
@@ -827,16 +827,19 @@ async def trace_one_hop_problem(
 ):
     stage_timings: list[dict[str, Any]] = []
     rag = await initialize_rag(work_dir, stage_timings=stage_timings)
-    with _maybe_create_usage_collector("onehop_trace") as collector:
-        result = await _run_one_hop_with_rag(
-            rag,
-            query,
-            mode,
-            conversation_history=conversation_history,
-            history_turns=history_turns,
-            include_trace=True,
-            prefill_stage_timings=stage_timings,
-        )
+    try:
+        with _maybe_create_usage_collector("onehop_trace") as collector:
+            result = await _run_one_hop_with_rag(
+                rag,
+                query,
+                mode,
+                conversation_history=conversation_history,
+                history_turns=history_turns,
+                include_trace=True,
+                prefill_stage_timings=stage_timings,
+            )
+    finally:
+        await _close_rag(rag)
     _write_usage_report_if_needed(
         collector,
         _resolve_kg_usage_report_dir(work_dir),
@@ -946,8 +949,11 @@ async def _run_multi_hop_with_rag(
 
 async def trace_multi_hop_problem(work_dir, query):
     rag = await initialize_rag(work_dir)
-    with _maybe_create_usage_collector("multihop_trace") as collector:
-        result = await _run_multi_hop_with_rag(rag, query, include_trace=True)
+    try:
+        with _maybe_create_usage_collector("multihop_trace") as collector:
+            result = await _run_multi_hop_with_rag(rag, query, include_trace=True)
+    finally:
+        await _close_rag(rag)
     _write_usage_report_if_needed(
         collector,
         _resolve_kg_usage_report_dir(work_dir),
@@ -1285,6 +1291,36 @@ async def initialize_rag(
     return rag
 
 
+async def _close_rag(rag: Ragent | None) -> None:
+    """Explicitly release async workers and storages before the CLI exits."""
+    if rag is None:
+        return
+
+    cleanup_errors: list[str] = []
+
+    for attr_name in ("embedding_func", "llm_model_func"):
+        target = getattr(rag, attr_name, None)
+        shutdown = getattr(target, "shutdown", None)
+        if callable(shutdown):
+            try:
+                await shutdown()
+            except Exception as e:
+                cleanup_errors.append(f"{attr_name}.shutdown: {e}")
+
+    try:
+        await rag.finalize_storages()
+    except Exception as e:
+        cleanup_errors.append(f"finalize_storages: {e}")
+
+    try:
+        finalize_share_data()
+    except Exception as e:
+        cleanup_errors.append(f"finalize_share_data: {e}")
+
+    if cleanup_errors:
+        logger.warning("RAG cleanup completed with errors: %s", "; ".join(cleanup_errors))
+
+
 async def ainsert_rag(work_dir, text, doc_name, file_paths: str | None = None):
     if not os.path.exists(work_dir):
         os.mkdir(work_dir)
@@ -1317,6 +1353,8 @@ async def ainsert_rag(work_dir, text, doc_name, file_paths: str | None = None):
         err_msg = str(e) if str(e) else f"{type(e).__name__}({repr(e)})"
         logger.warning(f"ainsert_rag failed, skip this chunk. doc={doc_name}, err={err_msg}")
         return False
+    finally:
+        await _close_rag(rag)
 
 
 def encode_image_to_base64(image_path):
@@ -1410,14 +1448,20 @@ def multimodal_image_analysis_sync(image_path):
 
 async def process_image_file(work_dir, image_file_path, doc_name):
     rag = await initialize_rag(work_dir)
-    image_description = await multimodal_image_analysis(image_file_path)
-    await rag.ainsert(image_description, doc_name=doc_name, file_paths=image_file_path)
+    try:
+        image_description = await multimodal_image_analysis(image_file_path)
+        await rag.ainsert(image_description, doc_name=doc_name, file_paths=image_file_path)
+    finally:
+        await _close_rag(rag)
 
 
 async def inference_multi_hop_problem(work_dir, query, return_all: bool = False):
     rag = await initialize_rag(work_dir)
-    with _maybe_create_usage_collector("multihop_query") as collector:
-        result = await _run_multi_hop_with_rag(rag, query, include_trace=False)
+    try:
+        with _maybe_create_usage_collector("multihop_query") as collector:
+            result = await _run_multi_hop_with_rag(rag, query, include_trace=False)
+    finally:
+        await _close_rag(rag)
     _write_usage_report_if_needed(
         collector,
         _resolve_kg_usage_report_dir(work_dir),
@@ -1440,15 +1484,18 @@ async def inference_one_hop_problem(
     history_turns: int | None = None,
 ):
     rag = await initialize_rag(work_dir)
-    with _maybe_create_usage_collector("onehop_query") as collector:
-        result = await _run_one_hop_with_rag(
-            rag,
-            query,
-            mode,
-            conversation_history=conversation_history,
-            history_turns=history_turns,
-            include_trace=False,
-        )
+    try:
+        with _maybe_create_usage_collector("onehop_query") as collector:
+            result = await _run_one_hop_with_rag(
+                rag,
+                query,
+                mode,
+                conversation_history=conversation_history,
+                history_turns=history_turns,
+                include_trace=False,
+            )
+    finally:
+        await _close_rag(rag)
     _write_usage_report_if_needed(
         collector,
         _resolve_kg_usage_report_dir(work_dir),
@@ -2015,6 +2062,7 @@ async def index_md_to_rag(
 ):
     """第二阶段：基于最终 md 和图片描述文件，构建 RAG/KG 索引。"""
     progress_tracker = _TerminalProgressTracker("KG")
+    rag: Ragent | None = None
     with _maybe_create_usage_collector("index_md_to_rag") as collector:
         with _activate_terminal_progress(progress_tracker):
             try:
@@ -2343,6 +2391,8 @@ async def index_md_to_rag(
             except Exception:
                 progress_tracker.fail("kg_failed", os.path.basename(pdf_file_path))
                 raise
+            finally:
+                await _close_rag(rag)
 
     _write_usage_report_if_needed(
         collector,
