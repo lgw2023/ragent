@@ -46,6 +46,7 @@ cd ragent_master
 - 如果你要直接运行 `integrations.py` / `singlefile.py` 的主流程，建议至少安装 `openai` 和 `api` 两组 extra。
   这里的 `openai` extra 现在实际包含 `litellm`，用于统一适配 OpenAI-compatible / 多提供商模型调用。
 - `api` 这个名字虽然偏服务端，但当前文档解析主流程里实际用到了其中的 `aiofiles` 依赖。
+
 **使用 uv（推荐）：**
 
 ```bash
