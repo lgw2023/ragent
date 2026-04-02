@@ -112,6 +112,42 @@ def _build_source_ref(
     return " | ".join(parts)
 
 
+def _normalize_source_chunk_ids(value: Any) -> list[str]:
+    if value in (None, "", [], {}, ()):
+        return []
+
+    if isinstance(value, str):
+        candidates = split_string_by_multi_markers(value, [GRAPH_FIELD_SEP])
+    elif isinstance(value, (list, tuple, set)):
+        candidates = []
+        for item in value:
+            candidates.extend(_normalize_source_chunk_ids(item))
+    else:
+        candidates = [str(value)]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        chunk_id = str(candidate).strip()
+        if not chunk_id or chunk_id in seen:
+            continue
+        seen.add(chunk_id)
+        normalized.append(chunk_id)
+    return normalized
+
+
+def _serialize_source_chunk_ids(*values: Any) -> str:
+    chunk_ids: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for chunk_id in _normalize_source_chunk_ids(value):
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            chunk_ids.append(chunk_id)
+    return GRAPH_FIELD_SEP.join(chunk_ids)
+
+
 def _extract_chunk_citation_fields(chunk: dict[str, Any]) -> dict[str, Any]:
     citation: dict[str, Any] = {}
     for key in (
@@ -414,6 +450,7 @@ async def _handle_single_entity_extraction(
         entity_type=entity_type,
         description=entity_description,
         source_id=chunk_key,
+        source_chunk_ids=chunk_key,
         file_path=file_path,
     )
 
@@ -473,6 +510,7 @@ async def _handle_single_relationship_extraction(
         description=edge_description,
         keywords=edge_keywords,
         source_id=edge_source_id,
+        source_chunk_ids=edge_source_id,
         file_path=file_path,
     )
 
@@ -496,7 +534,9 @@ async def _merge_nodes_then_upsert(
     if already_node:
         already_entity_types.append(already_node["entity_type"])
         already_source_ids.extend(
-            split_string_by_multi_markers(already_node["source_id"], [GRAPH_FIELD_SEP])
+            _normalize_source_chunk_ids(
+                already_node.get("source_chunk_ids") or already_node.get("source_id")
+            )
         )
         already_file_paths.extend(
             split_string_by_multi_markers(already_node["file_path"], [GRAPH_FIELD_SEP])
@@ -519,8 +559,12 @@ async def _merge_nodes_then_upsert(
     description = GRAPH_FIELD_SEP.join(
         sorted(set([dp["description"] for dp in nodes_data] + already_description))
     )
-    source_id = GRAPH_FIELD_SEP.join(
-        set([dp["source_id"] for dp in nodes_data] + already_source_ids)
+    source_id = _serialize_source_chunk_ids(
+        already_source_ids,
+        *[
+            dp.get("source_chunk_ids") or dp.get("source_id")
+            for dp in nodes_data
+        ],
     )
     file_path = GRAPH_FIELD_SEP.join(
         set([dp["file_path"] for dp in nodes_data] + already_file_paths)
@@ -564,6 +608,7 @@ async def _merge_nodes_then_upsert(
         entity_type=entity_type,
         description=description,
         source_id=source_id,
+        source_chunk_ids=source_id,
         file_path=file_path,
         embeddings= str(embeddings),
         created_at=int(time.time()),
@@ -603,10 +648,13 @@ async def _merge_edges_then_upsert(
             already_weights.append(already_edge.get("weight", 0.0))
 
             # Get source_id with empty string default if missing or None
-            if already_edge.get("source_id") is not None:
+            if already_edge.get("source_chunk_ids") is not None or already_edge.get(
+                "source_id"
+            ) is not None:
                 already_source_ids.extend(
-                    split_string_by_multi_markers(
-                        already_edge["source_id"], [GRAPH_FIELD_SEP]
+                    _normalize_source_chunk_ids(
+                        already_edge.get("source_chunk_ids")
+                        or already_edge.get("source_id")
                     )
                 )
 
@@ -656,11 +704,12 @@ async def _merge_edges_then_upsert(
     # Join all unique keywords with commas
     keywords = ",".join(sorted(all_keywords))
 
-    source_id = GRAPH_FIELD_SEP.join(
-        set(
-            [dp["source_id"] for dp in edges_data if dp.get("source_id")]
-            + already_source_ids
-        )
+    source_id = _serialize_source_chunk_ids(
+        already_source_ids,
+        *[
+            dp.get("source_chunk_ids") or dp.get("source_id")
+            for dp in edges_data
+        ],
     )
     file_path = GRAPH_FIELD_SEP.join(
         set(
@@ -681,6 +730,7 @@ async def _merge_edges_then_upsert(
                     node_data={
                         "entity_id": need_insert_id,
                         "source_id": source_id,
+                        "source_chunk_ids": source_id,
                         "description": description,
                         "entity_type": "UNKNOWN",
                         "file_path": file_path,
@@ -725,6 +775,7 @@ async def _merge_edges_then_upsert(
             description=description,
             keywords=keywords,
             source_id=source_id,
+            source_chunk_ids=source_id,
             file_path=file_path,
             created_at=int(time.time()),
         ),
@@ -736,6 +787,7 @@ async def _merge_edges_then_upsert(
         description=description,
         keywords=keywords,
         source_id=source_id,
+        source_chunk_ids=source_id,
         file_path=file_path,
         created_at=int(time.time()),
     )
@@ -829,6 +881,9 @@ async def merge_nodes_and_edges(
                             "content": f"{entity_data['entity_name']}\n{entity_data['description']}",
                             "embeddings" : entity_data["embeddings"],
                             "source_id": entity_data["source_id"],
+                            "source_chunk_ids": entity_data.get(
+                                "source_chunk_ids", entity_data["source_id"]
+                            ),
                             "file_path": entity_data.get("file_path", "unknown_source"),
                         }
                     }
@@ -867,6 +922,9 @@ async def merge_nodes_and_edges(
                             "keywords": edge_data["keywords"],
                             "content": f"{edge_data['src_id']}\t{edge_data['tgt_id']}\n{edge_data['keywords']}\n{edge_data['description']}",
                             "source_id": edge_data["source_id"],
+                            "source_chunk_ids": edge_data.get(
+                                "source_chunk_ids", edge_data["source_id"]
+                            ),
                             "file_path": edge_data.get("file_path", "unknown_source"),
                         }
                     }
@@ -2081,6 +2139,7 @@ async def _get_node_data(
                 "description": n.get("description", "UNKNOWN"),
                 "created_at": created_at,
                 "file_path": file_path,
+                "source_chunk_ids": n.get("source_chunk_ids") or n.get("source_id", ""),
             }
         )
 
@@ -2102,6 +2161,7 @@ async def _get_node_data(
                 "description": e["description"],
                 "created_at": created_at,
                 "file_path": file_path,
+                "source_chunk_ids": e.get("source_chunk_ids") or e.get("source_id", ""),
             }
         )
 
@@ -2117,13 +2177,15 @@ async def _find_most_related_text_unit_from_entities(
     logger.debug(f"Searching text chunks for {len(node_datas)} entities")
 
     text_units = [
-        split_string_by_multi_markers(dp["source_id"], [GRAPH_FIELD_SEP])[
+        _normalize_source_chunk_ids(
+            dp.get("source_chunk_ids") or dp.get("source_id")
+        )[
             : text_chunks_db.global_config.get(
                 "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
             )
         ]
         for dp in node_datas
-        if dp["source_id"] is not None
+        if (dp.get("source_chunk_ids") or dp.get("source_id")) is not None
     ]
 
     node_names = [dp["entity_name"] for dp in node_datas]
@@ -2149,9 +2211,13 @@ async def _find_most_related_text_unit_from_entities(
 
     # Add null check for node data
     all_one_hop_text_units_lookup = {
-        k: set(split_string_by_multi_markers(v["source_id"], [GRAPH_FIELD_SEP]))
+        k: set(
+            _normalize_source_chunk_ids(
+                v.get("source_chunk_ids") or v.get("source_id")
+            )
+        )
         for k, v in zip(all_one_hop_nodes, all_one_hop_nodes_data)
-        if v is not None and "source_id" in v  # Add source_id check
+        if v is not None and (v.get("source_chunk_ids") or v.get("source_id"))
     }
 
     all_text_units_lookup = {}
@@ -2356,6 +2422,7 @@ async def _get_edge_data(
                 "description": e["description"],
                 "created_at": created_at,
                 "file_path": file_path,
+                "source_chunk_ids": e.get("source_chunk_ids") or e.get("source_id", ""),
             }
         )
 
@@ -2377,6 +2444,7 @@ async def _get_edge_data(
                 "description": n.get("description", "UNKNOWN"),
                 "created_at": created_at,
                 "file_path": file_path,
+                "source_chunk_ids": n.get("source_chunk_ids") or n.get("source_id", ""),
             }
         )
 
@@ -2429,13 +2497,15 @@ async def _find_related_text_unit_from_relationships(
     logger.debug(f"Searching text chunks for {len(edge_datas)} relationships")
 
     text_units = [
-        split_string_by_multi_markers(dp["source_id"], [GRAPH_FIELD_SEP])[
+        _normalize_source_chunk_ids(
+            dp.get("source_chunk_ids") or dp.get("source_id")
+        )[
             : text_chunks_db.global_config.get(
                 "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
             )
         ]
         for dp in edge_datas
-        if dp["source_id"] is not None
+        if (dp.get("source_chunk_ids") or dp.get("source_id")) is not None
     ]
     all_text_units_lookup = {}
 

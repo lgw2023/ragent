@@ -83,6 +83,12 @@ from .utils import (
     logger,
 )
 from .types import KnowledgeGraph
+from .wide_table import (
+    PreparedWideTableImport,
+    WideTableImportConfig,
+    build_wide_table_chunk_result,
+    prepare_wide_table_import,
+)
 from collections import defaultdict
 
 RAG_INSERT_TRACE_ENABLED = os.getenv("RAG_INSERT_TRACE", "0") == "1"
@@ -551,13 +557,26 @@ class Ragent:
             namespace=NameSpace.VECTOR_STORE_ENTITIES,
             workspace=self.workspace,
             embedding_func=self.embedding_func,
-            meta_fields={"entity_name", "source_id", "content", "file_path"},
+            meta_fields={
+                "entity_name",
+                "source_id",
+                "source_chunk_ids",
+                "content",
+                "file_path",
+            },
         )
         self.relationships_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
             namespace=NameSpace.VECTOR_STORE_RELATIONSHIPS,
             workspace=self.workspace,
             embedding_func=self.embedding_func,
-            meta_fields={"src_id", "tgt_id", "source_id", "content", "file_path"},
+            meta_fields={
+                "src_id",
+                "tgt_id",
+                "source_id",
+                "source_chunk_ids",
+                "content",
+                "file_path",
+            },
         )
         self.chunks_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
             namespace=NameSpace.VECTOR_STORE_CHUNKS,
@@ -761,6 +780,67 @@ class Ragent:
             f"ainsert.done doc_name={doc_name} total_elapsed={time.perf_counter() - start_ts:.2f}s"
         )
 
+    def insert_wide_table(
+        self,
+        source: str | os.PathLike[str] | Any,
+        config: WideTableImportConfig,
+        *,
+        doc_id: str | None = None,
+        doc_name: str | None = None,
+        file_path: str | None = None,
+    ) -> None:
+        loop = always_get_an_event_loop()
+        loop.run_until_complete(
+            self.ainsert_wide_table(
+                source,
+                config,
+                doc_id=doc_id,
+                doc_name=doc_name,
+                file_path=file_path,
+            )
+        )
+
+    async def ainsert_wide_table(
+        self,
+        source: str | os.PathLike[str] | Any,
+        config: WideTableImportConfig,
+        *,
+        doc_id: str | None = None,
+        doc_name: str | None = None,
+        file_path: str | None = None,
+    ) -> None:
+        prepared_import = prepare_wide_table_import(
+            source,
+            config,
+            doc_name=doc_name,
+            file_path=file_path,
+        )
+        resolved_doc_id = doc_id or self._compute_wide_table_doc_id(
+            prepared_import, config
+        )
+
+        existing_docs = await self.doc_status.get_by_ids([resolved_doc_id])
+        if existing_docs and existing_docs[0].get("status") == DocStatus.PROCESSED:
+            logger.info(
+                "Wide-table document already processed: %s (%s)",
+                resolved_doc_id,
+                prepared_import.file_path,
+            )
+            return
+
+        chunks, chunk_results = self._build_wide_table_chunks_and_graph(
+            prepared_import,
+            config,
+            resolved_doc_id,
+        )
+        await self._ingest_prebuilt_chunk_graph(
+            doc_id=resolved_doc_id,
+            doc_content=prepared_import.doc_content,
+            file_path=prepared_import.file_path,
+            chunks=chunks,
+            chunk_results=chunk_results,
+        )
+
     async def apipeline_enqueue_documents(
         self,
         input: str | list[str],
@@ -921,6 +1001,248 @@ class Ragent:
         )
         logger.info(f"Stored {len(new_docs)} new unique documents")
 
+    def _build_wide_table_chunks_and_graph(
+        self,
+        prepared_import: PreparedWideTableImport,
+        config: WideTableImportConfig,
+        doc_id: str,
+    ) -> tuple[dict[str, dict[str, Any]], list]:
+        chunks: dict[str, dict[str, Any]] = {}
+        chunk_results = []
+
+        for row in prepared_import.rows:
+            chunk_id = compute_mdhash_id(row.chunk_content, prefix="chunk-")
+            chunks[chunk_id] = {
+                "tokens": len(self.tokenizer.encode(row.chunk_content)),
+                "content": row.chunk_content,
+                "full_doc_id": doc_id,
+                "chunk_order_index": row.row_index,
+                "file_path": prepared_import.file_path,
+                "section_path": row.entity_name,
+                "source_ref": row.source_ref,
+                "llm_cache_list": [],
+            }
+            chunk_results.append(
+                build_wide_table_chunk_result(
+                    row,
+                    chunk_id,
+                    entity_type=config.entity_type,
+                    file_path=prepared_import.file_path,
+                )
+            )
+
+        return chunks, chunk_results
+
+    def _compute_wide_table_doc_id(
+        self,
+        prepared_import: PreparedWideTableImport,
+        config: WideTableImportConfig,
+    ) -> str:
+        import hashlib
+
+        hasher = hashlib.md5()
+        for value in (
+            prepared_import.file_path,
+            prepared_import.doc_name,
+            config.entity_name_column,
+            config.entity_type,
+        ):
+            hasher.update(value.encode("utf-8"))
+            hasher.update(b"\n")
+
+        for row in prepared_import.rows:
+            hasher.update(row.chunk_content.encode("utf-8"))
+            hasher.update(b"\n")
+
+        return f"doc-{hasher.hexdigest()}"
+
+    async def _ingest_prebuilt_chunk_graph(
+        self,
+        *,
+        doc_id: str,
+        doc_content: str,
+        file_path: str,
+        chunks: dict[str, dict[str, Any]],
+        chunk_results: list,
+    ) -> None:
+        pipeline_status = await get_namespace_data("pipeline_status")
+        pipeline_status_lock = get_pipeline_status_lock()
+        content_summary = get_content_summary(doc_content)
+
+        async with pipeline_status_lock:
+            pipeline_status.setdefault("history_messages", [])
+            log_message = f"Processing structured import: {file_path}"
+            pipeline_status["latest_message"] = log_message
+            pipeline_status["history_messages"].append(log_message)
+
+        await self.doc_status.upsert(
+            {
+                doc_id: {
+                    "status": DocStatus.PROCESSING,
+                    "chunks_count": len(chunks),
+                    "chunks_list": list(chunks.keys()),
+                    "content": doc_content,
+                    "content_summary": content_summary,
+                    "content_length": len(doc_content),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "file_path": file_path,
+                }
+            }
+        )
+
+        try:
+            await asyncio.gather(
+                self.chunks_vdb.upsert(chunks),
+                self.full_docs.upsert({doc_id: {"content": doc_content}}),
+                self.text_chunks.upsert(chunks),
+            )
+
+            await merge_nodes_and_edges(
+                chunk_results=chunk_results,
+                knowledge_graph_inst=self.chunk_entity_relation_graph,
+                entity_vdb=self.entities_vdb,
+                relationships_vdb=self.relationships_vdb,
+                global_config=asdict(self),
+                pipeline_status=pipeline_status,
+                pipeline_status_lock=pipeline_status_lock,
+                llm_response_cache=self.llm_response_cache,
+                current_file_number=1,
+                total_files=1,
+                file_path=file_path,
+            )
+
+            await self.doc_status.upsert(
+                {
+                    doc_id: {
+                        "status": DocStatus.PROCESSED,
+                        "chunks_count": len(chunks),
+                        "chunks_list": list(chunks.keys()),
+                        "content": doc_content,
+                        "content_summary": content_summary,
+                        "content_length": len(doc_content),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "file_path": file_path,
+                    }
+                }
+            )
+            await self._insert_done(pipeline_status, pipeline_status_lock)
+        except Exception as e:
+            await self.doc_status.upsert(
+                {
+                    doc_id: {
+                        "status": DocStatus.FAILED,
+                        "error": str(e),
+                        "content": doc_content,
+                        "content_summary": content_summary,
+                        "content_length": len(doc_content),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "file_path": file_path,
+                    }
+                }
+            )
+            if self.llm_response_cache:
+                await self.llm_response_cache.index_done_callback()
+            raise
+
+    def _resolve_source_group_key(self, status_doc: DocProcessingStatus) -> str:
+        content = getattr(status_doc, "content", "") or ""
+        content_prefix = content.split("#######", 1)[0].strip()
+        if content_prefix:
+            content_basename = os.path.basename(content_prefix)
+            content_stem, content_ext = os.path.splitext(content_basename)
+            if content_ext:
+                return content_stem
+            if content_stem:
+                return content_stem
+
+        metadata = getattr(status_doc, "metadata", None) or {}
+        source_file_path = metadata.get("file_path")
+        if isinstance(source_file_path, str) and source_file_path.strip():
+            return os.path.splitext(os.path.basename(source_file_path))[0]
+        file_path = getattr(status_doc, "file_path", None)
+        if isinstance(file_path, str) and file_path.strip():
+            return os.path.splitext(os.path.basename(file_path))[0]
+        return "unknown_source"
+
+    def _build_doc_status_record(
+        self,
+        doc_id: str,
+        status_doc: DocProcessingStatus,
+        *,
+        status: DocStatus,
+        file_path: str,
+        chunks: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        record: dict[str, Any] = {
+            "status": status,
+            "content": status_doc.content,
+            "content_summary": status_doc.content_summary,
+            "content_length": status_doc.content_length,
+            "created_at": status_doc.created_at,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "file_path": file_path,
+            "metadata": getattr(status_doc, "metadata", None) or {},
+        }
+        if chunks is not None:
+            record["chunks_count"] = len(chunks)
+            record["chunks_list"] = list(chunks.keys())
+        elif getattr(status_doc, "chunks_list", None):
+            record["chunks_count"] = status_doc.chunks_count
+            record["chunks_list"] = list(status_doc.chunks_list or [])
+        if error is not None:
+            record["error"] = error
+        return {doc_id: record}
+
+    async def _rollback_staged_group_data(
+        self, staged_docs: list[dict[str, Any]]
+    ) -> None:
+        if not staged_docs:
+            return
+
+        doc_ids = list(
+            {
+                record["doc_id"]
+                for record in staged_docs
+                if record.get("doc_id")
+            }
+        )
+        chunk_ids = list(
+            {
+                chunk_id
+                for record in staged_docs
+                for chunk_id in (record.get("chunks") or {}).keys()
+            }
+        )
+
+        cache_keys: list[str] = []
+        if chunk_ids and self.text_chunks is not None:
+            stored_chunks = await self.text_chunks.get_by_ids(chunk_ids)
+            for chunk_data in stored_chunks:
+                if not chunk_data:
+                    continue
+                cache_keys.extend(chunk_data.get("llm_cache_list") or [])
+
+        cleanup_tasks = []
+        if doc_ids:
+            if self.full_docs is not None:
+                cleanup_tasks.append(self.full_docs.delete(doc_ids))
+        if chunk_ids:
+            if self.text_chunks is not None:
+                cleanup_tasks.append(self.text_chunks.delete(chunk_ids))
+            if self.chunks_vdb is not None:
+                cleanup_tasks.append(self.chunks_vdb.delete(chunk_ids))
+        if cache_keys and self.llm_response_cache is not None:
+            cleanup_tasks.append(
+                self.llm_response_cache.delete(sorted(set(cache_keys)))
+            )
+
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks)
+
     async def apipeline_process_enqueue_documents(
         self,
         split_by_character: str | None = None,
@@ -1019,153 +1341,296 @@ class Ragent:
                 job_name = f"{path_prefix}[{total_files} files]"
                 pipeline_status["job_name"] = job_name
 
-                # Create a counter to track the number of processed files
                 processed_count = 0
-                # Create a semaphore to limit the number of concurrent file processing
                 semaphore = asyncio.Semaphore(self.max_parallel_insert)
+                source_groups: dict[str, list[tuple[str, DocProcessingStatus]]] = (
+                    defaultdict(list)
+                )
+                for doc_id, status_doc in to_process_docs.items():
+                    source_groups[self._resolve_source_group_key(status_doc)].append(
+                        (doc_id, status_doc)
+                    )
 
-                async def process_document(
-                    doc_name:str,
+                class _GroupStageError(Exception):
+                    def __init__(
+                        self, stage_record: dict[str, Any], original_exc: Exception
+                    ):
+                        super().__init__(str(original_exc))
+                        self.stage_record = stage_record
+                        self.original_exc = original_exc
+
+                async def _stage_document(
+                    doc_name: str,
                     doc_id: str,
                     status_doc: DocProcessingStatus,
-                    split_by_character: str | None,
-                    split_by_character_only: bool,
-                    pipeline_status: dict,
-                    pipeline_status_lock: asyncio.Lock,
-                    semaphore: asyncio.Semaphore,
-                ) -> None:
-                    """Process single document"""
-                    file_extraction_stage_ok = False
-                    async with semaphore:
-                        nonlocal processed_count
-                        current_file_number = 0
+                ) -> dict[str, Any]:
+                    nonlocal processed_count
+                    file_path = getattr(status_doc, "file_path", "unknown_source")
+                    current_file_number = 0
+                    chunks: dict[str, Any] = {}
+                    first_stage_tasks: list[asyncio.Task[Any]] = []
+                    entity_relation_task: asyncio.Task[Any] | None = None
+
+                    try:
+                        async with pipeline_status_lock:
+                            processed_count += 1
+                            current_file_number = processed_count
+                            pipeline_status["cur_batch"] = processed_count
+
+                            log_message = (
+                                f"Extracting stage {current_file_number}/{total_files}: "
+                                f"{file_path}"
+                            )
+                            logger.info(log_message)
+                            pipeline_status["history_messages"].append(log_message)
+                            log_message = f"Processing d-id: {doc_id}"
+                            logger.info(log_message)
+                            pipeline_status["latest_message"] = log_message
+                            pipeline_status["history_messages"].append(log_message)
+
+                        chunking_start_ts = time.perf_counter()
                         try:
-                            # Get file path from status document
-                            file_path = getattr(
-                                status_doc, "file_path", "unknown_source"
+                            raw_chunks = self.chunking_func(
+                                doc_name,
+                                self.tokenizer,
+                                status_doc.content,
+                                doc_metadata=status_doc.metadata,
+                                split_by_character=split_by_character,
+                                split_by_character_only=split_by_character_only,
+                                overlap_token_size=self.chunk_overlap_token_size,
+                                max_token_size=self.chunk_token_size,
                             )
-
-                            async with pipeline_status_lock:
-                                # Update processed file count and save current file number
-                                processed_count += 1
-                                current_file_number = (
-                                    processed_count  # Save the current file number
-                                )
-                                pipeline_status["cur_batch"] = processed_count
-
-                                log_message = f"Extracting stage {current_file_number}/{total_files}: {file_path}"
-                                logger.info(log_message)
-                                pipeline_status["history_messages"].append(log_message)
-                                log_message = f"Processing d-id: {doc_id}"
-                                logger.info(log_message)
-                                pipeline_status["latest_message"] = log_message
-                                pipeline_status["history_messages"].append(log_message)
-
-                            # Generate chunks from document
-                            chunking_start_ts = time.perf_counter()
-                            try:
-                                raw_chunks = self.chunking_func(
-                                    doc_name,
-                                    self.tokenizer,
-                                    status_doc.content,
-                                    doc_metadata=status_doc.metadata,
-                                    split_by_character=split_by_character,
-                                    split_by_character_only=split_by_character_only,
-                                    overlap_token_size=self.chunk_overlap_token_size,
-                                    max_token_size=self.chunk_token_size,
-                                )
-                            except TypeError:
-                                raw_chunks = self.chunking_func(
-                                    doc_name,
-                                    self.tokenizer,
-                                    status_doc.content,
-                                    split_by_character,
-                                    split_by_character_only,
-                                    self.chunk_overlap_token_size,
-                                    self.chunk_token_size,
-                                )
-                            chunks: dict[str, Any] = {
-                                compute_mdhash_id(dp["content"], prefix="chunk-"): {
-                                    **dp,
-                                    "full_doc_id": doc_id,
-                                    "file_path": file_path,  # Add file path to each chunk
-                                    "llm_cache_list": [],  # Initialize empty LLM cache list for each chunk
-                                }
-                                for dp in raw_chunks
+                        except TypeError:
+                            raw_chunks = self.chunking_func(
+                                doc_name,
+                                self.tokenizer,
+                                status_doc.content,
+                                split_by_character,
+                                split_by_character_only,
+                                self.chunk_overlap_token_size,
+                                self.chunk_token_size,
+                            )
+                        chunks = {
+                            compute_mdhash_id(dp["content"], prefix="chunk-"): {
+                                **dp,
+                                "full_doc_id": doc_id,
+                                "file_path": file_path,
+                                "llm_cache_list": [],
                             }
-                            _trace_insert(
-                                f"process.chunking.done file={file_path} chunks={len(chunks)} elapsed={time.perf_counter() - chunking_start_ts:.2f}s"
-                            )
+                            for dp in raw_chunks
+                        }
+                        _trace_insert(
+                            f"process.chunking.done file={file_path} chunks={len(chunks)} "
+                            f"elapsed={time.perf_counter() - chunking_start_ts:.2f}s"
+                        )
 
-                            if not chunks:
-                                logger.warning("No document chunks to process")
+                        if not chunks:
+                            logger.warning("No document chunks to process")
 
-                            # Process document in two stages
-                            # Stage 1: Process text chunks and docs (parallel execution)
-                            doc_status_task = asyncio.create_task(
+                        first_stage_tasks = [
+                            asyncio.create_task(
                                 self.doc_status.upsert(
-                                    {
-                                        doc_id: {
-                                            "status": DocStatus.PROCESSING,
-                                            "chunks_count": len(chunks),
-                                            "chunks_list": list(
-                                                chunks.keys()
-                                            ),  # Save chunks list
-                                            "content": status_doc.content,
-                                            "content_summary": status_doc.content_summary,
-                                            "content_length": status_doc.content_length,
-                                            "created_at": status_doc.created_at,
-                                            "updated_at": datetime.now(
-                                                timezone.utc
-                                            ).isoformat(),
-                                            "file_path": file_path,
-                                        }
-                                    }
+                                    self._build_doc_status_record(
+                                        doc_id,
+                                        status_doc,
+                                        status=DocStatus.PROCESSING,
+                                        file_path=file_path,
+                                        chunks=chunks,
+                                    )
                                 )
-                            )
-                            chunks_vdb_task = asyncio.create_task(
-                                self.chunks_vdb.upsert(chunks)
-                            )
-                            full_docs_task = asyncio.create_task(
+                            ),
+                            asyncio.create_task(self.chunks_vdb.upsert(chunks)),
+                            asyncio.create_task(
                                 self.full_docs.upsert(
                                     {doc_id: {"content": status_doc.content}}
                                 )
-                            )
-                            text_chunks_task = asyncio.create_task(
-                                self.text_chunks.upsert(chunks)
-                            )
+                            ),
+                            asyncio.create_task(self.text_chunks.upsert(chunks)),
+                        ]
 
-                            # First stage tasks (parallel execution)
-                            first_stage_tasks = [
-                                doc_status_task,
-                                chunks_vdb_task,
-                                full_docs_task,
-                                text_chunks_task,
-                            ]
-                            entity_relation_task = None
+                        first_stage_start_ts = time.perf_counter()
+                        await asyncio.gather(*first_stage_tasks)
+                        _trace_insert(
+                            f"process.stage1.done file={file_path} "
+                            f"elapsed={time.perf_counter() - first_stage_start_ts:.2f}s"
+                        )
 
-                            # Execute first stage tasks
-                            first_stage_start_ts = time.perf_counter()
-                            await asyncio.gather(*first_stage_tasks)
-                            _trace_insert(
-                                f"process.stage1.done file={file_path} elapsed={time.perf_counter() - first_stage_start_ts:.2f}s"
+                        entity_stage_start_ts = time.perf_counter()
+                        entity_relation_task = asyncio.create_task(
+                            self._process_entity_relation_graph(
+                                chunks, pipeline_status, pipeline_status_lock
                             )
+                        )
+                        chunk_results = await entity_relation_task
+                        _trace_insert(
+                            f"process.entity_extract.done file={file_path} "
+                            f"elapsed={time.perf_counter() - entity_stage_start_ts:.2f}s"
+                        )
 
-                            # Stage 2: Process entity relation graph (after text_chunks are saved)
-                            entity_stage_start_ts = time.perf_counter()
-                            entity_relation_task = asyncio.create_task(
-                                self._process_entity_relation_graph(
-                                    chunks, pipeline_status, pipeline_status_lock
+                        return {
+                            "doc_id": doc_id,
+                            "status_doc": status_doc,
+                            "file_path": file_path,
+                            "chunks": chunks,
+                            "chunk_results": chunk_results,
+                            "current_file_number": current_file_number,
+                        }
+                    except Exception as e:
+                        error_msg = (
+                            f"Failed to extract document {current_file_number}/{total_files}: "
+                            f"{file_path}"
+                        )
+                        log_exception(error_msg, e)
+                        async with pipeline_status_lock:
+                            pipeline_status["latest_message"] = error_msg
+                            error_detail = (
+                                traceback.format_exc().rstrip()
+                                if is_verbose_error_logging_enabled()
+                                else f"{error_msg}: {format_exception_brief(e)}"
+                            )
+                            pipeline_status["history_messages"].append(error_detail)
+                            pipeline_status["history_messages"].append(error_msg)
+
+                            all_tasks = first_stage_tasks + (
+                                [entity_relation_task]
+                                if entity_relation_task is not None
+                                else []
+                            )
+                            for task in all_tasks:
+                                if task and not task.done():
+                                    task.cancel()
+
+                        if self.llm_response_cache:
+                            await self.llm_response_cache.index_done_callback()
+
+                        await self.doc_status.upsert(
+                            self._build_doc_status_record(
+                                doc_id,
+                                status_doc,
+                                status=DocStatus.FAILED,
+                                file_path=file_path,
+                                chunks=chunks,
+                                error=str(e),
+                            )
+                        )
+                        raise _GroupStageError(
+                            {
+                                "doc_id": doc_id,
+                                "status_doc": status_doc,
+                                "file_path": file_path,
+                                "chunks": chunks,
+                                "current_file_number": current_file_number,
+                            },
+                            e,
+                        ) from e
+
+                async def process_source_group(
+                    source_group_key: str,
+                    group_docs: list[tuple[str, DocProcessingStatus]],
+                ) -> None:
+                    async with semaphore:
+                        staged_records: list[dict[str, Any]] = []
+                        rollback_reason = ""
+
+                        for doc_id, status_doc in group_docs:
+                            try:
+                                staged_records.append(
+                                    await _stage_document(doc_name, doc_id, status_doc)
                                 )
-                            )
-                            await entity_relation_task
-                            _trace_insert(
-                                f"process.entity_extract.done file={file_path} elapsed={time.perf_counter() - entity_stage_start_ts:.2f}s"
-                            )
-                            file_extraction_stage_ok = True
+                            except _GroupStageError as stage_error:
+                                rollback_reason = (
+                                    "Rolled back because another segment from the same "
+                                    f"source file failed: {source_group_key}"
+                                )
+                                await self._rollback_staged_group_data(
+                                    staged_records + [stage_error.stage_record]
+                                )
+                                for record in staged_records:
+                                    await self.doc_status.upsert(
+                                        self._build_doc_status_record(
+                                            record["doc_id"],
+                                            record["status_doc"],
+                                            status=DocStatus.FAILED,
+                                            file_path=record["file_path"],
+                                            chunks=record["chunks"],
+                                            error=rollback_reason,
+                                        )
+                                    )
+                                await self._insert_done(
+                                    pipeline_status, pipeline_status_lock
+                                )
+                                return
 
+                        if not staged_records:
+                            return
+
+                        merge_file_number = max(
+                            record["current_file_number"] for record in staged_records
+                        )
+                        merge_start_ts = time.perf_counter()
+                        try:
+                            combined_chunk_results = [
+                                chunk_result
+                                for record in staged_records
+                                for chunk_result in record["chunk_results"]
+                            ]
+                            await merge_nodes_and_edges(
+                                chunk_results=combined_chunk_results,
+                                knowledge_graph_inst=self.chunk_entity_relation_graph,
+                                entity_vdb=self.entities_vdb,
+                                relationships_vdb=self.relationships_vdb,
+                                global_config=asdict(self),
+                                pipeline_status=pipeline_status,
+                                pipeline_status_lock=pipeline_status_lock,
+                                llm_response_cache=self.llm_response_cache,
+                                current_file_number=merge_file_number,
+                                total_files=total_files,
+                                file_path=source_group_key,
+                            )
+                            _trace_insert(
+                                f"process.merge.done file={source_group_key} "
+                                f"elapsed={time.perf_counter() - merge_start_ts:.2f}s"
+                            )
+
+                            await self.doc_status.upsert(
+                                {
+                                    record["doc_id"]: {
+                                        **self._build_doc_status_record(
+                                            record["doc_id"],
+                                            record["status_doc"],
+                                            status=DocStatus.PROCESSED,
+                                            file_path=record["file_path"],
+                                            chunks=record["chunks"],
+                                        )[record["doc_id"]]
+                                    }
+                                    for record in staged_records
+                                }
+                            )
+
+                            persist_start_ts = time.perf_counter()
+                            await self._insert_done(
+                                pipeline_status, pipeline_status_lock
+                            )
+                            _trace_insert(
+                                f"process.persist.done file={source_group_key} "
+                                f"elapsed={time.perf_counter() - persist_start_ts:.2f}s"
+                            )
+
+                            async with pipeline_status_lock:
+                                log_message = (
+                                    "Completed processing source group "
+                                    f"{merge_file_number}/{total_files}: "
+                                    f"{source_group_key}"
+                                )
+                                logger.info(log_message)
+                                pipeline_status["latest_message"] = log_message
+                                pipeline_status["history_messages"].append(log_message)
                         except Exception as e:
-                            error_msg = f"Failed to extract document {current_file_number}/{total_files}: {file_path}"
+                            error_msg = (
+                                "Merging stage failed in source group "
+                                f"{merge_file_number}/{total_files}: "
+                                f"{source_group_key}"
+                            )
                             log_exception(error_msg, e)
                             async with pipeline_status_lock:
                                 pipeline_status["latest_message"] = error_msg
@@ -1179,151 +1644,27 @@ class Ragent:
                                 )
                                 pipeline_status["history_messages"].append(error_msg)
 
-                                # Cancel tasks that are not yet completed
-                                all_tasks = first_stage_tasks + (
-                                    [entity_relation_task]
-                                    if entity_relation_task
-                                    else []
-                                )
-                                for task in all_tasks:
-                                    if task and not task.done():
-                                        task.cancel()
-
-                            # Persistent llm cache
                             if self.llm_response_cache:
                                 await self.llm_response_cache.index_done_callback()
 
-                            # Update document status to failed
-                            await self.doc_status.upsert(
-                                {
-                                    doc_id: {
-                                        "status": DocStatus.FAILED,
-                                        "error": str(e),
-                                        "content": status_doc.content,
-                                        "content_summary": status_doc.content_summary,
-                                        "content_length": status_doc.content_length,
-                                        "created_at": status_doc.created_at,
-                                        "updated_at": datetime.now(
-                                            timezone.utc
-                                        ).isoformat(),
-                                        "file_path": file_path,
-                                    }
-                                }
-                            )
-
-                        # Concurrency is controlled by graph db lock for individual entities and relationships
-                        if file_extraction_stage_ok:
-                            try:
-                                # Get chunk_results from entity_relation_task
-                                chunk_results = await entity_relation_task
-                                merge_start_ts = time.perf_counter()
-                                await merge_nodes_and_edges(
-                                    chunk_results=chunk_results,  # result collected from entity_relation_task
-                                    knowledge_graph_inst=self.chunk_entity_relation_graph,
-                                    entity_vdb=self.entities_vdb,
-                                    relationships_vdb=self.relationships_vdb,
-                                    global_config=asdict(self),
-                                    pipeline_status=pipeline_status,
-                                    pipeline_status_lock=pipeline_status_lock,
-                                    llm_response_cache=self.llm_response_cache,
-                                    current_file_number=current_file_number,
-                                    total_files=total_files,
-                                    file_path=file_path,
-                                )
-                                _trace_insert(
-                                    f"process.merge.done file={file_path} elapsed={time.perf_counter() - merge_start_ts:.2f}s"
-                                )
-
+                            for record in staged_records:
                                 await self.doc_status.upsert(
-                                    {
-                                        doc_id: {
-                                            "status": DocStatus.PROCESSED,
-                                            "chunks_count": len(chunks),
-                                            "chunks_list": list(
-                                                chunks.keys()
-                                            ),  # 保留 chunks_list
-                                            "content": status_doc.content,
-                                            "content_summary": status_doc.content_summary,
-                                            "content_length": status_doc.content_length,
-                                            "created_at": status_doc.created_at,
-                                            "updated_at": datetime.now(
-                                                timezone.utc
-                                            ).isoformat(),
-                                            "file_path": file_path,
-                                        }
-                                    }
+                                    self._build_doc_status_record(
+                                        record["doc_id"],
+                                        record["status_doc"],
+                                        status=DocStatus.FAILED,
+                                        file_path=record["file_path"],
+                                        chunks=record["chunks"],
+                                        error=str(e),
+                                    )
                                 )
+                            raise
 
-                                # Call _insert_done after processing each file
-                                persist_start_ts = time.perf_counter()
-                                await self._insert_done()
-                                _trace_insert(
-                                    f"process.persist.done file={file_path} elapsed={time.perf_counter() - persist_start_ts:.2f}s"
-                                )
-
-                                async with pipeline_status_lock:
-                                    log_message = f"Completed processing file {current_file_number}/{total_files}: {file_path}"
-                                    logger.info(log_message)
-                                    pipeline_status["latest_message"] = log_message
-                                    pipeline_status["history_messages"].append(
-                                        log_message
-                                    )
-
-                            except Exception as e:
-                                error_msg = f"Merging stage failed in document {current_file_number}/{total_files}: {file_path}"
-                                log_exception(error_msg, e)
-                                async with pipeline_status_lock:
-                                    pipeline_status["latest_message"] = error_msg
-                                    error_detail = (
-                                        traceback.format_exc().rstrip()
-                                        if is_verbose_error_logging_enabled()
-                                        else f"{error_msg}: {format_exception_brief(e)}"
-                                    )
-                                    pipeline_status["history_messages"].append(
-                                        error_detail
-                                    )
-                                    pipeline_status["history_messages"].append(
-                                        error_msg
-                                    )
-
-                                # Persistent llm cache
-                                if self.llm_response_cache:
-                                    await self.llm_response_cache.index_done_callback()
-
-                                # Update document status to failed
-                                await self.doc_status.upsert(
-                                    {
-                                        doc_id: {
-                                            "status": DocStatus.FAILED,
-                                            "error": str(e),
-                                            "content": status_doc.content,
-                                            "content_summary": status_doc.content_summary,
-                                            "content_length": status_doc.content_length,
-                                            "created_at": status_doc.created_at,
-                                            "updated_at": datetime.now().isoformat(),
-                                            "file_path": file_path,
-                                        }
-                                    }
-                                )
-
-                # Create processing tasks for all documents
-                doc_tasks = []
-                for doc_id, status_doc in to_process_docs.items():
-                    doc_tasks.append(
-                        process_document(
-                            doc_name,
-                            doc_id,
-                            status_doc,
-                            split_by_character,
-                            split_by_character_only,
-                            pipeline_status,
-                            pipeline_status_lock,
-                            semaphore,
-                        )
-                    )
-
-                # Wait for all document processing to complete
-                await asyncio.gather(*doc_tasks)
+                group_tasks = [
+                    process_source_group(source_group_key, group_docs)
+                    for source_group_key, group_docs in source_groups.items()
+                ]
+                await asyncio.gather(*group_tasks)
 
                 # Check if there's a pending request to process more documents (with lock)
                 has_pending_request = False
@@ -1442,12 +1783,18 @@ class Ragent:
                 chunk_entry = {
                     "content": chunk_content,
                     "source_id": source_id,
+                    "source_chunk_ids": chunk_data.get("source_chunk_ids", source_id),
                     "tokens": tokens,
                     "chunk_order_index": chunk_order_index,
                     "full_doc_id": full_doc_id
                     if full_doc_id is not None
                     else source_id,
                     "file_path": file_path,
+                    "page_numbers": chunk_data.get("page_numbers"),
+                    "page_number_start": chunk_data.get("page_number_start"),
+                    "page_number_end": chunk_data.get("page_number_end"),
+                    "section_path": chunk_data.get("section_path"),
+                    "source_ref": chunk_data.get("source_ref"),
                     "status": DocStatus.PROCESSED,
                 }
                 all_chunks_data[chunk_id] = chunk_entry
@@ -1482,6 +1829,7 @@ class Ragent:
                     "entity_type": entity_type,
                     "description": description,
                     "source_id": source_id,
+                    "source_chunk_ids": entity_data.get("source_chunk_ids", source_id),
                     "file_path": file_path,
                     "created_at": int(time.time()),
                 }
@@ -1521,6 +1869,9 @@ class Ragent:
                             node_data={
                                 "entity_id": need_insert_id,
                                 "source_id": source_id,
+                                "source_chunk_ids": relationship_data.get(
+                                    "source_chunk_ids", source_id
+                                ),
                                 "description": "UNKNOWN",
                                 "entity_type": "UNKNOWN",
                                 "file_path": file_path,
@@ -1537,6 +1888,9 @@ class Ragent:
                         "description": description,
                         "keywords": keywords,
                         "source_id": source_id,
+                        "source_chunk_ids": relationship_data.get(
+                            "source_chunk_ids", source_id
+                        ),
                         "file_path": file_path,
                         "created_at": int(time.time()),
                     },
@@ -1548,6 +1902,7 @@ class Ragent:
                     "description": description,
                     "keywords": keywords,
                     "source_id": source_id,
+                    "source_chunk_ids": relationship_data.get("source_chunk_ids", source_id),
                     "weight": weight,
                     "file_path": file_path,
                     "created_at": int(time.time()),
@@ -1561,6 +1916,7 @@ class Ragent:
                     "content": dp["entity_name"] + "\n" + dp["description"],
                     "entity_name": dp["entity_name"],
                     "source_id": dp["source_id"],
+                    "source_chunk_ids": dp.get("source_chunk_ids", dp["source_id"]),
                     "description": dp["description"],
                     "entity_type": dp["entity_type"],
                     "file_path": dp.get("file_path", "custom_kg"),
@@ -1575,6 +1931,7 @@ class Ragent:
                     "src_id": dp["src_id"],
                     "tgt_id": dp["tgt_id"],
                     "source_id": dp["source_id"],
+                    "source_chunk_ids": dp.get("source_chunk_ids", dp["source_id"]),
                     "content": f"{dp['keywords']}\t{dp['src_id']}\n{dp['tgt_id']}\n{dp['description']}",
                     "keywords": dp["keywords"],
                     "description": dp["description"],

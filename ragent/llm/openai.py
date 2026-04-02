@@ -144,6 +144,98 @@ def _is_retryable_transport_error(exc: BaseException) -> bool:
     return False
 
 
+def _extract_http_status_error(
+    exc: BaseException,
+) -> httpx.HTTPStatusError | None:
+    for chained_exc in _iter_exception_chain(exc):
+        if isinstance(chained_exc, httpx.HTTPStatusError):
+            return chained_exc
+    return None
+
+
+def _extract_http_error_response_details(response: httpx.Response) -> dict[str, Any]:
+    error_type = None
+    error_code = None
+    error_message = None
+    request_id = response.headers.get("x-request-id") or response.headers.get(
+        "request-id"
+    )
+
+    body_text: str | None = None
+    try:
+        body_text = response.text
+    except Exception:
+        body_text = None
+
+    body_json: Any | None = None
+    try:
+        body_json = response.json()
+    except Exception:
+        body_json = None
+
+    if isinstance(body_json, dict):
+        error_payload = body_json.get("error")
+        if isinstance(error_payload, dict):
+            error_type = error_payload.get("type")
+            error_code = error_payload.get("code")
+            error_message = error_payload.get("message")
+
+    body_preview_source = body_text
+    if not body_preview_source and body_json is not None:
+        body_preview_source = _safe_serialize_for_log(body_json, max_len=1200)
+
+    return {
+        "status_code": response.status_code,
+        "request_id": request_id,
+        "error_type": error_type,
+        "error_code": error_code,
+        "error_message": error_message,
+        "body_preview": _truncate_for_log(body_preview_source or "", max_len=1200),
+    }
+
+
+def _is_non_retryable_quota_http_status_error(response: httpx.Response) -> bool:
+    if response.status_code != 429:
+        return False
+
+    details = _extract_http_error_response_details(response)
+    markers = " ".join(
+        str(value).lower()
+        for value in (
+            details["error_type"],
+            details["error_code"],
+            details["error_message"],
+            details["body_preview"],
+        )
+        if value
+    )
+    return any(
+        marker in markers
+        for marker in (
+            "insufficient_quota",
+            "quota exceeded",
+            "quota_exceeded",
+            "current quota",
+            "billing details",
+            "token-limit",
+            "token limit",
+        )
+    )
+
+
+def _is_retryable_http_status_error(exc: BaseException) -> bool:
+    """429/502/503/504 from httpx (e.g. DashScope OpenAI-compatible /embeddings)."""
+    http_status_error = _extract_http_status_error(exc)
+    if http_status_error is None:
+        return False
+
+    response = http_status_error.response
+    code = response.status_code
+    if code == 429 and _is_non_retryable_quota_http_status_error(response):
+        return False
+    return code in (429, 502, 503, 504)
+
+
 def _parse_optional_bool(value: Any) -> bool | None:
     if value is None:
         return None
@@ -1171,6 +1263,7 @@ async def nvidia_openai_complete(
     retry=(
         retry_if_exception_type(RateLimitError)
         | retry_if_exception(_is_retryable_transport_error)
+        | retry_if_exception(_is_retryable_http_status_error)
     ),
 )
 async def openai_embed(
@@ -1277,7 +1370,25 @@ async def openai_embed(
         )
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(request_url, headers=headers, json=payload)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                details = _extract_http_error_response_details(response)
+                logger.error(
+                    "Embedding HTTP request failed. model=%s provider=%s batch_size=%s total_chars=%s request_url=%s status=%s request_id=%s error_code=%s error_type=%s message=%s body=%s",
+                    embedding_model,
+                    resolved_provider or "openai-compatible",
+                    len(texts),
+                    sum(len(text) for text in texts),
+                    request_url,
+                    details["status_code"],
+                    details["request_id"],
+                    details["error_code"],
+                    details["error_type"],
+                    details["error_message"],
+                    details["body_preview"],
+                )
+                raise
             response_payload = response.json()
         record_model_usage(
             "embedding",
