@@ -6,13 +6,15 @@ from dataclasses import asdict
 import math
 from dotenv import load_dotenv
 from pathlib import Path
+import pandas as pd
 # use the .env that is inside the current folder
 # allows to use different .env file for each ragent instance
 # the OS environment variables take precedence over the .env file
 _ENV_PATH = Path(__file__).resolve().with_name(".env")
 load_dotenv(dotenv_path=_ENV_PATH, override=True) #$HOME替换为本地ragent存储的绝对路径
 import subprocess
-from ragent import Ragent, QueryParam
+from ragent import Ragent, QueryParam, WideTableImportConfig
+from ragent.wide_table import load_wide_table_dataframe
 from ragent.llm.openai import env_openai_complete, openai_embed
 from ragent.rerank import rerank_from_env
 from ragent.kg.shared_storage import initialize_pipeline_status, finalize_share_data
@@ -23,7 +25,9 @@ from ragent.utils import (
     get_current_model_usage_collector,
     record_model_usage,
     write_model_usage_report,
+    split_string_by_multi_markers,
 )
+from ragent.constants import GRAPH_FIELD_SEP
 from ragent.operate import (
     graph_query,
     hybrid_query,
@@ -68,6 +72,30 @@ _MODEL_HEALTHCHECK_LOCK = asyncio.Lock()
 _INFO_PIPELINE_STAGE_PREFIXES = ("image_mm_", "md_injection_")
 _INFO_PIPELINE_STAGE_NAMES = {"build_enhanced_md_start"}
 _ACTIVE_TERMINAL_PROGRESS_TRACKER = None
+_WIDE_TABLE_ENTITY_NAME_CANDIDATES = (
+    "entity_name",
+    "recipe_name",
+    "sample_name",
+    "item_name",
+    "product_name",
+    "title",
+    "name",
+    "sample_id",
+    "item_id",
+    "record_id",
+    "id",
+)
+_WIDE_TABLE_ENTITY_TYPE_HINTS = {
+    "recipe": "recipe",
+    "paper": "paper",
+    "author": "author",
+    "drug": "drug",
+    "disease": "disease",
+    "patient": "patient",
+    "product": "product",
+    "company": "company",
+}
+_WIDE_TABLE_FILE_EXTENSIONS = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm"}
 
 
 def _env_progress_enabled() -> bool:
@@ -93,6 +121,144 @@ def _truncate_progress_text(text: str, limit: int) -> str:
     if len(normalized) <= limit:
         return normalized
     return normalized[: max(limit - 3, 0)] + "..."
+
+
+def _is_csv_file(file_path: str) -> bool:
+    return os.path.splitext(file_path)[1].lower() == ".csv"
+
+
+def _is_wide_table_file(file_path: str) -> bool:
+    return os.path.splitext(file_path)[1].lower() in _WIDE_TABLE_FILE_EXTENSIONS
+
+
+def _normalize_wide_table_identifier(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+
+
+def _parse_csv_bool_env(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_wide_table_list_env(name: str) -> list[str]:
+    return [
+        column_name.strip()
+        for column_name in os.getenv(name, "").split(",")
+        if column_name.strip()
+    ]
+
+
+def _parse_wide_table_sheet_name_env() -> str | int | None:
+    raw_value = os.getenv("WIDE_TABLE_SHEET_NAME")
+    if raw_value is None:
+        return None
+
+    stripped = raw_value.strip()
+    if not stripped:
+        return None
+    if stripped.isdigit():
+        return int(stripped)
+    return stripped
+
+
+def _detect_wide_table_entity_name_column(dataframe: pd.DataFrame) -> str:
+    override = os.getenv("WIDE_TABLE_ENTITY_NAME_COLUMN")
+    if override:
+        if override not in dataframe.columns:
+            raise ValueError(
+                f"WIDE_TABLE_ENTITY_NAME_COLUMN='{override}' not found in wide-table columns: "
+                f"{list(dataframe.columns)}"
+            )
+        return override
+
+    normalized_columns = {
+        column_name: _normalize_wide_table_identifier(column_name)
+        for column_name in dataframe.columns
+    }
+
+    for candidate in _WIDE_TABLE_ENTITY_NAME_CANDIDATES:
+        for column_name, normalized in normalized_columns.items():
+            if normalized == candidate:
+                return column_name
+
+    scored_candidates: list[tuple[float, str]] = []
+    for column_name in dataframe.columns:
+        series = dataframe[column_name].dropna()
+        if series.empty:
+            continue
+
+        string_series = series.astype(str).str.strip()
+        if string_series.eq("").all():
+            continue
+
+        numeric_ratio = pd.to_numeric(string_series, errors="coerce").notna().mean()
+        if numeric_ratio > 0.95:
+            continue
+
+        unique_ratio = string_series.nunique(dropna=True) / max(len(string_series), 1)
+        avg_len = float(string_series.map(len).mean())
+        score = unique_ratio * 3.0 + min(avg_len, 120.0) / 120.0
+        scored_candidates.append((score, column_name))
+
+    if scored_candidates:
+        scored_candidates.sort(reverse=True)
+        return scored_candidates[0][1]
+
+    raise ValueError(
+        "Unable to infer the entity-name column for this wide table. "
+        "Set WIDE_TABLE_ENTITY_NAME_COLUMN explicitly."
+    )
+
+
+def _detect_wide_table_entity_type(
+    table_file_path: str,
+    entity_name_column: str,
+) -> str:
+    override = os.getenv("WIDE_TABLE_ENTITY_TYPE")
+    if override:
+        return override.strip()
+
+    combined_hint = _normalize_wide_table_identifier(
+        f"{Path(table_file_path).stem}_{entity_name_column}"
+    )
+    for hint, entity_type in _WIDE_TABLE_ENTITY_TYPE_HINTS.items():
+        if hint in combined_hint:
+            return entity_type
+
+    normalized_column = _normalize_wide_table_identifier(entity_name_column)
+    if normalized_column.endswith("_name"):
+        base_type = normalized_column[: -len("_name")]
+        if base_type and base_type not in {"entity", "item", "sample", "record", "row"}:
+            return base_type
+
+    return "sample"
+
+
+def _build_wide_table_import_config(
+    dataframe: pd.DataFrame,
+    table_file_path: str,
+) -> WideTableImportConfig:
+    sheet_name = _parse_wide_table_sheet_name_env()
+    entity_name_column = _detect_wide_table_entity_name_column(dataframe)
+    entity_type = _detect_wide_table_entity_type(table_file_path, entity_name_column)
+    excluded_columns = _parse_wide_table_list_env("WIDE_TABLE_EXCLUDED_COLUMNS")
+    feature_columns = _parse_wide_table_list_env("WIDE_TABLE_FEATURE_COLUMNS") or None
+    include_null_values = _parse_csv_bool_env("WIDE_TABLE_INCLUDE_NULL_VALUES", False)
+    table_name = Path(table_file_path).stem
+    if sheet_name not in (None, "", 0):
+        table_name = f"{table_name}[{sheet_name}]"
+
+    return WideTableImportConfig(
+        entity_name_column=entity_name_column,
+        entity_type=entity_type,
+        sheet_name=sheet_name,
+        feature_columns=feature_columns,
+        excluded_columns=excluded_columns,
+        include_null_values=include_null_values,
+        table_name=table_name,
+    )
 
 
 def _weighted_ratio(start: float, end: float, completed: int, total: int) -> float:
@@ -491,10 +657,23 @@ def _build_text_segment_metadata(
     }
 
 
+def _resolve_content_list_path_from_md(md_path: str) -> str | None:
+    if not md_path:
+        return None
+
+    md_dir = os.path.dirname(md_path)
+    md_name = os.path.splitext(os.path.basename(md_path))[0]
+    candidate_path = os.path.join(md_dir, f"{md_name}_content_list.json")
+    if os.path.exists(candidate_path):
+        return candidate_path
+    return None
+
+
 def _collect_ranked_chunks(
     weights: dict[str, Any],
     texts: dict[str, str],
     file_paths: dict[str, str],
+    metadata_map: dict[str, dict[str, Any]] | None = None,
     limit: int = 5,
     source: str | None = None,
 ):
@@ -510,21 +689,58 @@ def _collect_ranked_chunks(
         }
         if source is not None:
             result["source"] = source
+        if metadata_map:
+            for key, value in metadata_map.get(chunk_id, {}).items():
+                if value not in (None, "", [], {}):
+                    result[key] = value
         results.append(result)
     return results
+
+
+def _normalize_source_chunk_ids(value: Any) -> list[str]:
+    if value in (None, "", [], {}, ()):
+        return []
+
+    if isinstance(value, str):
+        candidates = split_string_by_multi_markers(value, [GRAPH_FIELD_SEP])
+    elif isinstance(value, (list, tuple, set)):
+        candidates = []
+        for item in value:
+            candidates.extend(_normalize_source_chunk_ids(item))
+    else:
+        candidates = [str(value)]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        chunk_id = str(candidate).strip()
+        if not chunk_id or chunk_id in seen:
+            continue
+        seen.add(chunk_id)
+        normalized.append(chunk_id)
+    return normalized
+
+
+def _extract_source_fields(item: dict[str, Any]) -> dict[str, Any]:
+    extracted: dict[str, Any] = {}
+    for key in ("source_chunk_ids", "source_refs", "source_refs_display"):
+        value = item.get(key)
+        if value not in (None, "", [], {}):
+            extracted[key] = value
+    return extracted
 
 
 def _collect_entity_hits(entities: list[dict], limit: int = 5):
     results = []
     for item in entities[:limit]:
-        results.append(
-            {
-                "entity": item.get("entity", "UNKNOWN"),
-                "type": item.get("type", "UNKNOWN"),
-                "file_path": item.get("file_path", "unknown_source"),
-                "preview": _preview_text(item.get("description", "")),
-            }
-        )
+        result = {
+            "entity": item.get("entity", "UNKNOWN"),
+            "type": item.get("type", "UNKNOWN"),
+            "file_path": item.get("file_path", "unknown_source"),
+            "preview": _preview_text(item.get("description", "")),
+        }
+        result.update(_extract_source_fields(item))
+        results.append(result)
     return results
 
 
@@ -550,15 +766,80 @@ def _extract_document_chunks_from_context(context_text: str) -> list[dict[str, A
 def _collect_relation_hits(relations: list[dict], limit: int = 5):
     results = []
     for item in relations[:limit]:
-        results.append(
-            {
-                "entity1": item.get("entity1", "UNKNOWN"),
-                "entity2": item.get("entity2", "UNKNOWN"),
-                "file_path": item.get("file_path", "unknown_source"),
-                "preview": _preview_text(item.get("description", "")),
-            }
-        )
+        result = {
+            "entity1": item.get("entity1", "UNKNOWN"),
+            "entity2": item.get("entity2", "UNKNOWN"),
+            "file_path": item.get("file_path", "unknown_source"),
+            "preview": _preview_text(item.get("description", "")),
+        }
+        result.update(_extract_source_fields(item))
+        results.append(result)
     return results
+
+
+async def _enrich_graph_hits_with_chunk_sources(
+    items: list[dict[str, Any]],
+    chunk_storage,
+    limit_per_item: int = 3,
+) -> None:
+    if not items or chunk_storage is None:
+        return
+
+    ordered_chunk_ids: list[str] = []
+    seen_chunk_ids: set[str] = set()
+    for item in items:
+        for chunk_id in _normalize_source_chunk_ids(
+            item.get("source_chunk_ids") or item.get("source_id")
+        ):
+            if chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(chunk_id)
+            ordered_chunk_ids.append(chunk_id)
+
+    if not ordered_chunk_ids:
+        return
+
+    chunk_records = await chunk_storage.get_by_ids(ordered_chunk_ids)
+    chunk_map: dict[str, dict[str, Any]] = {}
+    for chunk_id, record in zip(ordered_chunk_ids, chunk_records):
+        if record:
+            chunk_map[chunk_id] = record
+
+    for item in items:
+        source_chunk_ids = _normalize_source_chunk_ids(
+            item.get("source_chunk_ids") or item.get("source_id")
+        )
+        if not source_chunk_ids:
+            continue
+        source_refs: list[str] = []
+        for chunk_id in source_chunk_ids:
+            chunk = chunk_map.get(chunk_id)
+            if not chunk:
+                continue
+            source_ref = chunk.get("source_ref") or chunk.get("file_path") or chunk_id
+            if source_ref in source_refs:
+                continue
+            source_refs.append(source_ref)
+            if len(source_refs) >= limit_per_item:
+                break
+        if source_refs:
+            item["source_chunk_ids"] = GRAPH_FIELD_SEP.join(source_chunk_ids)
+            item["source_refs"] = source_refs
+            item["source_refs_display"] = " ; ".join(source_refs)
+
+
+async def _enrich_debug_payload_with_chunk_sources(
+    debug_payload: dict[str, Any],
+    chunk_storage,
+) -> None:
+    await _enrich_graph_hits_with_chunk_sources(
+        debug_payload.get("graph_entities", []),
+        chunk_storage,
+    )
+    await _enrich_graph_hits_with_chunk_sources(
+        debug_payload.get("graph_relations", []),
+        chunk_storage,
+    )
 
 
 def _collect_final_context_chunks(
@@ -660,6 +941,7 @@ def _build_one_hop_trace(
             debug_payload["vector_weights"],
             debug_payload["vector_texts"],
             debug_payload["vector_file_paths"],
+            debug_payload.get("vector_metadata_map"),
             source="vector",
         )
         trace["graph_entity_hits"] = _collect_entity_hits(debug_payload["graph_entities"])
@@ -668,6 +950,7 @@ def _build_one_hop_trace(
             debug_payload["graph_weights"],
             debug_payload["graph_texts"],
             debug_payload["graph_file_paths"],
+            debug_payload.get("graph_metadata_map"),
             source="graph",
         )
         trace["merged_candidates"] = [
@@ -753,6 +1036,10 @@ async def _run_one_hop_with_rag(
                     *prefill_stage_timings,
                     *debug_payload.get("stage_timings", []),
                 ]
+            await _enrich_debug_payload_with_chunk_sources(
+                debug_payload,
+                rag.text_chunks,
+            )
             await rag._query_done()
             return {
                 "answer": answer,
@@ -790,6 +1077,10 @@ async def _run_one_hop_with_rag(
                     *prefill_stage_timings,
                     *debug_payload.get("stage_timings", []),
                 ]
+            await _enrich_debug_payload_with_chunk_sources(
+                debug_payload,
+                rag.text_chunks,
+            )
             await rag._query_done()
             return {
                 "answer": answer,
@@ -2109,13 +2400,20 @@ async def index_md_to_rag(
                 if not md_text:
                     raise ValueError("md_text is empty")
 
+                resolved_content_list_path = content_list_path or _resolve_content_list_path_from_md(
+                    md_path
+                )
                 content_list: list[dict[str, Any]] = []
-                if content_list_path and os.path.exists(content_list_path):
+                if resolved_content_list_path and os.path.exists(resolved_content_list_path):
                     try:
-                        async with aiofiles.open(content_list_path, "r", encoding="utf-8") as f:
+                        async with aiofiles.open(
+                            resolved_content_list_path, "r", encoding="utf-8"
+                        ) as f:
                             content_list = json.loads(await f.read())
                     except Exception as e:
-                        logger.warning(f"Failed to load content_list metadata from {content_list_path}: {e}")
+                        logger.warning(
+                            f"Failed to load content_list metadata from {resolved_content_list_path}: {e}"
+                        )
 
                 text_blocks, image_metadata_map = _build_content_list_index(
                     content_list, source_pdf_path
@@ -2533,6 +2831,119 @@ async def pdf_insert(pdf_file_path, mineru_output_dir, project_dir, keep_pdf_sub
             "stage": "all",
         },
     )
+
+
+async def wide_table_insert(table_file_path, project_dir):
+    """Structured wide-table ingestion: detect a sample-feature schema and build KG directly."""
+    if not os.path.exists(table_file_path):
+        raise FileNotFoundError(f"找不到文件: {table_file_path}")
+    if not _is_wide_table_file(table_file_path):
+        raise ValueError(
+            "输入文件必须是宽表文件，支持 .csv/.tsv/.txt/.xlsx/.xlsm"
+        )
+    if not project_dir:
+        raise ValueError("宽表导入需要 project_dir")
+
+    await ensure_startup_model_check_once()
+    table_abs_path = os.path.abspath(table_file_path)
+    project_abs_path = os.path.abspath(project_dir)
+    os.makedirs(project_abs_path, exist_ok=True)
+
+    progress_tracker = _TerminalProgressTracker("TABLE")
+    rag: Ragent | None = None
+
+    sheet_name = _parse_wide_table_sheet_name_env()
+
+    with _maybe_create_usage_collector("wide_table_insert") as collector:
+        with _activate_terminal_progress(progress_tracker):
+            try:
+                progress_tracker.start_estimated_phase(
+                    "table_scan",
+                    f"Loading {os.path.basename(table_abs_path)}",
+                    start_progress=0.02,
+                    end_progress=0.18,
+                    estimate_seconds=float(
+                        os.getenv("CSV_SCAN_ESTIMATE_SECONDS", "2")
+                    ),
+                )
+                dataframe, _ = await asyncio.to_thread(
+                    load_wide_table_dataframe,
+                    table_abs_path,
+                    sheet_name=sheet_name,
+                )
+                config = _build_wide_table_import_config(dataframe, table_abs_path)
+                row_count, column_count = dataframe.shape
+                progress_tracker.update(
+                    0.18,
+                    "table_scan",
+                    f"rows={row_count}, cols={column_count}, entity={config.entity_name_column}",
+                )
+                logger.info(
+                    "Wide-table import detected. file=%s, rows=%s, columns=%s, entity_name_column=%s, entity_type=%s, sheet_name=%s",
+                    table_abs_path,
+                    row_count,
+                    column_count,
+                    config.entity_name_column,
+                    config.entity_type,
+                    config.sheet_name,
+                )
+
+                progress_tracker.start_estimated_phase(
+                    "rag_init",
+                    "Initializing RAG stores",
+                    start_progress=0.18,
+                    end_progress=0.28,
+                    estimate_seconds=float(
+                        os.getenv("KG_PROGRESS_INIT_ESTIMATE_SECONDS", "8")
+                    ),
+                )
+                rag = await initialize_rag(project_abs_path)
+                progress_tracker.update(0.28, "rag_init", "RAG stores initialized")
+
+                ingest_estimate = max(
+                    float(os.getenv("CSV_INGEST_ESTIMATE_SECONDS", "8")),
+                    min(row_count * 0.03, 180.0),
+                )
+                progress_tracker.start_estimated_phase(
+                    "table_ingest",
+                    f"Importing {os.path.basename(table_abs_path)}",
+                    start_progress=0.28,
+                    end_progress=0.95,
+                    estimate_seconds=ingest_estimate,
+                )
+                await rag.ainsert_wide_table(
+                    dataframe,
+                    config,
+                    file_path=table_abs_path,
+                    doc_name=config.table_name or Path(table_abs_path).stem,
+                )
+                progress_tracker.finish("kg_ready", os.path.basename(table_abs_path))
+                logger.info(
+                    "Wide-table knowledge graph import completed. file=%s, project_dir=%s",
+                    table_abs_path,
+                    project_abs_path,
+                )
+            except Exception:
+                progress_tracker.fail("table_failed", os.path.basename(table_abs_path))
+                raise
+            finally:
+                await _close_rag(rag)
+
+    _write_usage_report_if_needed(
+        collector,
+        _resolve_kg_usage_report_dir(project_abs_path),
+        task_name="wide_table_insert",
+        metadata={
+            "wide_table_file_path": table_abs_path,
+            "project_dir": project_abs_path,
+            "stage": "wide_table",
+        },
+    )
+
+
+async def csv_insert(csv_file_path, project_dir):
+    """Backward-compatible alias for wide-table ingestion."""
+    await wide_table_insert(csv_file_path, project_dir)
 
 
 async def docx2pdf(docx_path, pdf_path):

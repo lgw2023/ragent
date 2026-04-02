@@ -9,6 +9,7 @@ from typing import Any
 if __package__:
     # Package execution (e.g., python -m ragent.singlefile)
     from .integrations import (
+        wide_table_insert,
         pdf_insert,
         build_enhanced_md,
         index_md_to_rag,
@@ -21,6 +22,7 @@ if __package__:
 else:
     # Script execution (e.g., python singlefile.py ...)
     from integrations import (
+        wide_table_insert,
         pdf_insert,
         build_enhanced_md,
         index_md_to_rag,
@@ -72,6 +74,12 @@ def _warn(text: str) -> str:
 
 def _section_rule(char: str = "=") -> str:
     return _style(char * 78, _DIM, _WHITE)
+
+_WIDE_TABLE_EXTENSIONS = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm"}
+
+
+def _is_wide_table_path(file_path: str) -> bool:
+    return os.path.splitext(file_path)[1].lower() in _WIDE_TABLE_EXTENSIONS
 
 
 def _cli_excepthook(exc_type, exc, tb):
@@ -132,13 +140,14 @@ def _print_trace_list(title: str, items: list[dict], kind: str):
         print(_muted("  - 无"))
         return
     for item in items:
+        source_label = item.get("source_ref") or item.get("source_refs_display") or item.get("file_path", "unknown_source")
         if kind == "keyword":
             print(f"  - {_style(str(item), _GREEN)}")
             continue
         if kind == "entity":
             _print_item_box(
                 [
-                    f"{_style(item['entity'], _BOLD, _GREEN)} | type={item['type']} | source={item['file_path']}",
+                    f"{_style(item['entity'], _BOLD, _GREEN)} | type={item['type']} | source={source_label}",
                     item["preview"],
                 ],
                 _GREEN,
@@ -147,7 +156,7 @@ def _print_trace_list(title: str, items: list[dict], kind: str):
         if kind == "relation":
             _print_item_box(
                 [
-                    f"{_style(item['entity1'], _BOLD, _BLUE)} -> {_style(item['entity2'], _BOLD, _BLUE)} | source={item['file_path']}",
+                    f"{_style(item['entity1'], _BOLD, _BLUE)} -> {_style(item['entity2'], _BOLD, _BLUE)} | source={source_label}",
                     item["preview"],
                 ],
                 _BLUE,
@@ -159,7 +168,7 @@ def _print_trace_list(title: str, items: list[dict], kind: str):
             source_text = f" | source={item['source']}" if "source" in item else ""
             _print_item_box(
                 [
-                    f"#{item['rank']}{source_text}{score_text} | {item['file_path']}",
+                    f"#{item['rank']}{source_text}{score_text} | {source_label}",
                     f"chunk_id={item.get('chunk_id', 'n/a')}",
                     item["preview"],
                 ],
@@ -170,7 +179,7 @@ def _print_trace_list(title: str, items: list[dict], kind: str):
             source_text = f" | source={item['source']}" if "source" in item else ""
             _print_item_box(
                 [
-                    f"#{item['rank']}{source_text} | {item['file_path']}",
+                    f"#{item['rank']}{source_text} | {source_label}",
                     f"chunk_id={item.get('chunk_id', 'n/a')}",
                     item["preview"],
                 ],
@@ -183,7 +192,7 @@ def _print_trace_list(title: str, items: list[dict], kind: str):
             source_text = f" | source={item['source']}" if "source" in item else ""
             _print_item_box(
                 [
-                    f"#{item['rank']}{source_text}{score_text} | {item['file_path']}",
+                    f"#{item['rank']}{source_text}{score_text} | {source_label}",
                     f"chunk_id={item.get('chunk_id', 'n/a')}",
                     item["preview"],
                 ],
@@ -193,7 +202,7 @@ def _print_trace_list(title: str, items: list[dict], kind: str):
         if kind == "context_chunk":
             _print_item_box(
                 [
-                    f"#{item.get('id', 'n/a')} | {item.get('file_path', 'unknown_source')}",
+                    f"#{item.get('id', 'n/a')} | {source_label}",
                     _truncate_console(item.get("content", ""), limit=320),
                 ],
                 _WHITE,
@@ -544,6 +553,31 @@ class RagentApp:
         if not pdf_file_path:
             raise ValueError("Missing required argument: pdf_file_path")
 
+        resolved_input_path = os.path.abspath(pdf_file_path)
+        if _is_wide_table_path(pdf_file_path):
+            table_project_dir = target_project_dir or target_output_dir
+            if stage == "md":
+                raise ValueError("宽表输入不支持 md 阶段，请使用 auto | all | rag")
+            if not table_project_dir:
+                raise ValueError("宽表输入需要 project_dir")
+            if target_project_dir is None and target_output_dir is not None:
+                logger.warning(
+                    "宽表输入未提供独立 project_dir，复用第二个参数作为 project_dir: %s",
+                    os.path.abspath(table_project_dir),
+                )
+
+            resolved_stage = "rag" if stage in {"auto", "all", "rag"} else stage
+            logger.info(
+                "parse 执行阶段: %s (wide_table=%s, project_dir=%s)",
+                resolved_stage,
+                resolved_input_path,
+                os.path.abspath(table_project_dir),
+            )
+            logger.info("开始解析宽表并构建知识库...")
+            await wide_table_insert(pdf_file_path, table_project_dir)
+            logger.info("宽表知识库构建完成。")
+            return
+
         if stage in {"auto", "all", "md"} and not target_output_dir:
             raise ValueError("Missing required argument for md stage: mineru_output_dir")
 
@@ -568,9 +602,9 @@ class RagentApp:
             logger.info(f"自动推断阶段: {resolved_stage}")
 
         logger.info(
-            "parse 执行阶段: %s (pdf=%s, mineru_output_dir=%s, project_dir=%s)",
+            "parse 执行阶段: %s (input=%s, mineru_output_dir=%s, project_dir=%s)",
             resolved_stage,
-            os.path.abspath(pdf_file_path),
+            resolved_input_path,
             os.path.abspath(target_output_dir) if target_output_dir else None,
             os.path.abspath(target_project_dir) if target_project_dir else None,
         )
@@ -799,27 +833,86 @@ if __name__ == "__main__":
     if MODULE == "parse":
         # 支持：
         # 1) parse <pdf_or_dir> <mineru_output_dir>
-        #    - 自动推断 stage=md
+        #    - PDF 自动推断 stage=md
         # 2) parse <pdf_or_dir> <mineru_output_dir> <project_dir>
-        #    - 自动推断 stage=all/rag（有 md 即 rag，否则 all）
+        #    - PDF 自动推断 stage=all/rag（有 md 即 rag，否则 all）
         # 3) parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage]
-        #    - 可选手动覆盖 stage（auto/all/md/rag）
+        #    - PDF 可选手动覆盖 stage（auto/all/md/rag）
+        # 4) parse <wide_table_or_dir> <project_dir> [stage]
+        #    - 宽表文件直接建图，stage 仅接受 auto/all/rag
+        # 5) parse <wide_table_or_dir> <unused_output_dir> <project_dir> [stage]
+        #    - 兼容沿用 PDF 三参数写法；第二个参数会被忽略
         if len(sys.argv) < 4:
-            raise ValueError("Usage: parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage]")
+            raise ValueError(
+                "Usage: parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage]\n"
+                "   or: parse <wide_table_or_dir> <project_dir> [stage]"
+            )
 
         PDF_FILE_PATH = sys.argv[2] # "path/to/your/document.pdf"
-        MINERU_OUTPUT_DIR = sys.argv[3] # "mineru_out"  # 存储解析结果的目录
-
         valid_stages = {"auto", "all", "md", "rag"}
-        arg4 = sys.argv[4] if len(sys.argv) > 4 else None
-        arg5 = sys.argv[5] if len(sys.argv) > 5 else None
+        input_is_wide_table = os.path.isfile(PDF_FILE_PATH) and _is_wide_table_path(PDF_FILE_PATH)
 
-        if arg4 in valid_stages:
-            stage = arg4
-            PROJECT_DIR = None
+        if os.path.isdir(PDF_FILE_PATH):
+            has_pdf = False
+            has_wide_table = False
+            for root, dirs, files in os.walk(PDF_FILE_PATH):
+                for name in files:
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext == ".pdf":
+                        has_pdf = True
+                    elif ext in _WIDE_TABLE_EXTENSIONS:
+                        has_wide_table = True
+                if has_pdf and has_wide_table:
+                    break
+
+            if has_wide_table and not has_pdf:
+                arg3 = sys.argv[3]
+                arg4 = sys.argv[4] if len(sys.argv) > 4 else None
+                arg5 = sys.argv[5] if len(sys.argv) > 5 else None
+
+                if arg4 in valid_stages or arg4 is None:
+                    PROJECT_DIR = arg3
+                    stage = arg4 if arg4 else "auto"
+                    MINERU_OUTPUT_DIR = None
+                else:
+                    MINERU_OUTPUT_DIR = arg3
+                    PROJECT_DIR = arg4
+                    stage = arg5 if arg5 else "auto"
+            else:
+                MINERU_OUTPUT_DIR = sys.argv[3] # "mineru_out"  # 存储解析结果的目录
+                arg4 = sys.argv[4] if len(sys.argv) > 4 else None
+                arg5 = sys.argv[5] if len(sys.argv) > 5 else None
+
+                if arg4 in valid_stages:
+                    stage = arg4
+                    PROJECT_DIR = None
+                else:
+                    PROJECT_DIR = arg4
+                    stage = arg5 if arg5 else "auto"
+        elif input_is_wide_table:
+            arg3 = sys.argv[3]
+            arg4 = sys.argv[4] if len(sys.argv) > 4 else None
+            arg5 = sys.argv[5] if len(sys.argv) > 5 else None
+
+            if arg4 in valid_stages or arg4 is None:
+                PROJECT_DIR = arg3
+                stage = arg4 if arg4 else "auto"
+                MINERU_OUTPUT_DIR = None
+            else:
+                MINERU_OUTPUT_DIR = arg3
+                PROJECT_DIR = arg4
+                stage = arg5 if arg5 else "auto"
         else:
-            PROJECT_DIR = arg4
-            stage = arg5 if arg5 else "auto"
+            MINERU_OUTPUT_DIR = sys.argv[3] # "mineru_out"  # 存储解析结果的目录
+            arg4 = sys.argv[4] if len(sys.argv) > 4 else None
+            arg5 = sys.argv[5] if len(sys.argv) > 5 else None
+
+            if arg4 in valid_stages:
+                stage = arg4
+                PROJECT_DIR = None
+            else:
+                PROJECT_DIR = arg4
+                stage = arg5 if arg5 else "auto"
 
         if stage not in valid_stages:
             raise ValueError(f"Invalid stage: {stage}. Use one of: auto | all | md | rag")
@@ -827,7 +920,7 @@ if __name__ == "__main__":
         if os.path.isdir(PDF_FILE_PATH):
             BATCH_PARSE = True
             KEEP_PDF_SUBDIR = True
-            valid_exts = {".pdf"}
+            valid_exts = {".pdf", *_WIDE_TABLE_EXTENSIONS}
             file_list = []
             for root, dirs, files in os.walk(PDF_FILE_PATH):
                 for name in files:
@@ -841,19 +934,25 @@ if __name__ == "__main__":
             for idx, fp in enumerate(sorted(file_list)):
                 logger.info(f"[{idx + 1}/{len(file_list)}] 开始解析: {fp}")
                 try:
-                    # 目录模式下逐文件自动推断：
-                    # 无 project_dir -> md；有 project_dir 时，已有 md -> rag，否则 all
-                    per_file_stage = stage
-                    if stage == "auto":
-                        if PROJECT_DIR:
-                            existing_md = RagentApp._resolve_existing_md_path(
-                                fp,
-                                MINERU_OUTPUT_DIR,
-                                keep_pdf_subdir=True,
-                            )
-                            per_file_stage = "rag" if existing_md else "all"
-                        else:
-                            per_file_stage = "md"
+                    if _is_wide_table_path(fp):
+                        if stage == "md":
+                            logger.info(f"跳过宽表文件（md 阶段不适用）: {fp}")
+                            continue
+                        per_file_stage = "rag" if stage in {"auto", "all", "rag"} else stage
+                    else:
+                        # 目录模式下逐文件自动推断：
+                        # 无 project_dir -> md；有 project_dir 时，已有 md -> rag，否则 all
+                        per_file_stage = stage
+                        if stage == "auto":
+                            if PROJECT_DIR:
+                                existing_md = RagentApp._resolve_existing_md_path(
+                                    fp,
+                                    MINERU_OUTPUT_DIR,
+                                    keep_pdf_subdir=True,
+                                )
+                                per_file_stage = "rag" if existing_md else "all"
+                            else:
+                                per_file_stage = "md"
                     asyncio.run(
                         main(
                             "parse",
