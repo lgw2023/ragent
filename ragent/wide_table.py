@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -84,6 +84,7 @@ def prepare_wide_table_import(
     *,
     doc_name: str | None = None,
     file_path: str | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> PreparedWideTableImport:
     dataframe, detected_file_path = load_wide_table_dataframe(
         source, sheet_name=config.sheet_name
@@ -101,15 +102,45 @@ def prepare_wide_table_import(
     rows: list[WideTableRowRecord] = []
     skipped_rows = 0
 
+    total_source_rows = len(dataframe.index)
+
     for row_index, (_, row) in enumerate(dataframe.iterrows()):
         raw_name = row.get(config.entity_name_column)
         if _is_missing_value(raw_name):
             skipped_rows += 1
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "prepare_rows",
+                        "current": row_index + 1,
+                        "total": total_source_rows,
+                        "row_index": row_index + 1,
+                        "entity_name": "",
+                        "source_ref": f"row={row_index + 1}",
+                        "skipped": True,
+                        "valid_rows": len(rows),
+                        "skipped_rows": skipped_rows,
+                    }
+                )
             continue
 
         entity_name = clean_text(str(raw_name))
         if not entity_name:
             skipped_rows += 1
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "prepare_rows",
+                        "current": row_index + 1,
+                        "total": total_source_rows,
+                        "row_index": row_index + 1,
+                        "entity_name": "",
+                        "source_ref": f"row={row_index + 1}",
+                        "skipped": True,
+                        "valid_rows": len(rows),
+                        "skipped_rows": skipped_rows,
+                    }
+                )
             continue
 
         feature_lines: list[str] = []
@@ -145,6 +176,20 @@ def prepare_wide_table_import(
                 chunk_content="\n".join(chunk_lines),
             )
         )
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "prepare_rows",
+                    "current": row_index + 1,
+                    "total": total_source_rows,
+                    "row_index": row_index + 1,
+                    "entity_name": entity_name,
+                    "source_ref": source_ref,
+                    "skipped": False,
+                    "valid_rows": len(rows),
+                    "skipped_rows": skipped_rows,
+                }
+            )
 
     if not rows:
         raise ValueError("No valid rows found in wide table after preprocessing")

@@ -808,12 +808,14 @@ class Ragent:
         doc_id: str | None = None,
         doc_name: str | None = None,
         file_path: str | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         prepared_import = prepare_wide_table_import(
             source,
             config,
             doc_name=doc_name,
             file_path=file_path,
+            progress_callback=progress_callback,
         )
         resolved_doc_id = doc_id or self._compute_wide_table_doc_id(
             prepared_import, config
@@ -832,13 +834,21 @@ class Ragent:
             prepared_import,
             config,
             resolved_doc_id,
+            progress_callback=progress_callback,
+        )
+        vector_chunks = await self._build_wide_table_vector_chunks(
+            chunks,
+            chunk_results,
+            progress_callback=progress_callback,
         )
         await self._ingest_prebuilt_chunk_graph(
             doc_id=resolved_doc_id,
             doc_content=prepared_import.doc_content,
             file_path=prepared_import.file_path,
             chunks=chunks,
+            vector_chunks=vector_chunks,
             chunk_results=chunk_results,
+            progress_callback=progress_callback,
         )
 
     async def apipeline_enqueue_documents(
@@ -1006,11 +1016,13 @@ class Ragent:
         prepared_import: PreparedWideTableImport,
         config: WideTableImportConfig,
         doc_id: str,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[dict[str, dict[str, Any]], list]:
         chunks: dict[str, dict[str, Any]] = {}
         chunk_results = []
+        total_rows = len(prepared_import.rows)
 
-        for row in prepared_import.rows:
+        for index, row in enumerate(prepared_import.rows, start=1):
             chunk_id = compute_mdhash_id(row.chunk_content, prefix="chunk-")
             chunks[chunk_id] = {
                 "tokens": len(self.tokenizer.encode(row.chunk_content)),
@@ -1030,8 +1042,92 @@ class Ragent:
                     file_path=prepared_import.file_path,
                 )
             )
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "build_chunks",
+                        "current": index,
+                        "total": total_rows,
+                        "row_index": row.row_index + 1,
+                        "entity_name": row.entity_name,
+                        "source_ref": row.source_ref,
+                        "chunk_id": chunk_id,
+                    }
+                )
 
         return chunks, chunk_results
+
+    async def _build_wide_table_vector_chunks(
+        self,
+        chunks: dict[str, dict[str, Any]],
+        chunk_results: list,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        if not chunks:
+            return {}
+
+        chunk_ids = list(chunks.keys())
+        contents = [chunks[chunk_id]["content"] for chunk_id in chunk_ids]
+        batch_specs = [
+            (
+                chunk_ids[i : i + self.embedding_batch_num],
+                contents[i : i + self.embedding_batch_num],
+            )
+            for i in range(0, len(contents), self.embedding_batch_num)
+        ]
+
+        async def _embed_batch(
+            batch_chunk_ids: list[str],
+            batch_contents: list[str],
+        ) -> tuple[list[str], list[Any]]:
+            return batch_chunk_ids, await self.embedding_func(batch_contents)
+
+        tasks = [
+            asyncio.create_task(_embed_batch(batch_chunk_ids, batch_contents))
+            for batch_chunk_ids, batch_contents in batch_specs
+        ]
+
+        chunk_embeddings: dict[str, Any] = {}
+        completed_chunks = 0
+        total_chunks = len(chunk_ids)
+        for task in asyncio.as_completed(tasks):
+            batch_chunk_ids, batch_embeddings = await task
+            if len(batch_embeddings) != len(batch_chunk_ids):
+                raise ValueError(
+                    "Generated wide-table chunk embeddings count does not match chunk count."
+                )
+            for chunk_id, embedding in zip(batch_chunk_ids, batch_embeddings):
+                chunk_embeddings[chunk_id] = embedding
+                completed_chunks += 1
+                if progress_callback is not None:
+                    chunk = chunks[chunk_id]
+                    progress_callback(
+                        {
+                            "stage": "embed_rows",
+                            "current": completed_chunks,
+                            "total": total_chunks,
+                            "row_index": int(chunk.get("chunk_order_index", 0)) + 1,
+                            "entity_name": chunk.get("section_path", ""),
+                            "source_ref": chunk.get("source_ref", ""),
+                            "chunk_id": chunk_id,
+                        }
+                    )
+
+        for maybe_nodes, _ in chunk_results:
+            for entity_name, entities in maybe_nodes.items():
+                if entity_name not in chunk_embeddings:
+                    continue
+                for entity in entities:
+                    if entity.get("entity_type") == "chunk_text":
+                        entity["embeddings"] = chunk_embeddings[entity_name]
+
+        return {
+            chunk_id: {
+                **chunk,
+                "embeddings": chunk_embeddings[chunk_id],
+            }
+            for chunk_id, chunk in chunks.items()
+        }
 
     def _compute_wide_table_doc_id(
         self,
@@ -1063,7 +1159,9 @@ class Ragent:
         doc_content: str,
         file_path: str,
         chunks: dict[str, dict[str, Any]],
+        vector_chunks: dict[str, dict[str, Any]] | None = None,
         chunk_results: list,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         pipeline_status = await get_namespace_data("pipeline_status")
         pipeline_status_lock = get_pipeline_status_lock()
@@ -1093,7 +1191,7 @@ class Ragent:
 
         try:
             await asyncio.gather(
-                self.chunks_vdb.upsert(chunks),
+                self.chunks_vdb.upsert(vector_chunks or chunks),
                 self.full_docs.upsert({doc_id: {"content": doc_content}}),
                 self.text_chunks.upsert(chunks),
             )
@@ -1110,6 +1208,7 @@ class Ragent:
                 current_file_number=1,
                 total_files=1,
                 file_path=file_path,
+                progress_callback=progress_callback,
             )
 
             await self.doc_status.upsert(

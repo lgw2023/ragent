@@ -5,7 +5,7 @@ import asyncio
 import json
 import re
 import os
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 from collections import Counter, defaultdict
 from ragent.rerank import rerank_from_env
 from .utils import (
@@ -807,6 +807,7 @@ async def merge_nodes_and_edges(
     current_file_number: int = 0,
     total_files: int = 0,
     file_path: str = "unknown_source",
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> None:
     """Merge nodes and edges from extraction results
 
@@ -934,18 +935,63 @@ async def merge_nodes_and_edges(
     # Create a single task queue for both entities and edges
     tasks = []
 
+    async def _track_merge_task(
+        task_kind: str,
+        key: Any,
+        coro,
+    ) -> tuple[str, Any, Any]:
+        result = await coro
+        return task_kind, key, result
+
     # Add entity processing tasks
     for entity_name, entities in all_nodes.items():
         tasks.append(
-            asyncio.create_task(_locked_process_entity_name(entity_name, entities))
+            asyncio.create_task(
+                _track_merge_task(
+                    "entity",
+                    entity_name,
+                    _locked_process_entity_name(entity_name, entities),
+                )
+            )
         )
 
     # Add edge processing tasks
     for edge_key, edges in all_edges.items():
-        tasks.append(asyncio.create_task(_locked_process_edges(edge_key, edges)))
+        tasks.append(
+            asyncio.create_task(
+                _track_merge_task(
+                    "relation",
+                    edge_key,
+                    _locked_process_edges(edge_key, edges),
+                )
+            )
+        )
 
     # Execute all tasks in parallel with semaphore control
-    await asyncio.gather(*tasks)
+    merged_entities = 0
+    merged_relations = 0
+    total_merge_items = total_entities_count + total_relations_count
+    for task in asyncio.as_completed(tasks):
+        task_kind, task_key, _ = await task
+        if task_kind == "entity":
+            merged_entities += 1
+        else:
+            merged_relations += 1
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "merge_graph",
+                    "current": merged_entities + merged_relations,
+                    "total": total_merge_items,
+                    "entity_current": merged_entities,
+                    "entity_total": total_entities_count,
+                    "relation_current": merged_relations,
+                    "relation_total": total_relations_count,
+                    "entity_name": task_key if task_kind == "entity" else "",
+                    "edge_key": task_key if task_kind == "relation" else None,
+                    "file_path": file_path,
+                }
+            )
 
 
 async def extract_entities(
