@@ -290,20 +290,38 @@ class _TerminalProgressTracker:
         if progress > 0.02 and progress < 0.999:
             eta_sec = elapsed * (1.0 - progress) / progress
         percent_text = f"{int(round(progress * 100)):3d}%"
-        bar_width = 28
-        filled = min(bar_width, max(int(round(progress * bar_width)), 0))
-        bar = "#" * filled + "-" * (bar_width - filled)
         terminal_width = shutil.get_terminal_size((120, 20)).columns
         prefix = f"[{self.label}]"
+        elapsed_text = f" elapsed {_format_duration(elapsed)}"
+        eta_text = f" eta {_format_duration(eta_sec)}" if eta_sec is not None else ""
+        min_detail_width = 18 if detail else 0
+        reserved_width = (
+            len(prefix)
+            + len(" [] ")
+            + len(percent_text)
+            + 1
+            + len(phase)
+            + len(elapsed_text)
+            + len(eta_text)
+            + (3 + min_detail_width if detail else 0)
+        )
+        bar_width = min(28, max(8, terminal_width - reserved_width))
+        filled = min(bar_width, max(int(round(progress * bar_width)), 0))
+        bar = "#" * filled + "-" * (bar_width - filled)
         meta = f"{prefix} [{bar}] {percent_text} {phase}"
-        tail = f" elapsed {_format_duration(elapsed)}"
-        if eta_sec is not None:
-            tail += f" eta {_format_duration(eta_sec)}"
+        tail = elapsed_text + eta_text
         if detail:
-            remaining = max(terminal_width - len(meta) - len(tail) - 3, 0)
-            if remaining > 8:
-                tail += f" | {_truncate_progress_text(detail, remaining)}"
-        line = f"{meta}{tail}"
+            remaining = terminal_width - len(meta) - len(tail) - 3
+            if remaining < 12 and eta_text:
+                tail = elapsed_text
+                remaining = terminal_width - len(meta) - len(tail) - 3
+            if remaining >= 8:
+                detail_text = _truncate_progress_text(detail, remaining)
+                line = f"{meta} | {detail_text}{tail}"
+            else:
+                line = f"{meta}{tail}"
+        else:
+            line = f"{meta}{tail}"
         with self._lock:
             sys.stderr.write("\r" + line.ljust(max(terminal_width - 1, 20)))
             sys.stderr.flush()
@@ -2904,6 +2922,78 @@ async def wide_table_insert(table_file_path, project_dir):
                     float(os.getenv("CSV_INGEST_ESTIMATE_SECONDS", "8")),
                     min(row_count * 0.03, 180.0),
                 )
+                wide_table_stage_ranges = {
+                    "prepare_rows": (0.28, 0.50),
+                    "build_chunks": (0.50, 0.66),
+                    "embed_rows": (0.66, 0.84),
+                    "merge_graph": (0.84, 0.95),
+                }
+
+                def _format_wide_table_progress_detail(payload: dict[str, Any]) -> str:
+                    stage = payload.get("stage", "")
+                    current = int(payload.get("current", 0) or 0)
+                    total = int(payload.get("total", 0) or 0)
+                    row_index = int(payload.get("row_index", current) or current)
+                    entity_name = str(payload.get("entity_name") or "").strip()
+
+                    if stage == "prepare_rows":
+                        if payload.get("skipped"):
+                            return f"prep {row_index}/{total} skipped"
+                        valid_rows = int(payload.get("valid_rows", current) or current)
+                        skipped_rows = int(payload.get("skipped_rows", 0) or 0)
+                        detail = f"prep {row_index}/{total}"
+                        if entity_name:
+                            detail += f" {entity_name}"
+                        detail += f" | ok={valid_rows} skip={skipped_rows}"
+                        return detail
+
+                    if stage == "build_chunks":
+                        detail = f"chunk {current}/{total}"
+                        if entity_name:
+                            detail += f" {entity_name}"
+                        return detail
+
+                    if stage == "embed_rows":
+                        detail = f"embed {current}/{total}"
+                        if entity_name:
+                            detail += f" {entity_name}"
+                        return detail
+
+                    if stage == "merge_graph":
+                        entity_current = int(payload.get("entity_current", 0) or 0)
+                        entity_total = int(payload.get("entity_total", 0) or 0)
+                        relation_current = int(payload.get("relation_current", 0) or 0)
+                        relation_total = int(payload.get("relation_total", 0) or 0)
+                        detail = (
+                            f"merge {current}/{total} "
+                            f"e {entity_current}/{entity_total} "
+                            f"r {relation_current}/{relation_total}"
+                        )
+                        if entity_name:
+                            detail += f" {entity_name}"
+                        return detail
+
+                    return f"{stage} {current}/{total}".strip()
+
+                def _on_wide_table_progress(payload: dict[str, Any]) -> None:
+                    stage = str(payload.get("stage") or "")
+                    if stage not in wide_table_stage_ranges:
+                        return
+                    start_progress, end_progress = wide_table_stage_ranges[stage]
+                    current = int(payload.get("current", 0) or 0)
+                    total = int(payload.get("total", 0) or 0)
+                    phase_name = {
+                        "prepare_rows": "table_prepare",
+                        "build_chunks": "table_chunks",
+                        "embed_rows": "table_embed",
+                        "merge_graph": "table_merge",
+                    }.get(stage, "table_ingest")
+                    progress_tracker.update(
+                        _weighted_ratio(start_progress, end_progress, current, total),
+                        phase_name,
+                        _format_wide_table_progress_detail(payload),
+                    )
+
                 progress_tracker.start_estimated_phase(
                     "table_ingest",
                     f"Importing {os.path.basename(table_abs_path)}",
@@ -2916,6 +3006,7 @@ async def wide_table_insert(table_file_path, project_dir):
                     config,
                     file_path=table_abs_path,
                     doc_name=config.table_name or Path(table_abs_path).stem,
+                    progress_callback=_on_wide_table_progress,
                 )
                 progress_tracker.finish("kg_ready", os.path.basename(table_abs_path))
                 logger.info(
