@@ -43,6 +43,8 @@ from ragent.utils import (
     wrap_embedding_func_with_attrs,
     locate_json_string_body_from_string,
     safe_unicode_decode,
+    get_configured_embedding_dim,
+    get_configured_embedding_dimensions,
     logger,
     log_exception,
     log_model_call,
@@ -1252,9 +1254,7 @@ async def nvidia_openai_complete(
 
 
 @wrap_embedding_func_with_attrs(
-    embedding_dim=int(
-        os.getenv("EMBEDDING_DIM", os.getenv("EMBEDDING_DIMENSIONS", "1024"))
-    ),
+    embedding_dim=get_configured_embedding_dim(),
     max_token_size=8192,
 )
 @retry(
@@ -1285,7 +1285,7 @@ async def openai_embed(
         raise ValueError("Missing required env/config: EMBEDDING_MODEL")
 
     client_configs = client_configs or {}
-    dimensions = os.getenv("EMBEDDING_DIMENSIONS")
+    dimensions = get_configured_embedding_dimensions()
     resolved_provider = _resolve_provider(
         embedding_model,
         api_base=embedding_base_url,

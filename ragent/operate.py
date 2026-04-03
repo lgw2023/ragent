@@ -2,12 +2,16 @@ from __future__ import annotations
 from functools import partial
 
 import asyncio
+import ast
 import json
-import re
+import math
 import os
+import re
+import numpy as np
 from typing import Any, AsyncIterator, Callable
 from collections import Counter, defaultdict
 from ragent.rerank import rerank_from_env
+from .llm.openai import openai_embed
 from .utils import (
     logger,
     clean_str,
@@ -69,6 +73,67 @@ def _record_stage_timing(
     started_at: float,
 ):
     _append_stage_timing(stage_timings, stage, label, time.perf_counter() - started_at)
+
+
+def _coerce_embedding_array(embedding: Any) -> np.ndarray | None:
+    if embedding is None:
+        return None
+
+    parsed_embedding = embedding
+    if isinstance(parsed_embedding, str):
+        stripped = parsed_embedding.strip()
+        if stripped in {"", "None", "[]"}:
+            return None
+        try:
+            parsed_embedding = json.loads(stripped)
+        except json.JSONDecodeError:
+            try:
+                parsed_embedding = ast.literal_eval(stripped)
+            except (SyntaxError, ValueError):
+                return None
+
+    try:
+        array = np.asarray(parsed_embedding, dtype=float)
+    except (TypeError, ValueError):
+        return None
+
+    if array.ndim != 1 or array.size == 0:
+        return None
+    return array
+
+
+def _coerce_embedding_list(embedding: Any) -> list[float] | None:
+    array = _coerce_embedding_array(embedding)
+    if array is None:
+        return None
+    return array.tolist()
+
+
+async def _generate_chunk_text_embeddings(
+    chunk_text_items: list[tuple[str, str]],
+    global_config: dict[str, Any],
+) -> dict[str, list[float]]:
+    if not chunk_text_items:
+        return {}
+
+    embedding_func = global_config.get("embedding_func") or openai_embed
+    descriptions = [description for _, description in chunk_text_items]
+    generated_embeddings = await embedding_func(descriptions)
+
+    if generated_embeddings is None or len(generated_embeddings) != len(chunk_text_items):
+        raise ValueError(
+            "Generated embeddings count does not match chunk_text items count."
+        )
+
+    embeddings_by_entity: dict[str, list[float]] = {}
+    for (entity_name, _), embedding in zip(chunk_text_items, generated_embeddings):
+        parsed_embedding = _coerce_embedding_list(embedding)
+        if parsed_embedding is None:
+            raise ValueError(
+                f"Generated invalid embedding for chunk_text node: {entity_name}"
+            )
+        embeddings_by_entity[entity_name] = parsed_embedding
+    return embeddings_by_entity
 
 def _normalize_source_text_for_match(text: str) -> str:
     if not text:
@@ -529,7 +594,6 @@ async def _merge_nodes_then_upsert(
     already_source_ids = []
     already_description = []
     already_file_paths = []
-    already_embeddings = []
     already_node = await knowledge_graph_inst.get_node(entity_name)
     if already_node:
         already_entity_types.append(already_node["entity_type"])
@@ -542,13 +606,6 @@ async def _merge_nodes_then_upsert(
             split_string_by_multi_markers(already_node["file_path"], [GRAPH_FIELD_SEP])
         )
         already_description.append(already_node["description"])
-        already_embeddings.append([])
-
-
-    if "embeddings" not in nodes_data[0]:
-        embeddings = []
-    else:
-        embeddings= nodes_data[0]["embeddings"].tolist()
     entity_type = sorted(
         Counter(
             [dp["entity_type"] for dp in nodes_data] + already_entity_types
@@ -569,6 +626,18 @@ async def _merge_nodes_then_upsert(
     file_path = GRAPH_FIELD_SEP.join(
         set([dp["file_path"] for dp in nodes_data] + already_file_paths)
     )
+    embeddings = next(
+        (
+            candidate
+            for candidate in (
+                _coerce_embedding_list(dp.get("embeddings")) for dp in nodes_data
+            )
+            if candidate is not None
+        ),
+        None,
+    )
+    if embeddings is None and already_node is not None:
+        embeddings = _coerce_embedding_list(already_node.get("embeddings"))
 
     force_llm_summary_on_merge = global_config["force_llm_summary_on_merge"]
 
@@ -597,6 +666,16 @@ async def _merge_nodes_then_upsert(
                     pipeline_status["latest_message"] = status_message
                     pipeline_status["history_messages"].append(status_message)
 
+    if embeddings is None and entity_type == "chunk_text":
+        embeddings = (
+            await _generate_chunk_text_embeddings(
+                [(entity_name, description)],
+                global_config,
+            )
+        )[entity_name]
+        logger.info("Backfilled missing embedding for chunk_text node: %s", entity_name)
+
+    embeddings = embeddings or []
 
 #    if embeddings == []:
 #        embeddings_list = [entity_name + "|" + description]
@@ -2599,13 +2678,8 @@ async def _find_related_text_unit_from_relationships(
 
     return result_chunks
 
-from ragent.llm.openai import openai_embed
-import numpy as np
-from typing import Dict
-import math
-
 def weightd_merge(
-    chunk1: Dict[str, float], chunk2: Dict[str, float], alpha: float = 0.5
+    chunk1: dict[str, float], chunk2: dict[str, float], alpha: float = 0.5
 ):
     def min_max_normalize(chunks):
         if len(chunks) == 0:
@@ -2643,22 +2717,29 @@ def weightd_merge(
             merged[doc_id] = score * (1 - alpha)
 
     return merged
-import ast
 
 def cosine_similarity(query_embedding, chunk_embedding_list) -> list:
-    chunk_embedding = chunk_embedding_list
+    query_vector = _coerce_embedding_array(query_embedding)
+    if query_vector is None:
+        logger.warning(
+            "Skipping graph chunk rescoring because the query embedding is empty or invalid."
+        )
+        return [0.0] * len(chunk_embedding_list)
+
     similarity_list = []
-    for ce in chunk_embedding:
-        ce_list = ast.literal_eval(ce)
-        np_ce = np.array(ce_list)
-        dot_product = np.dot(np_ce, query_embedding)
+    for ce in chunk_embedding_list:
+        np_ce = _coerce_embedding_array(ce)
+        if np_ce is None or np_ce.shape != query_vector.shape:
+            similarity_list.append(0.0)
+            continue
+        dot_product = np.dot(np_ce, query_vector)
         norm_a = np.linalg.norm(np_ce)
-        norm_b = np.linalg.norm(query_embedding)
+        norm_b = np.linalg.norm(query_vector)
         if norm_a == 0 or norm_b == 0:
             similarity_list.append(0.0)
         else:
-            similarity_list.append(dot_product / (norm_a * norm_b))
-    return  similarity_list
+            similarity_list.append(float(dot_product / (norm_a * norm_b)))
+    return similarity_list
 
 
 def _resolve_hybrid_chunk_candidate(
@@ -2809,21 +2890,27 @@ async def _build_hybrid_retrieval_debug_data(
     graph_metadata_map = {}
     valid_chunk_ids = []
     valid_chunk_embeddings = []
+    skipped_invalid_graph_embeddings = 0
 
     for chunk_id, text, embedding, file_path, chunk_metadata in zip(
         chunk_ids, chunk_texts, chunk_embeddings, chunk_file_paths, chunk_metadata_list
     ):
-        if embedding in (None, "", "None"):
-            continue
-        valid_chunk_ids.append(chunk_id)
-        valid_chunk_embeddings.append(
-            embedding if isinstance(embedding, str) else json.dumps(embedding)
-        )
         graph_text_map[chunk_id] = text
         graph_file_path_map[chunk_id] = file_path
         graph_metadata_map[chunk_id] = chunk_metadata
+        embedding_array = _coerce_embedding_array(embedding)
+        if embedding_array is None:
+            skipped_invalid_graph_embeddings += 1
+            continue
+        valid_chunk_ids.append(chunk_id)
+        valid_chunk_embeddings.append(embedding_array)
 
     stage_started_at = time.perf_counter()
+    if skipped_invalid_graph_embeddings:
+        logger.warning(
+            "Skipping %s graph chunk candidates with empty or invalid embeddings during hybrid rescoring.",
+            skipped_invalid_graph_embeddings,
+        )
     if valid_chunk_embeddings:
         query_embedding = await openai_embed([query])
         similarity_scores = cosine_similarity(

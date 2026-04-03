@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 # use the .env that is inside the current folder
 # allows to use different .env file for each ragent instance
-# the OS environment variables take precedence over the .env file
+# .env values take precedence over inherited OS environment variables
 _ENV_PATH = Path(__file__).resolve().with_name(".env")
 load_dotenv(dotenv_path=_ENV_PATH, override=True) #$HOME替换为本地ragent存储的绝对路径
 import subprocess
@@ -2935,6 +2935,7 @@ async def wide_table_insert(table_file_path, project_dir):
                     total = int(payload.get("total", 0) or 0)
                     row_index = int(payload.get("row_index", current) or current)
                     entity_name = str(payload.get("entity_name") or "").strip()
+                    source_ref = str(payload.get("source_ref") or "").strip()
 
                     if stage == "prepare_rows":
                         if payload.get("skipped"):

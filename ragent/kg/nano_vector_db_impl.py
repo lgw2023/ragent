@@ -1,4 +1,6 @@
 import asyncio
+import ast
+import json
 import os
 from typing import Any, final
 from dataclasses import dataclass
@@ -87,6 +89,53 @@ class NanoVectorDBStorage(BaseVectorStorage):
 
             return self._client
 
+    def _coerce_precomputed_embedding(
+        self, embedding: Any, record_id: str
+    ) -> np.ndarray | None:
+        if embedding is None:
+            return None
+
+        parsed_embedding = embedding
+        if isinstance(parsed_embedding, str):
+            stripped = parsed_embedding.strip()
+            if stripped in {"", "None", "[]"}:
+                return None
+            try:
+                parsed_embedding = json.loads(stripped)
+            except json.JSONDecodeError:
+                try:
+                    parsed_embedding = ast.literal_eval(stripped)
+                except (SyntaxError, ValueError):
+                    logger.warning(
+                        "Ignoring invalid precomputed embedding for %s in %s; falling back to embedding model.",
+                        record_id,
+                        self.namespace,
+                    )
+                    return None
+
+        try:
+            array = np.asarray(parsed_embedding, dtype=float)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring non-numeric precomputed embedding for %s in %s; falling back to embedding model.",
+                record_id,
+                self.namespace,
+            )
+            return None
+
+        if array.size == 0:
+            return None
+        if array.ndim != 1:
+            raise ValueError(
+                f"Precomputed embedding for {record_id} in {self.namespace} must be 1D, got {array.ndim}D."
+            )
+        if array.shape[0] != self.embedding_func.embedding_dim:
+            raise ValueError(
+                f"Precomputed embedding for {record_id} in {self.namespace} has dim {array.shape[0]}, "
+                f"expected {self.embedding_func.embedding_dim}."
+            )
+        return array
+
     async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
         """
         Importance notes:
@@ -108,28 +157,48 @@ class NanoVectorDBStorage(BaseVectorStorage):
             }
             for k, v in data.items()
         ]
-        contents = [v["content"] for v in data.values()]
-        batches = [
-            contents[i : i + self._max_batch_size]
-            for i in range(0, len(contents), self._max_batch_size)
-        ]
+        pending_indices: list[int] = []
+        pending_contents: list[str] = []
 
-        # Execute embedding outside of lock to avoid long lock times
-        embedding_tasks = [self.embedding_func(batch) for batch in batches]
-        embeddings_list = await asyncio.gather(*embedding_tasks)
-
-        embeddings = np.concatenate(embeddings_list)
-        if len(embeddings) == len(list_data):
-            for i, d in enumerate(list_data):
-                d["__vector__"] = embeddings[i]
-            client = await self._get_client()
-            results = client.upsert(datas=list_data)
-            return results
-        else:
-            # sometimes the embedding is not returned correctly. just log it.
-            logger.error(
-                f"embedding is not 1-1 with data, {len(embeddings)} != {len(list_data)}"
+        for index, ((record_id, record), list_record) in enumerate(
+            zip(data.items(), list_data)
+        ):
+            precomputed_embedding = self._coerce_precomputed_embedding(
+                record.get("embeddings"),
+                record_id,
             )
+            if precomputed_embedding is not None:
+                list_record["__vector__"] = precomputed_embedding
+                continue
+
+            pending_indices.append(index)
+            pending_contents.append(record["content"])
+
+        if pending_contents:
+            batches = [
+                pending_contents[i : i + self._max_batch_size]
+                for i in range(0, len(pending_contents), self._max_batch_size)
+            ]
+
+            # Execute embedding outside of lock to avoid long lock times
+            embedding_tasks = [self.embedding_func(batch) for batch in batches]
+            embeddings_list = await asyncio.gather(*embedding_tasks)
+            embeddings = np.concatenate(embeddings_list, axis=0)
+
+            if len(embeddings) != len(pending_contents):
+                logger.error(
+                    "embedding is not 1-1 with data, %s != %s",
+                    len(embeddings),
+                    len(pending_contents),
+                )
+                return None
+
+            for index, embedding in zip(pending_indices, embeddings):
+                list_data[index]["__vector__"] = embedding
+
+        client = await self._get_client()
+        results = client.upsert(datas=list_data)
+        return results
 
 
     async def query(
