@@ -11,6 +11,7 @@ import logging
 import logging.handlers
 import os
 import re
+from pathlib import Path
 
 # Before `litellm` is imported (see ragent.llm.openai): default to quiet SDK logs.
 # Override with e.g. LITELLM_LOG=DEBUG in the environment when diagnosing calls.
@@ -21,12 +22,37 @@ from functools import wraps
 from hashlib import md5
 from typing import Any, Protocol, Callable, TYPE_CHECKING, List
 import numpy as np
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from ragent.constants import (
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILENAME,
 )
+
+
+def _load_priority_dotenv() -> str | None:
+    dotenv_candidates: list[Path] = []
+    discovered_dotenv = find_dotenv(".env", usecwd=True)
+    if discovered_dotenv:
+        dotenv_candidates.append(Path(discovered_dotenv))
+
+    repo_dotenv = Path(__file__).resolve().parent.parent / ".env"
+    if repo_dotenv.exists():
+        dotenv_candidates.append(repo_dotenv)
+
+    loaded_path: str | None = None
+    seen_paths: set[Path] = set()
+    for candidate in dotenv_candidates:
+        resolved = candidate.resolve()
+        if resolved in seen_paths or not resolved.exists():
+            continue
+        load_dotenv(dotenv_path=resolved, override=True)
+        loaded_path = str(resolved)
+        seen_paths.add(resolved)
+    return loaded_path
+
+
+_LOADED_PRIORITY_DOTENV = _load_priority_dotenv()
 
 
 def get_env_value(
@@ -57,6 +83,20 @@ def get_env_value(
     try:
         return value_type(value)
     except (ValueError, TypeError):
+        return default
+
+
+def get_configured_embedding_dimensions() -> str | None:
+    return os.getenv("EMBEDDING_DIMENSIONS") or os.getenv("EMBEDDING_DIM")
+
+
+def get_configured_embedding_dim(default: int = 1024) -> int:
+    configured_dimensions = get_configured_embedding_dimensions()
+    if configured_dimensions is None:
+        return default
+    try:
+        return int(configured_dimensions)
+    except (TypeError, ValueError):
         return default
 
 

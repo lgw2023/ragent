@@ -137,13 +137,18 @@ def _print_multiline_value(label: str, value: str, color: str = _WHITE):
 def _print_trace_list(title: str, items: list[dict], kind: str):
     _print_block_header(title)
     if not items:
-        print(_muted("  - 无"))
+        print(_muted("  - 无  "))
         return
+    if isinstance(items, (str, dict)):
+        items = [items]
     for item in items:
-        source_label = item.get("source_ref") or item.get("source_refs_display") or item.get("file_path", "unknown_source")
         if kind == "keyword":
-            print(f"  - {_style(str(item), _GREEN)}")
+            print(f"  - {_style(str(item), _GREEN)}  ")
             continue
+        if not isinstance(item, dict):
+            _print_item_box([str(item)], _WHITE)
+            continue
+        source_label = item.get("source_ref") or item.get("source_refs_display") or item.get("file_path", "unknown_source")
         if kind == "entity":
             _print_item_box(
                 [

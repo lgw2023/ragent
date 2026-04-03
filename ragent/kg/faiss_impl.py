@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import ast
 from typing import Any, final
 import json
 import numpy as np
@@ -90,6 +91,53 @@ class FaissVectorDBStorage(BaseVectorStorage):
                 self.storage_updated.value = False
             return self._index
 
+    def _coerce_precomputed_embedding(
+        self, embedding: Any, record_id: str
+    ) -> np.ndarray | None:
+        if embedding is None:
+            return None
+
+        parsed_embedding = embedding
+        if isinstance(parsed_embedding, str):
+            stripped = parsed_embedding.strip()
+            if stripped in {"", "None", "[]"}:
+                return None
+            try:
+                parsed_embedding = json.loads(stripped)
+            except json.JSONDecodeError:
+                try:
+                    parsed_embedding = ast.literal_eval(stripped)
+                except (SyntaxError, ValueError):
+                    logger.warning(
+                        "Ignoring invalid precomputed embedding for %s in %s; falling back to embedding model.",
+                        record_id,
+                        self.namespace,
+                    )
+                    return None
+
+        try:
+            array = np.asarray(parsed_embedding, dtype=np.float32)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring non-numeric precomputed embedding for %s in %s; falling back to embedding model.",
+                record_id,
+                self.namespace,
+            )
+            return None
+
+        if array.size == 0:
+            return None
+        if array.ndim != 1:
+            raise ValueError(
+                f"Precomputed embedding for {record_id} in {self.namespace} must be 1D, got {array.ndim}D."
+            )
+        if array.shape[0] != self._dim:
+            raise ValueError(
+                f"Precomputed embedding for {record_id} in {self.namespace} has dim {array.shape[0]}, "
+                f"expected {self._dim}."
+            )
+        return array
+
     async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
         """
         Insert or update vectors in the Faiss index.
@@ -114,34 +162,51 @@ class FaissVectorDBStorage(BaseVectorStorage):
 
         # Prepare data for embedding
         list_data = []
-        contents = []
+        pending_indices: list[int] = []
+        pending_contents: list[str] = []
+        embeddings = np.empty((len(data), self._dim), dtype=np.float32)
         for k, v in data.items():
             # Store only known meta fields if needed
             meta = {mf: v[mf] for mf in self.meta_fields if mf in v}
             meta["__id__"] = k
             meta["__created_at__"] = current_time
             list_data.append(meta)
-            contents.append(v["content"])
+            index = len(list_data) - 1
+            precomputed_embedding = self._coerce_precomputed_embedding(
+                v.get("embeddings"),
+                k,
+            )
+            if precomputed_embedding is not None:
+                embeddings[index] = precomputed_embedding
+                continue
+
+            pending_indices.append(index)
+            pending_contents.append(v["content"])
 
         # Split into batches for embedding if needed
-        batches = [
-            contents[i : i + self._max_batch_size]
-            for i in range(0, len(contents), self._max_batch_size)
-        ]
+        if pending_contents:
+            batches = [
+                pending_contents[i : i + self._max_batch_size]
+                for i in range(0, len(pending_contents), self._max_batch_size)
+            ]
 
-        embedding_tasks = [self.embedding_func(batch) for batch in batches]
-        embeddings_list = await asyncio.gather(*embedding_tasks)
+            embedding_tasks = [self.embedding_func(batch) for batch in batches]
+            embeddings_list = await asyncio.gather(*embedding_tasks)
 
-        # Flatten the list of arrays
-        embeddings = np.concatenate(embeddings_list, axis=0)
-        if len(embeddings) != len(list_data):
-            logger.error(
-                f"Embedding size mismatch. Embeddings: {len(embeddings)}, Data: {len(list_data)}"
-            )
-            return []
+            # Flatten the list of arrays
+            generated_embeddings = np.concatenate(embeddings_list, axis=0)
+            if len(generated_embeddings) != len(pending_contents):
+                logger.error(
+                    "Embedding size mismatch. Embeddings: %s, Data: %s",
+                    len(generated_embeddings),
+                    len(pending_contents),
+                )
+                return []
+
+            for index, embedding in zip(pending_indices, generated_embeddings):
+                embeddings[index] = np.asarray(embedding, dtype=np.float32)
 
         # Convert to float32 and normalize embeddings for cosine similarity (in-place)
-        embeddings = embeddings.astype(np.float32)
         faiss.normalize_L2(embeddings)
 
         # Upsert logic:
