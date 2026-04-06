@@ -927,7 +927,7 @@ async def merge_nodes_and_edges(
         pipeline_status["history_messages"].append(log_message)
 
     # Get max async tasks limit from global_config for semaphore control
-    graph_max_async = global_config.get("llm_model_max_async", 4) * 2
+    graph_max_async = global_config.get("llm_model_max_async", 4)
     semaphore = asyncio.Semaphore(graph_max_async)
 
     # Process and update all entities and relationships in parallel
