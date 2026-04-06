@@ -13,6 +13,7 @@ if __package__:
         pdf_insert,
         build_enhanced_md,
         index_md_to_rag,
+        get_mineru_output_subdirs_for_lookup,
         inference_one_hop_problem,
         inference_multi_hop_problem,
         trace_multi_hop_problem,
@@ -26,6 +27,7 @@ else:
         pdf_insert,
         build_enhanced_md,
         index_md_to_rag,
+        get_mineru_output_subdirs_for_lookup,
         inference_one_hop_problem,
         inference_multi_hop_problem,
         trace_multi_hop_problem,
@@ -643,15 +645,55 @@ class RagentApp:
             keep_pdf_subdir=keep_pdf_subdir,
         )
         if not md_path:
-            pdf_name = os.path.basename(pdf_file_path).rsplit(".", 1)[0]
-            md_path_new = os.path.join(target_output_dir, "txt", f"{pdf_name}.md")
-            md_path_old = os.path.join(target_output_dir, pdf_name, "txt", f"{pdf_name}.md")
+            candidate_paths = self._build_md_candidate_paths(
+                pdf_file_path,
+                target_output_dir,
+                keep_pdf_subdir=keep_pdf_subdir,
+            )
             raise FileNotFoundError(
-                f"未找到最终 md 文件，请先执行 md 阶段: {md_path_new} 或 {md_path_old}"
+                "未找到最终 md 文件，请先执行 md 阶段。已检查路径: "
+                + " | ".join(candidate_paths)
             )
         logger.info(f"开始基于最终 md 构建知识库: {md_path}")
         await index_md_to_rag(pdf_file_path, target_project_dir, md_path)
         logger.info("知识库构建完成。")
+
+    @staticmethod
+    def _build_md_candidate_paths(
+        pdf_file_path: str,
+        mineru_output_dir: str | None,
+        keep_pdf_subdir: bool = True,
+    ) -> list[str]:
+        if not mineru_output_dir:
+            return []
+
+        pdf_name = os.path.basename(pdf_file_path).rsplit(".", 1)[0]
+        candidate_paths = []
+        output_subdirs = get_mineru_output_subdirs_for_lookup()
+        if keep_pdf_subdir:
+            for output_subdir in output_subdirs:
+                candidate_paths.append(
+                    os.path.join(mineru_output_dir, pdf_name, output_subdir, f"{pdf_name}.md")
+                )
+            for output_subdir in output_subdirs:
+                candidate_paths.append(
+                    os.path.join(mineru_output_dir, output_subdir, f"{pdf_name}.md")
+                )
+        else:
+            for output_subdir in output_subdirs:
+                candidate_paths.append(
+                    os.path.join(mineru_output_dir, output_subdir, f"{pdf_name}.md")
+                )
+            for output_subdir in output_subdirs:
+                candidate_paths.append(
+                    os.path.join(mineru_output_dir, pdf_name, output_subdir, f"{pdf_name}.md")
+                )
+
+        deduped_paths: list[str] = []
+        for candidate in candidate_paths:
+            if candidate not in deduped_paths:
+                deduped_paths.append(candidate)
+        return deduped_paths
 
     @staticmethod
     def _resolve_existing_md_path(
@@ -659,19 +701,11 @@ class RagentApp:
         mineru_output_dir: str | None,
         keep_pdf_subdir: bool = True,
     ) -> str | None:
-        if not mineru_output_dir:
-            return None
-
-        pdf_name = os.path.basename(pdf_file_path).rsplit(".", 1)[0]
-        candidate_paths = []
-        if keep_pdf_subdir:
-            candidate_paths.append(os.path.join(mineru_output_dir, pdf_name, "txt", f"{pdf_name}.md"))
-            candidate_paths.append(os.path.join(mineru_output_dir, "txt", f"{pdf_name}.md"))
-        else:
-            candidate_paths.append(os.path.join(mineru_output_dir, "txt", f"{pdf_name}.md"))
-            candidate_paths.append(os.path.join(mineru_output_dir, pdf_name, "txt", f"{pdf_name}.md"))
-
-        for md_path in candidate_paths:
+        for md_path in RagentApp._build_md_candidate_paths(
+            pdf_file_path,
+            mineru_output_dir,
+            keep_pdf_subdir=keep_pdf_subdir,
+        ):
             if os.path.exists(md_path):
                 return md_path
         return None
