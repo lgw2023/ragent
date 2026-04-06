@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 from contextlib import nullcontext
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import math
 from dotenv import load_dotenv
 from pathlib import Path
@@ -47,7 +47,7 @@ from collections import Counter
 import aiofiles
 from typing import Any
 
-from mineru.cli.common import convert_pdf_bytes_to_bytes_by_pypdfium2, prepare_env, read_fn
+from mineru.cli.common import convert_pdf_bytes_to_bytes, prepare_env, read_fn
 from mineru.utils.config_reader import get_local_models_dir
 
 
@@ -62,7 +62,14 @@ from mineru.data.data_reader_writer import FileBasedDataWriter
 from mineru.utils.draw_bbox import draw_layout_bbox, draw_span_bbox
 from mineru.utils.enum_class import MakeMode
 from mineru.backend.vlm.vlm_analyze import doc_analyze as vlm_doc_analyze
-from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
+try:
+    from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
+    pipeline_doc_analyze_streaming = None
+except ImportError:
+    pipeline_doc_analyze = None
+    from mineru.backend.pipeline.pipeline_analyze import (
+        doc_analyze_streaming as pipeline_doc_analyze_streaming,
+    )
 from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
 from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
 from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union_make
@@ -96,6 +103,215 @@ _WIDE_TABLE_ENTITY_TYPE_HINTS = {
     "company": "company",
 }
 _WIDE_TABLE_FILE_EXTENSIONS = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm"}
+_MINERU_PARSE_MODE_ALIASES = {
+    "pipeline": "pipeline",
+    "pipeline-engine": "pipeline",
+    "vlm": "vlm-engine",
+    "vlm-engine": "vlm-engine",
+    "hybrid": "hybrid-engine",
+    "hybrid-engine": "hybrid-engine",
+}
+_MINERU_MODEL_SOURCE_ALIASES = {
+    "local": "local",
+    "modelscope": "modelscope",
+    "huggingface": "huggingface",
+}
+_MINERU_PIPELINE_METHOD_ALIASES = {
+    "auto": "auto",
+    "txt": "txt",
+    "ocr": "ocr",
+}
+_MINERU_VLM_BACKEND_ALIASES = {
+    "auto": "auto",
+    "transformers": "transformers",
+    "vlm-transformers": "transformers",
+    "sglang-engine": "sglang-engine",
+    "vlm-sglang-engine": "sglang-engine",
+    "sglang-client": "sglang-client",
+    "vlm-sglang-client": "sglang-client",
+}
+_MINERU_OUTPUT_SUBDIRS = ("txt", "vlm")
+_MARKDOWN_IT_PARSER = None
+
+
+@dataclass(frozen=True)
+class MineruParseSettings:
+    requested_mode: str
+    effective_backend: str
+    parse_method: str
+    output_subdir: str
+    model_source: str
+    server_url: str | None = None
+    model_path: str | None = None
+    local_model_key: str | None = None
+
+
+def _normalize_env_choice(
+    raw_value: str | None,
+    aliases: dict[str, str],
+    *,
+    default: str,
+    env_name: str,
+) -> str:
+    if raw_value is None:
+        return default
+
+    normalized = raw_value.strip().lower().replace("_", "-")
+    if not normalized:
+        return default
+    if normalized in aliases:
+        return aliases[normalized]
+
+    supported = ", ".join(sorted(set(aliases.values())))
+    raise ValueError(
+        f"Invalid {env_name}={raw_value!r}. Supported values: {supported}"
+    )
+
+
+def _mineru_sglang_engine_available() -> bool:
+    try:
+        from sglang.srt.server_args import ServerArgs  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_mineru_output_subdir(backend: str) -> str:
+    return "txt" if backend == "pipeline" else "vlm"
+
+
+def _resolve_mineru_config_path() -> str:
+    config_name = os.getenv("MINERU_TOOLS_CONFIG_JSON", "mineru.json")
+    if os.path.isabs(config_name):
+        return config_name
+    return os.path.join(os.path.expanduser("~"), config_name)
+
+
+def _ensure_local_mineru_model_ready(model_key: str) -> str:
+    local_models_dir = get_local_models_dir()
+    model_root = local_models_dir.get(model_key) if isinstance(local_models_dir, dict) else None
+    if model_root:
+        return model_root
+
+    config_path = _resolve_mineru_config_path()
+    raise RuntimeError(
+        f"MinerU {model_key} local model is not configured. "
+        f"Expected '{config_path}' to contain 'models-dir.{model_key}'. "
+        f"Run `uv run mineru-models-download --source modelscope --model_type {model_key}` "
+        "in this environment first, or update the config to the existing model path."
+    )
+
+
+def resolve_mineru_parse_settings_from_env() -> MineruParseSettings:
+    requested_mode = _normalize_env_choice(
+        os.getenv("MINERU_PARSE_MODE"),
+        _MINERU_PARSE_MODE_ALIASES,
+        default="pipeline",
+        env_name="MINERU_PARSE_MODE",
+    )
+    model_source = _normalize_env_choice(
+        os.getenv("MINERU_MODEL_SOURCE"),
+        _MINERU_MODEL_SOURCE_ALIASES,
+        default="local",
+        env_name="MINERU_MODEL_SOURCE",
+    )
+
+    if requested_mode == "pipeline":
+        parse_method = _normalize_env_choice(
+            os.getenv("MINERU_PIPELINE_METHOD"),
+            _MINERU_PIPELINE_METHOD_ALIASES,
+            default="txt",
+            env_name="MINERU_PIPELINE_METHOD",
+        )
+        return MineruParseSettings(
+            requested_mode=requested_mode,
+            effective_backend="pipeline",
+            parse_method=parse_method,
+            output_subdir="txt",
+            model_source=model_source,
+            local_model_key="pipeline" if model_source == "local" else None,
+        )
+
+    if requested_mode == "hybrid-engine":
+        parse_method = _normalize_env_choice(
+            os.getenv("MINERU_HYBRID_METHOD") or os.getenv("MINERU_PIPELINE_METHOD"),
+            _MINERU_PIPELINE_METHOD_ALIASES,
+            default="auto",
+            env_name="MINERU_HYBRID_METHOD",
+        )
+        return MineruParseSettings(
+            requested_mode=requested_mode,
+            effective_backend="pipeline",
+            parse_method=parse_method,
+            output_subdir="txt",
+            model_source=model_source,
+            local_model_key="pipeline" if model_source == "local" else None,
+        )
+
+    server_url = (os.getenv("MINERU_VLM_SERVER_URL") or "").strip() or None
+    requested_vlm_backend = _normalize_env_choice(
+        os.getenv("MINERU_VLM_BACKEND"),
+        _MINERU_VLM_BACKEND_ALIASES,
+        default="auto",
+        env_name="MINERU_VLM_BACKEND",
+    )
+    if requested_vlm_backend == "auto":
+        resolved_vlm_backend = (
+            "sglang-client"
+            if server_url
+            else "sglang-engine"
+            if _mineru_sglang_engine_available()
+            else "transformers"
+        )
+    else:
+        resolved_vlm_backend = requested_vlm_backend
+
+    if resolved_vlm_backend == "sglang-client" and not server_url:
+        raise ValueError(
+            "MINERU_VLM_SERVER_URL is required when MINERU_VLM_BACKEND=sglang-client "
+            "or when MINERU_PARSE_MODE=vlm-engine auto-selects client mode."
+        )
+    if resolved_vlm_backend == "sglang-engine" and not _mineru_sglang_engine_available():
+        raise RuntimeError(
+            "MINERU_VLM_BACKEND=sglang-engine requires sglang to be installed in this environment."
+        )
+
+    model_path = (os.getenv("MINERU_VLM_MODEL_PATH") or "").strip() or None
+    local_model_key = None
+    if resolved_vlm_backend != "sglang-client" and model_source == "local" and model_path is None:
+        local_model_key = "vlm"
+
+    return MineruParseSettings(
+        requested_mode=requested_mode,
+        effective_backend=f"vlm-{resolved_vlm_backend}",
+        parse_method="vlm",
+        output_subdir="vlm",
+        model_source=model_source,
+        server_url=server_url,
+        model_path=model_path,
+        local_model_key=local_model_key,
+    )
+
+
+def get_mineru_output_subdirs_for_lookup() -> list[str]:
+    preferred = resolve_mineru_parse_settings_from_env().output_subdir
+    ordered: list[str] = []
+    for subdir in (preferred, *_MINERU_OUTPUT_SUBDIRS):
+        if subdir not in ordered:
+            ordered.append(subdir)
+    return ordered
+
+
+def _prepare_mineru_runtime(settings: MineruParseSettings) -> None:
+    os.environ["MINERU_MODEL_SOURCE"] = settings.model_source
+    if settings.local_model_key:
+        _ensure_local_mineru_model_ready(settings.local_model_key)
+
+    logger.info(
+        "MinerU parse settings resolved: %s",
+        asdict(settings),
+    )
 
 
 def _env_progress_enabled() -> bool:
@@ -420,7 +636,7 @@ class _activate_terminal_progress:
 
 def _resolve_md_usage_report_dir(pdf_outdir: str) -> str:
     candidate = os.path.abspath(pdf_outdir)
-    if os.path.basename(candidate) == "txt":
+    if os.path.basename(candidate) in _MINERU_OUTPUT_SUBDIRS:
         parent = os.path.dirname(candidate)
         if os.path.basename(parent).endswith("_md"):
             return parent
@@ -528,6 +744,52 @@ def _build_source_ref(
     return " | ".join(parts)
 
 
+def _coerce_content_list_text_fragments(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, (list, tuple)):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(_coerce_content_list_text_fragments(item))
+        return parts
+
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _append_index_text_block(
+    text_blocks: list[dict[str, Any]],
+    *,
+    raw_text: str,
+    page_number: int | None,
+    section_path: str,
+    source_file_path: str,
+    is_heading: bool = False,
+    source_kind: str = "text",
+) -> None:
+    normalized_text = _normalize_source_text_for_match(raw_text)
+    if not normalized_text:
+        return
+
+    min_match_len = 2 if is_heading else 6
+    if len(normalized_text) < min_match_len:
+        return
+
+    text_blocks.append(
+        {
+            "match_text": normalized_text[:240],
+            "page_number": page_number,
+            "section_path": section_path,
+            "file_path": source_file_path,
+            "is_heading": is_heading,
+            "source_kind": source_kind,
+        }
+    )
+
+
 def _build_content_list_index(
     content_list: list[dict[str, Any]],
     source_file_path: str,
@@ -536,7 +798,7 @@ def _build_content_list_index(
     image_metadata_map: dict[str, dict[str, Any]] = {}
     section_stack: list[str] = []
 
-    for item in content_list:
+    for item_index, item in enumerate(content_list):
         page_idx = item.get("page_idx")
         page_number = page_idx + 1 if isinstance(page_idx, int) else None
 
@@ -556,15 +818,34 @@ def _build_content_list_index(
             if section_stack and section_stack[0] == "目 录":
                 continue
 
-            text_blocks.append(
-                {
-                    "match_text": normalized_text[:240],
-                    "page_number": page_number,
-                    "section_path": " > ".join(section_stack),
-                    "file_path": source_file_path,
-                    "is_heading": _is_heading_item(item),
-                }
+            _append_index_text_block(
+                text_blocks,
+                raw_text=raw_text,
+                page_number=page_number,
+                section_path=" > ".join(section_stack),
+                source_file_path=source_file_path,
+                is_heading=_is_heading_item(item),
+                source_kind="text",
             )
+            continue
+
+        section_path = " > ".join(section_stack)
+        if item.get("type") == "table":
+            table_text_candidates = [
+                *(_coerce_content_list_text_fragments(item.get("table_caption"))),
+                *(_coerce_content_list_text_fragments(item.get("table_body"))),
+                *(_coerce_content_list_text_fragments(item.get("table_footnote"))),
+            ]
+            for table_text in table_text_candidates:
+                _append_index_text_block(
+                    text_blocks,
+                    raw_text=table_text,
+                    page_number=page_number,
+                    section_path=section_path,
+                    source_file_path=source_file_path,
+                    is_heading=False,
+                    source_kind="table",
+                )
             continue
 
         image_path = item.get("img_path")
@@ -572,7 +853,6 @@ def _build_content_list_index(
             continue
 
         image_name = os.path.basename(image_path)
-        section_path = " > ".join(section_stack)
         page_numbers = [page_number] if page_number else []
         image_metadata_map[image_name] = {
             "file_path": source_file_path,
@@ -581,6 +861,10 @@ def _build_content_list_index(
             "page_number_end": page_numbers[-1] if page_numbers else None,
             "section_path": section_path,
             "source_ref": _build_source_ref(source_file_path, page_numbers, section_path),
+            "source_kind": item.get("type") or "image",
+            "content_list_index": item_index,
+            "image_caption": _coerce_content_list_text_fragments(item.get("image_caption")),
+            "image_footnote": _coerce_content_list_text_fragments(item.get("image_footnote")),
         }
 
     return text_blocks, image_metadata_map
@@ -608,6 +892,7 @@ def _build_text_segment_metadata(
                         "section_path": block.get("section_path", ""),
                         "file_path": block.get("file_path", source_file_path),
                         "is_heading": bool(block.get("is_heading")),
+                        "source_kind": block.get("source_kind", "text"),
                     }
                 )
 
@@ -673,6 +958,755 @@ def _build_text_segment_metadata(
         "source_ref": _build_source_ref(source_file_path, page_numbers, section_path),
         "content_blocks": matched_blocks,
     }
+
+
+def _get_markdown_it_parser():
+    global _MARKDOWN_IT_PARSER
+    if _MARKDOWN_IT_PARSER is not None:
+        return _MARKDOWN_IT_PARSER
+
+    try:
+        from markdown_it import MarkdownIt
+        from markdown_it.tree import SyntaxTreeNode
+    except Exception:
+        return None, None
+
+    # `commonmark + table` avoids the optional linkify dependency while still
+    # giving us stable top-level block parsing and fenced-code support.
+    parser = MarkdownIt("commonmark", {"linkify": False}).enable("table")
+    _MARKDOWN_IT_PARSER = (parser, SyntaxTreeNode)
+    return _MARKDOWN_IT_PARSER
+
+
+def _normalize_heading_text(raw_heading: str) -> str:
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", raw_heading or "")
+    return text.strip()
+
+
+def _render_markdown_section_context(section_stack: list[str]) -> str:
+    if not section_stack:
+        return ""
+    lines: list[str] = []
+    for index, heading in enumerate(section_stack[:6], 1):
+        clean_heading = heading.strip()
+        if not clean_heading:
+            continue
+        lines.append(f"{'#' * index} {clean_heading}")
+    return "\n".join(lines).strip()
+
+
+def _token_count(tokenizer, text: str) -> int:
+    if not text:
+        return 0
+    return len(tokenizer.encode(text))
+
+
+def _split_text_by_token_window(
+    text: str,
+    tokenizer,
+    *,
+    max_token_size: int,
+    overlap_token_size: int,
+) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    tokens = tokenizer.encode(text)
+    if len(tokens) <= max_token_size:
+        return [text]
+
+    step = max(max_token_size - overlap_token_size, 1)
+    parts: list[str] = []
+    for start in range(0, len(tokens), step):
+        piece = tokenizer.decode(tokens[start : start + max_token_size]).strip()
+        if piece:
+            parts.append(piece)
+    return parts
+
+
+def _split_html_table_by_rows(
+    table_text: str,
+    tokenizer,
+    *,
+    max_token_size: int,
+) -> list[str]:
+    table_text = (table_text or "").strip()
+    if not table_text:
+        return []
+
+    table_match = re.search(r"(?is)(<table\b[^>]*>)(.*?)(</table>)", table_text)
+    if not table_match:
+        return [table_text]
+
+    start_tag, inner_html, end_tag = table_match.groups()
+    rows = re.findall(r"(?is)<tr\b.*?</tr>", inner_html)
+    if len(rows) <= 1:
+        return [table_text]
+
+    header_rows: list[str] = []
+    body_rows: list[str] = []
+    for row in rows:
+        if not body_rows and ("<th" in row.lower() or not header_rows):
+            header_rows.append(row)
+            continue
+        body_rows.append(row)
+
+    if not body_rows:
+        return [table_text]
+
+    fixed_prefix = start_tag + "".join(header_rows)
+    fixed_tokens = _token_count(tokenizer, fixed_prefix + end_tag)
+    if fixed_tokens >= max_token_size:
+        return [table_text]
+
+    pieces: list[str] = []
+    current_rows: list[str] = []
+    current_tokens = fixed_tokens
+    for row in body_rows:
+        row_tokens = _token_count(tokenizer, row)
+        if current_rows and current_tokens + row_tokens > max_token_size:
+            pieces.append(fixed_prefix + "".join(current_rows) + end_tag)
+            current_rows = [row]
+            current_tokens = fixed_tokens + row_tokens
+            continue
+        current_rows.append(row)
+        current_tokens += row_tokens
+
+    if current_rows:
+        pieces.append(fixed_prefix + "".join(current_rows) + end_tag)
+
+    return [piece.strip() for piece in pieces if piece.strip()] or [table_text]
+
+
+def _syntax_tree_node_is_single_image(node) -> bool:
+    if getattr(node, "type", "") != "paragraph":
+        return False
+    children = list(getattr(node, "children", []) or [])
+    if len(children) != 1 or getattr(children[0], "type", "") != "inline":
+        return False
+    inline_children = list(getattr(children[0], "children", []) or [])
+    if len(inline_children) != 1:
+        return False
+    return getattr(inline_children[0], "type", "") == "image"
+
+
+def _classify_markdown_block(node, block_text: str) -> tuple[str, int | None]:
+    node_type = getattr(node, "type", "")
+    if node_type == "heading":
+        try:
+            heading_level = int(str(getattr(node, "tag", "h1")).lstrip("h") or "1")
+        except Exception:
+            heading_level = 1
+        return "heading", heading_level
+
+    if node_type == "paragraph":
+        if _syntax_tree_node_is_single_image(node):
+            return "image", None
+        return "paragraph", None
+
+    if node_type in {"bullet_list", "ordered_list"}:
+        return "list", None
+    if node_type == "blockquote":
+        return "blockquote", None
+    if node_type in {"fence", "code_block"}:
+        info = (getattr(node, "info", "") or "").strip().lower()
+        if info == "image_description_start":
+            return "image_description", None
+        return "code", None
+    if node_type == "table":
+        return "table", None
+    if node_type == "html_block":
+        lowered = block_text.lower()
+        if "image_description:" in lowered:
+            return "image_description_marker", None
+        if "<img" in lowered:
+            return "image", None
+        if "<table" in lowered:
+            return "table", None
+        return "html", None
+
+    return node_type or "unknown", None
+
+
+def _extract_markdown_image_src(block_text: str) -> str | None:
+    md_match = re.search(r"!\[[^\]]*\]\(([^)]+)\)", block_text)
+    if md_match:
+        raw_target = md_match.group(1).strip()
+        if raw_target.startswith("<") and raw_target.endswith(">"):
+            raw_target = raw_target[1:-1].strip()
+        raw_target = re.split(r"""\s+(?=["'])""", raw_target, maxsplit=1)[0].strip()
+        return raw_target or None
+
+    html_match = re.search(
+        r"""<img\b[^>]*\bsrc=["']([^"']+)["']""",
+        block_text,
+        re.IGNORECASE,
+    )
+    if html_match:
+        return html_match.group(1).strip() or None
+
+    return None
+
+
+def _extract_markdown_image_file_name(block_text: str) -> str | None:
+    image_src = _extract_markdown_image_src(block_text)
+    if not image_src:
+        return None
+    normalized_src = image_src.split("?", 1)[0].split("#", 1)[0].strip()
+    image_file_name = os.path.basename(normalized_src)
+    return image_file_name or None
+
+
+def _find_markdown_image_occurrences(content: str) -> list[dict[str, Any]]:
+    occurrences: list[dict[str, Any]] = []
+    patterns = [
+        re.compile(r"!\[[^\]]*\]\((?:[^)(]+|\([^)]*\))*\)"),
+        re.compile(r"""<img\b[^>]*\bsrc=["'][^"']+["'][^>]*>""", re.IGNORECASE),
+    ]
+
+    for pattern in patterns:
+        for match in pattern.finditer(content):
+            image_file_name = _extract_markdown_image_file_name(match.group(0))
+            if not image_file_name:
+                continue
+            occurrences.append(
+                {
+                    "image_file": image_file_name,
+                    "match_start": match.start(),
+                    "match_end": match.end(),
+                    "insert_after": match.end(),
+                }
+            )
+
+    occurrences.sort(key=lambda item: (item["match_start"], item["match_end"]))
+    deduped_occurrences: list[dict[str, Any]] = []
+    for occurrence in occurrences:
+        if deduped_occurrences and occurrence["match_start"] == deduped_occurrences[-1]["match_start"] and occurrence["match_end"] == deduped_occurrences[-1]["match_end"]:
+            continue
+        deduped_occurrences.append(occurrence)
+
+    return deduped_occurrences
+
+
+def _parse_markdown_blocks(content: str) -> list[dict[str, Any]]:
+    parser, syntax_tree_node_cls = _get_markdown_it_parser()
+    if parser is None or syntax_tree_node_cls is None or not content.strip():
+        return []
+
+    lines = content.splitlines(keepends=True)
+    root = syntax_tree_node_cls(parser.parse(content))
+    section_stack: list[str] = []
+    raw_blocks: list[dict[str, Any]] = []
+
+    for ordinal, node in enumerate(list(getattr(root, "children", []) or [])):
+        line_map = getattr(node, "map", None)
+        if not line_map:
+            continue
+        start_line, end_line = line_map
+        block_text = "".join(lines[start_line:end_line]).strip()
+        if not block_text:
+            continue
+
+        kind, heading_level = _classify_markdown_block(node, block_text)
+        block: dict[str, Any] = {
+            "ordinal": ordinal,
+            "kind": kind,
+            "text": block_text,
+            "heading_level": heading_level,
+            "line_start": start_line,
+            "line_end": end_line,
+            "node": node,
+        }
+
+        if kind == "heading":
+            heading_text = _normalize_heading_text(block_text)
+            if not heading_text:
+                continue
+            level = heading_level or 1
+            section_stack = section_stack[: level - 1]
+            section_stack.append(heading_text)
+            block["heading_text"] = heading_text
+        elif kind == "image":
+            image_src = _extract_markdown_image_src(block_text)
+            block["image_src"] = image_src
+            block["image_file"] = _extract_markdown_image_file_name(block_text)
+
+        block["section_path"] = " > ".join(section_stack)
+        block["section_context"] = _render_markdown_section_context(section_stack)
+        raw_blocks.append(block)
+
+    return raw_blocks
+
+
+def _load_image_description_text(image_dir: str, image_file_name: str) -> str:
+    image_desc_path = os.path.join(
+        image_dir, os.path.splitext(image_file_name)[0] + ".txt"
+    )
+    if not os.path.exists(image_desc_path):
+        return ""
+
+    try:
+        with open(image_desc_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def _build_legacy_markdown_image_refs(
+    md_text: str,
+    *,
+    context_front_chars: int,
+    context_behind_chars: int,
+) -> list[dict[str, Any]]:
+    text_list = md_text.split("images/")
+    image_name_pattern = re.compile(r"^([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
+    image_refs: list[dict[str, Any]] = []
+
+    for index, text in enumerate(text_list):
+        if index == 0:
+            continue
+        image_match = image_name_pattern.match(text)
+        if not image_match:
+            continue
+        image_file_name = image_match.group(1)
+        image_refs.append(
+            {
+                "image_file": image_file_name,
+                "image_src": f"images/{image_file_name}",
+                "section_path": "",
+                "section_context": "",
+                "context_front": text_list[index - 1][-context_front_chars:]
+                if context_front_chars > 0
+                else "",
+                "context_behind": text[image_match.end() :][:context_behind_chars]
+                if context_behind_chars > 0
+                else "",
+                "line_start": None,
+                "line_end": None,
+                "ordinal": index,
+            }
+        )
+
+    return image_refs
+
+
+def _build_md_parser_image_refs(
+    md_text: str,
+    *,
+    context_front_chars: int,
+    context_behind_chars: int,
+) -> list[dict[str, Any]]:
+    raw_blocks = _parse_markdown_blocks(md_text)
+    if not raw_blocks:
+        return []
+
+    image_context_kinds = {"paragraph", "list", "blockquote"}
+    skip_kinds = {"image", "image_description", "image_description_marker"}
+    image_refs: list[dict[str, Any]] = []
+
+    for index, block in enumerate(raw_blocks):
+        if block.get("kind") != "image":
+            continue
+
+        image_file_name = block.get("image_file")
+        if not image_file_name:
+            continue
+
+        section_path = block.get("section_path", "")
+        if section_path.split(" > ", 1)[0].replace(" ", "") == "目录":
+            continue
+
+        front_parts: list[str] = []
+        cursor = index - 1
+        while cursor >= 0:
+            prev_block = raw_blocks[cursor]
+            prev_kind = prev_block.get("kind")
+            if prev_kind == "heading":
+                break
+            if prev_kind in skip_kinds:
+                cursor -= 1
+                continue
+            if prev_kind in image_context_kinds:
+                prev_text = (prev_block.get("text") or "").strip()
+                if prev_text:
+                    front_parts.append(prev_text)
+                    front_candidate = "\n\n".join(
+                        part
+                        for part in [
+                            block.get("section_context", "").strip(),
+                            "\n\n".join(reversed(front_parts)).strip(),
+                        ]
+                        if part
+                    ).strip()
+                    if context_front_chars > 0 and len(front_candidate) >= context_front_chars:
+                        break
+            cursor -= 1
+        front_parts.reverse()
+        front_context = "\n\n".join(
+            part
+            for part in [block.get("section_context", "").strip(), *front_parts]
+            if part
+        ).strip()
+        if context_front_chars > 0:
+            front_context = front_context[-context_front_chars:]
+        else:
+            front_context = ""
+
+        behind_parts: list[str] = []
+        cursor = index + 1
+        while cursor < len(raw_blocks):
+            next_block = raw_blocks[cursor]
+            next_kind = next_block.get("kind")
+            if next_kind == "heading":
+                break
+            if next_kind in skip_kinds:
+                cursor += 1
+                continue
+            if next_kind in image_context_kinds:
+                next_text = (next_block.get("text") or "").strip()
+                if next_text:
+                    behind_parts.append(next_text)
+                    behind_candidate = "\n\n".join(behind_parts).strip()
+                    if context_behind_chars > 0 and len(behind_candidate) >= context_behind_chars:
+                        break
+            cursor += 1
+        behind_context = "\n\n".join(part for part in behind_parts if part).strip()
+        if context_behind_chars > 0:
+            behind_context = behind_context[:context_behind_chars]
+        else:
+            behind_context = ""
+
+        image_refs.append(
+            {
+                "image_file": image_file_name,
+                "image_src": block.get("image_src"),
+                "section_path": section_path,
+                "section_context": block.get("section_context", ""),
+                "context_front": front_context,
+                "context_behind": behind_context,
+                "line_start": block.get("line_start"),
+                "line_end": block.get("line_end"),
+                "ordinal": block.get("ordinal", index),
+            }
+        )
+
+    return image_refs
+
+
+def split_by_md_parser(
+    content: str,
+    tokenizer,
+    *,
+    max_token_size: int,
+    overlap_token_size: int,
+    skip_image_blocks: bool = True,
+) -> list[dict[str, Any]]:
+    raw_blocks = _parse_markdown_blocks(content)
+    if not raw_blocks:
+        return []
+
+    chunks: list[dict[str, Any]] = []
+    current_parts: list[str] = []
+    current_types: list[str] = []
+    current_line_start: int | None = None
+    current_line_end: int | None = None
+    current_section_path = ""
+    soft_max_tokens = max(int(max_token_size * 0.85), min(max_token_size, 96))
+    hard_kinds = {"table", "code", "html"}
+    skip_kinds = {"image", "image_description", "image_description_marker"} if skip_image_blocks else set()
+
+    def flush_current() -> None:
+        nonlocal current_parts, current_types, current_line_start, current_line_end, current_section_path
+        if not current_parts:
+            return
+        merged_text = "\n\n".join(part.strip() for part in current_parts if part and part.strip()).strip()
+        if merged_text:
+            chunks.append(
+                {
+                    "content": merged_text,
+                    "line_start": current_line_start,
+                    "line_end": current_line_end,
+                    "section_path": current_section_path,
+                    "block_types": list(current_types),
+                }
+            )
+        current_parts = []
+        current_types = []
+        current_line_start = None
+        current_line_end = None
+        current_section_path = ""
+
+    def split_large_block(block_text: str, block_kind: str) -> list[str]:
+        if block_kind == "table":
+            pieces = _split_html_table_by_rows(
+                block_text,
+                tokenizer,
+                max_token_size=max_token_size,
+            )
+            if pieces:
+                return pieces
+        return _split_text_by_token_window(
+            block_text,
+            tokenizer,
+            max_token_size=max_token_size,
+            overlap_token_size=overlap_token_size,
+        )
+
+    for block in raw_blocks:
+        block_kind = block["kind"]
+        block_text = block["text"]
+        line_start = block["line_start"]
+        line_end = block["line_end"]
+
+        if block_kind == "heading":
+            flush_current()
+            continue
+
+        if block_kind in skip_kinds:
+            flush_current()
+            continue
+
+        section_path = block.get("section_path", "")
+        if section_path.split(" > ", 1)[0].replace(" ", "") == "目录":
+            continue
+
+        section_context = block.get("section_context", "")
+        if section_context:
+            candidate_text = f"{section_context}\n\n{block_text}".strip()
+        else:
+            candidate_text = block_text.strip()
+            section_path = ""
+
+        candidate_tokens = _token_count(tokenizer, candidate_text)
+
+        if block_kind in hard_kinds or candidate_tokens > max_token_size:
+            flush_current()
+            for part in split_large_block(candidate_text, block_kind):
+                chunks.append(
+                    {
+                        "content": part.strip(),
+                        "line_start": line_start,
+                        "line_end": line_end,
+                        "section_path": section_path,
+                        "block_types": [block_kind],
+                    }
+                )
+            continue
+
+        if not current_parts:
+            current_parts = [candidate_text]
+            current_types = [block_kind]
+            current_line_start = line_start
+            current_line_end = line_end
+            current_section_path = section_path
+            continue
+
+        merged_candidate = "\n\n".join(current_parts + [block_text]).strip()
+        if _token_count(tokenizer, merged_candidate) > soft_max_tokens:
+            flush_current()
+            current_parts = [candidate_text]
+            current_types = [block_kind]
+            current_line_start = line_start
+            current_line_end = line_end
+            current_section_path = section_path
+            continue
+
+        current_parts.append(block_text)
+        current_types.append(block_kind)
+        current_line_end = line_end
+
+    flush_current()
+    return [chunk for chunk in chunks if chunk.get("content")]
+
+
+def _build_md_parser_text_insert_units(
+    md_text: str,
+    source_file_path: str,
+    text_blocks: list[dict[str, Any]],
+    tokenizer,
+    *,
+    max_token_size: int,
+    overlap_token_size: int,
+) -> list[dict[str, Any]]:
+    parser_chunks = split_by_md_parser(
+        md_text,
+        tokenizer,
+        max_token_size=max_token_size,
+        overlap_token_size=overlap_token_size,
+        skip_image_blocks=True,
+    )
+
+    insert_units: list[dict[str, Any]] = []
+    for index, chunk in enumerate(parser_chunks):
+        chunk_text = (chunk.get("content") or "").strip()
+        if not chunk_text:
+            continue
+        insert_units.append(
+            {
+                "text": chunk_text,
+                "metadata": _build_text_segment_metadata(
+                    chunk_text, source_file_path, text_blocks
+                ),
+                "chunk_index": index,
+                "chunk_type": "text_md_parser",
+                "detail": "markdown parser block inserted",
+                "line_start": chunk.get("line_start"),
+                "line_end": chunk.get("line_end"),
+                "section_path": chunk.get("section_path", ""),
+            }
+        )
+    return insert_units
+
+
+def _build_md_parser_image_insert_units(
+    md_text: str,
+    image_dir: str,
+    image_metadata_map: dict[str, dict[str, Any]],
+    doc_name_without_ext: str,
+) -> list[dict[str, Any]]:
+    image_refs = _build_md_parser_image_refs(
+        md_text,
+        context_front_chars=0,
+        context_behind_chars=0,
+    )
+
+    insert_units: list[dict[str, Any]] = []
+    for index, image_ref in enumerate(image_refs):
+        image_file_name = image_ref.get("image_file")
+        if not image_file_name:
+            continue
+
+        image_desc_text = _load_image_description_text(image_dir, image_file_name)
+        if not image_desc_text:
+            continue
+
+        insert_units.append(
+            {
+                "text": image_desc_text,
+                "doc_name": doc_name_without_ext,
+                "file_paths": os.path.abspath(os.path.join(image_dir, image_file_name)),
+                "metadata": image_metadata_map.get(image_file_name, {}),
+                "chunk_index": index,
+                "chunk_type": "image_desc",
+                "detail": f"image {image_file_name}",
+                "image_file": image_file_name,
+                "line_start": image_ref.get("line_start"),
+                "line_end": image_ref.get("line_end"),
+                "section_path": image_ref.get("section_path", ""),
+            }
+        )
+
+    return insert_units
+
+
+def _build_image_insert_units_from_content_list(
+    content_list: list[dict[str, Any]],
+    image_dir: str,
+    image_metadata_map: dict[str, dict[str, Any]],
+    doc_name_without_ext: str,
+) -> list[dict[str, Any]]:
+    insert_units: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in content_list:
+        if item.get("type") != "image":
+            continue
+        image_path = item.get("img_path")
+        if not image_path:
+            continue
+
+        image_file_name = os.path.basename(image_path)
+        if image_file_name in seen:
+            continue
+        seen.add(image_file_name)
+
+        image_desc_text = _load_image_description_text(image_dir, image_file_name)
+        if not image_desc_text:
+            continue
+
+        insert_units.append(
+            {
+                "text": image_desc_text,
+                "doc_name": doc_name_without_ext,
+                "file_paths": os.path.abspath(os.path.join(image_dir, image_file_name)),
+                "metadata": image_metadata_map.get(image_file_name, {}),
+                "chunk_index": len(insert_units),
+                "chunk_type": "image_desc",
+                "detail": f"image {image_file_name}",
+                "image_file": image_file_name,
+            }
+        )
+    return insert_units
+
+
+def _build_legacy_md_insert_units(
+    md_text: str,
+    source_file_path: str,
+    text_blocks: list[dict[str, Any]],
+    image_dir: str,
+    image_metadata_map: dict[str, dict[str, Any]],
+    doc_name_with_ext: str,
+    doc_name_without_ext: str,
+) -> list[dict[str, Any]]:
+    insert_units: list[dict[str, Any]] = []
+    text_list = md_text.split("images/")
+    image_name_pattern = re.compile(r"^([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
+
+    for index, text in enumerate(text_list):
+        if index == 0:
+            if text.strip():
+                insert_units.append(
+                    {
+                        "text": text,
+                        "doc_name": doc_name_with_ext,
+                        "file_paths": source_file_path,
+                        "metadata": _build_text_segment_metadata(
+                            text, source_file_path, text_blocks
+                        ),
+                        "chunk_index": 0,
+                        "chunk_type": "text_first",
+                        "detail": "text block inserted",
+                        "sort_order": 0,
+                    }
+                )
+            continue
+
+        image_match = image_name_pattern.match(text)
+        if image_match:
+            image_file_name = image_match.group(1)
+            image_desc_text = _load_image_description_text(image_dir, image_file_name)
+            if image_desc_text:
+                insert_units.append(
+                    {
+                        "text": image_desc_text,
+                        "doc_name": doc_name_without_ext,
+                        "file_paths": os.path.abspath(os.path.join(image_dir, image_file_name)),
+                        "metadata": image_metadata_map.get(image_file_name, {}),
+                        "chunk_index": index,
+                        "chunk_type": "image_desc",
+                        "detail": f"image {image_file_name}",
+                        "image_file": image_file_name,
+                        "sort_order": index * 2,
+                    }
+                )
+
+        if text.strip():
+            insert_units.append(
+                {
+                    "text": text,
+                    "doc_name": doc_name_with_ext,
+                    "file_paths": source_file_path,
+                    "metadata": _build_text_segment_metadata(
+                        text, source_file_path, text_blocks
+                    ),
+                    "chunk_index": index,
+                    "chunk_type": "text",
+                    "detail": "text block inserted",
+                    "sort_order": index * 2 + 1,
+                }
+            )
+
+    return insert_units
 
 
 def _resolve_content_list_path_from_md(md_path: str) -> str | None:
@@ -1678,12 +2712,43 @@ def _guess_image_mime_type(image_path: str) -> str:
     return guessed or "image/jpeg"
 
 
-async def multimodal_image_analysis(image_path):
-    return await asyncio.to_thread(multimodal_image_analysis_sync, image_path)
+_IMAGE_DESCRIPTION_MODE_ALIASES = {
+    "single": "single_multimodal",
+    "single_stage": "single_multimodal",
+    "single-stage": "single_multimodal",
+    "single_multimodal": "single_multimodal",
+    "single-multimodal": "single_multimodal",
+    "one_shot": "single_multimodal",
+    "one-shot": "single_multimodal",
+    "two_stage": "two_stage",
+    "two-stage": "two_stage",
+    "two_step": "two_stage",
+    "two-step": "two_stage",
+    "legacy": "two_stage",
+}
+
+_SINGLE_MULTIMODAL_IMAGE_PROMPT = """请结合图片本身与给定上下文，为知识库生成一段全面、忠实的图片说明。
+要求：
+1. 先描述图片中直接可见的内容、对象、结构、文字、图表或关系。
+2. 再结合上下文说明这张图在文档中的主题、作用、结论或含义。
+3. 对无法从图片直接确认、仅能依据上下文推断的内容，要明确写出“根据上下文推断”。
+4. 如果上下文与图片可见内容不一致，优先忠实于图片本身，并指出存在不一致。
+5. 输出使用中文自然段，不要使用标题或项目符号。"""
 
 
-def multimodal_image_analysis_sync(image_path):
-    base64_image = encode_image_to_base64(image_path)
+def _resolve_image_description_mode() -> str:
+    raw_mode = (os.getenv("IMAGE_DESCRIPTION_MODE", "single_multimodal") or "").strip().lower()
+    resolved_mode = _IMAGE_DESCRIPTION_MODE_ALIASES.get(raw_mode)
+    if resolved_mode is not None:
+        return resolved_mode
+    logger.warning(
+        "Unknown IMAGE_DESCRIPTION_MODE=%s. Fallback to single_multimodal.",
+        raw_mode,
+    )
+    return "single_multimodal"
+
+
+def _prepare_image_model_request(image_path: str) -> dict[str, Any] | None:
     api_key = os.getenv("IMAGE_MODEL_KEY")
     image_model = os.getenv("IMAGE_MODEL")
     image_model_url = os.getenv("IMAGE_MODEL_URL")
@@ -1692,69 +2757,192 @@ def multimodal_image_analysis_sync(image_path):
             "Missing IMAGE_MODEL config, skip image description. "
             "required: IMAGE_MODEL_KEY/IMAGE_MODEL/IMAGE_MODEL_URL"
         )
-        return ""
+        return None
     url = image_model_url.rstrip("/")
     # Support both full chat endpoint and base OpenAI-compatible endpoint.
     if not url.endswith("/chat/completions"):
         url = f"{url}/chat/completions"
-    mime_type = _guess_image_mime_type(image_path)
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
+    return {
+        "api_key": api_key,
+        "image_model": image_model,
+        "image_model_url": image_model_url,
+        "url": url,
+        "mime_type": _guess_image_mime_type(image_path),
+        "base64_image": encode_image_to_base64(image_path),
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        "timeout_sec": int(os.getenv("IMAGE_MODEL_TIMEOUT", "90")),
     }
+
+
+def _run_multimodal_image_completion(
+    image_path: str,
+    content: list[dict[str, Any]],
+    *,
+    source: str,
+    request_context: dict[str, Any] | None = None,
+) -> str:
+    request_context = request_context or _prepare_image_model_request(image_path)
+    if request_context is None:
+        return ""
+
     payload = {
-        "model": image_model,
+        "model": request_context["image_model"],
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": "请详细描述这张图片的内容，描述尽量多的实体信息"},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{mime_type};base64,{base64_image}"
-                        }
-                    }
-                ]
+                "content": content,
             }
         ],
-        "max_tokens": 1000 
+        "max_tokens": 1000,
     }
-    timeout_sec = int(os.getenv("IMAGE_MODEL_TIMEOUT", "90"))
     log_model_call(
-        "integrations.multimodal_image_analysis_sync",
+        source,
         {
             "image_path": image_path,
-            "api_key": api_key,
-            "image_model": image_model,
-            "image_model_url": image_model_url,
-            "url": url,
-            "mime_type": mime_type,
-            "timeout_sec": timeout_sec,
-            "headers": headers,
+            "api_key": request_context["api_key"],
+            "image_model": request_context["image_model"],
+            "image_model_url": request_context["image_model_url"],
+            "url": request_context["url"],
+            "mime_type": request_context["mime_type"],
+            "timeout_sec": request_context["timeout_sec"],
+            "headers": request_context["headers"],
             "payload": payload,
         },
     )
+
     response = None
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=timeout_sec)
+        response = requests.post(
+            request_context["url"],
+            headers=request_context["headers"],
+            json=payload,
+            timeout=request_context["timeout_sec"],
+        )
         response.raise_for_status()
         data = response.json()
         record_model_usage(
             "image",
-            image_model,
+            request_context["image_model"],
             data,
-            source="integrations.multimodal_image_analysis_sync",
+            source=source,
             extra={"image_path": os.path.abspath(image_path)},
         )
         return data["choices"][0]["message"]["content"]
     except Exception as e:
         detail = response.text if response is not None else str(e)
         logger.warning(
-            f"Image model request failed, skip image description. url={url}, model={image_model}, detail={detail}"
+            "Image model request failed, skip image description. url=%s, model=%s, detail=%s",
+            request_context["url"],
+            request_context["image_model"],
+            detail,
         )
         return ""
-    
+
+
+async def multimodal_image_analysis(image_path):
+    return await asyncio.to_thread(multimodal_image_analysis_sync, image_path)
+
+
+def multimodal_image_analysis_sync(image_path):
+    request_context = _prepare_image_model_request(image_path)
+    if request_context is None:
+        return ""
+    return _run_multimodal_image_completion(
+        image_path,
+        [
+            {"type": "text", "text": "请详细描述这张图片的内容，描述尽量多的实体信息"},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": (
+                        f"data:{request_context['mime_type']};base64,"
+                        f"{request_context['base64_image']}"
+                    )
+                },
+            },
+        ],
+        source="integrations.multimodal_image_analysis_sync",
+        request_context=request_context,
+    )
+
+
+async def multimodal_image_analysis_with_context(
+    image_path: str,
+    image_illustration_front: str,
+    image_illustration_behind: str,
+):
+    return await asyncio.to_thread(
+        multimodal_image_analysis_with_context_sync,
+        image_path,
+        image_illustration_front,
+        image_illustration_behind,
+    )
+
+
+def multimodal_image_analysis_with_context_sync(
+    image_path: str,
+    image_illustration_front: str,
+    image_illustration_behind: str,
+) -> str:
+    request_context = _prepare_image_model_request(image_path)
+    if request_context is None:
+        return ""
+    front_text = (image_illustration_front or "").strip() or "[无前文]"
+    behind_text = (image_illustration_behind or "").strip() or "[无后文]"
+    return _run_multimodal_image_completion(
+        image_path,
+        [
+            {"type": "text", "text": _SINGLE_MULTIMODAL_IMAGE_PROMPT},
+            {"type": "text", "text": f"图片前文：\n{front_text}"},
+            {"type": "text", "text": f"图片后文：\n{behind_text}"},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": (
+                        f"data:{request_context['mime_type']};base64,"
+                        f"{request_context['base64_image']}"
+                    )
+                },
+            },
+        ],
+        source="integrations.multimodal_image_analysis_with_context_sync",
+        request_context=request_context,
+    )
+
+
+async def generate_markdown_image_description(
+    image_path: str,
+    image_illustration_front: str,
+    image_illustration_behind: str,
+    *,
+    mode: str | None = None,
+) -> str:
+    resolved_mode = mode or _resolve_image_description_mode()
+    if resolved_mode == "two_stage":
+        image_description = await multimodal_image_analysis(image_path)
+        if not image_description:
+            return ""
+        return await env_openai_complete(
+            prompt=(
+                "image_Illustration_front:"
+                + image_illustration_front
+                + "image_Illustration_behind："
+                + image_illustration_behind
+                + "\n"
+                + "image_discription:"
+                + image_description
+            ),
+            system_prompt="请结合两端文本（分别是图片的上下文和LLM生成的描述），进行全面描述",
+        )
+    return await multimodal_image_analysis_with_context(
+        image_path,
+        image_illustration_front,
+        image_illustration_behind,
+    )
+
 
 async def process_image_file(work_dir, image_file_path, doc_name):
     rag = await initialize_rag(work_dir)
@@ -1832,11 +3020,13 @@ def do_parse(
     pdf_bytes_list: list[bytes],  # List of PDF bytes to be parsed
     p_lang_list: list[str],  # List of languages for each PDF, default is 'ch' (Chinese)
     backend="pipeline",  # The backend for parsing PDF, default is 'pipeline'
-    parse_method="txt",  # The method for parsing PDF, default is 'auto'
+    parse_method="txt",  # Legacy default kept as txt for pipeline mode compatibility
     flat_output=False,  # 单文件时直接输出到 output_dir/parse_method，无中间层
     p_formula_enable=True,  # Enable formula parsing
     p_table_enable=True,  # Enable table parsing
     server_url=None,  # Server URL for vlm-sglang-client backend
+    model_path=None,  # Optional model path override for VLM backends
+    output_subdir=None,  # Stable output subdir name, independent from parse_method
     f_draw_layout_bbox=True,  # Whether to draw layout bounding boxes
     f_draw_span_bbox=True,  # Whether to draw span bounding boxes
     f_dump_md=True,  # Whether to dump markdown files
@@ -1848,32 +3038,43 @@ def do_parse(
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
 ):
+    resolved_output_subdir = output_subdir or _resolve_mineru_output_subdir(backend)
 
     if backend == "pipeline":
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
-            new_pdf_bytes = convert_pdf_bytes_to_bytes_by_pypdfium2(pdf_bytes, start_page_id, end_page_id)
+            new_pdf_bytes = convert_pdf_bytes_to_bytes(pdf_bytes, start_page_id, end_page_id)
             pdf_bytes_list[idx] = new_pdf_bytes
 
-        infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = pipeline_doc_analyze(pdf_bytes_list, p_lang_list, parse_method=parse_method, formula_enable=p_formula_enable,table_enable=p_table_enable)
-        
-        for idx, model_list in enumerate(infer_results):
-            model_json = copy.deepcopy(model_list)
-            pdf_file_name = pdf_file_names[idx]
+        pipeline_contexts = []
+        for pdf_file_name in pdf_file_names:
             if flat_output and len(pdf_file_names) == 1:
-                local_image_dir, local_md_dir = _prepare_env_flat(output_dir, parse_method)
+                local_image_dir, local_md_dir = _prepare_env_flat(output_dir, resolved_output_subdir)
             else:
-                local_image_dir, local_md_dir = prepare_env(output_dir, pdf_file_name, parse_method)
-            image_writer, md_writer = FileBasedDataWriter(local_image_dir), FileBasedDataWriter(local_md_dir)
+                local_image_dir, local_md_dir = prepare_env(output_dir, pdf_file_name, resolved_output_subdir)
+            pipeline_contexts.append(
+                {
+                    "pdf_file_name": pdf_file_name,
+                    "local_image_dir": local_image_dir,
+                    "local_md_dir": local_md_dir,
+                    "image_writer": FileBasedDataWriter(local_image_dir),
+                    "md_writer": FileBasedDataWriter(local_md_dir),
+                }
+            )
 
-            images_list = all_image_lists[idx]
-            pdf_doc = all_pdf_docs[idx]
-            _lang = lang_list[idx]
-            _ocr_enable = ocr_enabled_list[idx]
-            middle_json = pipeline_result_to_middle_json(model_list, images_list, pdf_doc, image_writer, _lang, _ocr_enable, p_formula_enable)
-
+        def _dump_pipeline_parse_result(
+            *,
+            ctx: dict[str, Any],
+            pdf_bytes: bytes,
+            middle_json: dict[str, Any],
+            model_list: list[Any],
+        ) -> None:
+            pdf_file_name = ctx["pdf_file_name"]
+            local_image_dir = ctx["local_image_dir"]
+            local_md_dir = ctx["local_md_dir"]
+            md_writer = ctx["md_writer"]
+            model_json = copy.deepcopy(model_list)
             pdf_info = middle_json["pdf_info"]
 
-            pdf_bytes = pdf_bytes_list[idx]
             if f_draw_layout_bbox:
                 draw_layout_bbox(pdf_info, pdf_bytes, local_md_dir, f"{pdf_file_name}_layout.pdf")
 
@@ -1915,21 +3116,88 @@ def do_parse(
                 )
 
             logger.info(f"local output dir is {local_md_dir}")
+
+        if pipeline_doc_analyze is not None:
+            infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = pipeline_doc_analyze(
+                pdf_bytes_list,
+                p_lang_list,
+                parse_method=parse_method,
+                formula_enable=p_formula_enable,
+                table_enable=p_table_enable,
+            )
+
+            for idx, model_list in enumerate(infer_results):
+                ctx = pipeline_contexts[idx]
+                images_list = all_image_lists[idx]
+                pdf_doc = all_pdf_docs[idx]
+                _lang = lang_list[idx]
+                _ocr_enable = ocr_enabled_list[idx]
+                middle_json = pipeline_result_to_middle_json(
+                    model_list,
+                    images_list,
+                    pdf_doc,
+                    ctx["image_writer"],
+                    _lang,
+                    _ocr_enable,
+                    p_formula_enable,
+                )
+                _dump_pipeline_parse_result(
+                    ctx=ctx,
+                    pdf_bytes=pdf_bytes_list[idx],
+                    middle_json=middle_json,
+                    model_list=model_list,
+                )
+        else:
+            streaming_results: list[dict[str, Any] | None] = [None] * len(pdf_file_names)
+
+            def _on_doc_ready(doc_index: int, model_list: list[Any], middle_json: dict[str, Any], ocr_enable: bool) -> None:
+                streaming_results[doc_index] = {
+                    "model_list": model_list,
+                    "middle_json": middle_json,
+                    "ocr_enable": ocr_enable,
+                }
+
+            pipeline_doc_analyze_streaming(
+                pdf_bytes_list,
+                [ctx["image_writer"] for ctx in pipeline_contexts],
+                p_lang_list,
+                _on_doc_ready,
+                parse_method=parse_method,
+                formula_enable=p_formula_enable,
+                table_enable=p_table_enable,
+            )
+
+            for idx, result in enumerate(streaming_results):
+                if result is None:
+                    raise RuntimeError(
+                        f"Pipeline analyze did not return a result for document index {idx}: {pdf_file_names[idx]}"
+                    )
+                _dump_pipeline_parse_result(
+                    ctx=pipeline_contexts[idx],
+                    pdf_bytes=pdf_bytes_list[idx],
+                    middle_json=result["middle_json"],
+                    model_list=result["model_list"],
+                )
     else:
         if backend.startswith("vlm-"):
             backend = backend[4:]
 
         f_draw_span_bbox = False
-        parse_method = "vlm"
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
             pdf_file_name = pdf_file_names[idx]
-            pdf_bytes = convert_pdf_bytes_to_bytes_by_pypdfium2(pdf_bytes, start_page_id, end_page_id)
+            pdf_bytes = convert_pdf_bytes_to_bytes(pdf_bytes, start_page_id, end_page_id)
             if flat_output and len(pdf_file_names) == 1:
-                local_image_dir, local_md_dir = _prepare_env_flat(output_dir, parse_method)
+                local_image_dir, local_md_dir = _prepare_env_flat(output_dir, resolved_output_subdir)
             else:
-                local_image_dir, local_md_dir = prepare_env(output_dir, pdf_file_name, parse_method)
+                local_image_dir, local_md_dir = prepare_env(output_dir, pdf_file_name, resolved_output_subdir)
             image_writer, md_writer = FileBasedDataWriter(local_image_dir), FileBasedDataWriter(local_md_dir)
-            middle_json, infer_result = vlm_doc_analyze(pdf_bytes, image_writer=image_writer, backend=backend, server_url=server_url)
+            middle_json, infer_result = vlm_doc_analyze(
+                pdf_bytes,
+                image_writer=image_writer,
+                backend=backend,
+                server_url=server_url,
+                model_path=model_path,
+            )
 
             pdf_info = middle_json["pdf_info"]
 
@@ -1985,6 +3253,8 @@ def parse_doc(
         method="txt",
         flat_output=False,
         server_url=None,
+        model_path=None,
+        output_subdir=None,
         start_page_id=0,  # Start page ID for parsing, default is 0
         end_page_id=None  # End page ID for parsing, default is None (parse all pages until the end of the document)
 ):
@@ -2028,6 +3298,8 @@ def parse_doc(
             parse_method=method,
             flat_output=flat_output,
             server_url=server_url,
+            model_path=model_path,
+            output_subdir=output_subdir,
             start_page_id=start_page_id,
             end_page_id=end_page_id
         )
@@ -2037,36 +3309,35 @@ def parse_doc(
 
 def mineru_process(pdf_file_path, output_dir, keep_pdf_subdir: bool = True):
     pdf_path_list = [pdf_file_path]
-    os.environ['MINERU_MODEL_SOURCE'] = "local"
-    local_models_dir = get_local_models_dir()
-    pipeline_model_root = (
-        local_models_dir.get("pipeline")
-        if isinstance(local_models_dir, dict)
-        else None
-    )
-    if not pipeline_model_root:
-        config_name = os.getenv("MINERU_TOOLS_CONFIG_JSON", "mineru.json")
-        config_path = (
-            config_name
-            if os.path.isabs(config_name)
-            else os.path.join(os.path.expanduser("~"), config_name)
-        )
-        raise RuntimeError(
-            "MinerU pipeline local model is not configured. "
-            f"Expected '{config_path}' to contain 'models-dir.pipeline'. "
-            "Run `uv run mineru-models-download --source modelscope --model_type pipeline` "
-            "in this environment first, or update the config to the existing model path."
-        )
+    settings = resolve_mineru_parse_settings_from_env()
+    _prepare_mineru_runtime(settings)
     pdf_name = pdf_file_path.split("/")[-1].split(".")[0]
 
     if keep_pdf_subdir:
-        parse_doc(path_list=pdf_path_list, output_dir=output_dir, backend="pipeline")
-        return os.path.join(output_dir, pdf_name, "txt")
+        parse_doc(
+            path_list=pdf_path_list,
+            output_dir=output_dir,
+            backend=settings.effective_backend,
+            method=settings.parse_method,
+            server_url=settings.server_url,
+            model_path=settings.model_path,
+            output_subdir=settings.output_subdir,
+        )
+        return os.path.join(output_dir, pdf_name, settings.output_subdir)
 
-    # 单文件模式下直接输出到 <output_dir>/txt，无中间层
+    # 单文件模式下直接输出到 <output_dir>/<resolved_output_subdir>，无中间层
     os.makedirs(output_dir, exist_ok=True)
-    parse_doc(path_list=pdf_path_list, output_dir=output_dir, backend="pipeline", flat_output=True)
-    return os.path.join(output_dir, "txt")
+    parse_doc(
+        path_list=pdf_path_list,
+        output_dir=output_dir,
+        backend=settings.effective_backend,
+        method=settings.parse_method,
+        flat_output=True,
+        server_url=settings.server_url,
+        model_path=settings.model_path,
+        output_subdir=settings.output_subdir,
+    )
+    return os.path.join(output_dir, settings.output_subdir)
 
 
 async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: bool = True):
@@ -2104,11 +3375,21 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                 if not md_text:
                     raise ValueError("md_text is empty")
 
-                text_list = md_text.split("images/")
                 num_chars_of_behind = int(os.getenv("num_chars_of_behind") or "120")
                 num_chars_of_front = int(os.getenv("num_chars_of_front") or "120")
-                total_blocks = len(text_list)
-                total_images = max(total_blocks - 1, 0)
+                image_refs = _build_md_parser_image_refs(
+                    md_text,
+                    context_front_chars=num_chars_of_front,
+                    context_behind_chars=num_chars_of_behind,
+                )
+                if not image_refs:
+                    image_refs = _build_legacy_markdown_image_refs(
+                        md_text,
+                        context_front_chars=num_chars_of_front,
+                        context_behind_chars=num_chars_of_behind,
+                    )
+                total_images = len(image_refs)
+                total_blocks = total_images + 1 if total_images > 0 else 1
                 _print_pipeline_progress(
                     "build_enhanced_md_start",
                     source_pdf=os.path.abspath(pdf_file_path),
@@ -2123,48 +3404,38 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                 else:
                     progress_tracker.update(0.55, "image_mm", f"0/{total_images} images analyzed")
 
+                image_description_mode = _resolve_image_description_mode()
+
                 # 先并发处理所有图片信息：请求在线程池中执行，且并发上限固定为 16
                 image_preprocess_concurrency = 16
                 semaphore = asyncio.Semaphore(image_preprocess_concurrency)
                 image_progress_state = {"completed": 0}
                 image_progress_lock = asyncio.Lock()
 
-                async def process_image(i, text):
-                    if i == 0:
-                        return None
-                    image_match = re.match(r"^([^)]+?\.(?:jpg|jpeg|png))\)", text, re.IGNORECASE)
-                    if not image_match:
-                        async with image_progress_lock:
-                            image_progress_state["completed"] += 1
-                            completed = image_progress_state["completed"]
-                            progress_tracker.update(
-                                _weighted_ratio(0.55, 0.85, completed, total_images),
-                                "image_mm",
-                                f"{completed}/{total_images} image slots analyzed",
-                            )
-                            _print_pipeline_progress(
-                                "image_mm_skip_invalid_chunk",
-                                image_index=i,
-                                completed=completed,
-                                total_images=total_images,
-                                chunk_preview=text[:80].replace("\n", " "),
-                            )
+                async def process_image(image_index: int, image_ref: dict[str, Any]):
+                    image_name = image_ref.get("image_file")
+                    if not image_name:
                         return ""
-                    image_name = image_match.group(1)
                     image_path = os.path.join(image_dir, image_name)
-                    image_illustration_front = text_list[i - 1][-num_chars_of_front:]
-                    image_illustration_behind = text[image_match.end():][:num_chars_of_behind]
+                    image_illustration_front = image_ref.get("context_front", "")
+                    image_illustration_behind = image_ref.get("context_behind", "")
                     async with semaphore:
                         _print_pipeline_progress(
                             "image_mm_start",
-                            image_index=i,
+                            image_index=image_index,
                             total_images=total_images,
                             image_name=image_name,
                             image_path=os.path.abspath(image_path),
+                            image_description_mode=image_description_mode,
                         )
                         try:
-                            image_description = await multimodal_image_analysis(image_path)
-                            if not image_description:
+                            combined_desc = await generate_markdown_image_description(
+                                image_path,
+                                image_illustration_front,
+                                image_illustration_behind,
+                                mode=image_description_mode,
+                            )
+                            if not combined_desc:
                                 async with image_progress_lock:
                                     image_progress_state["completed"] += 1
                                     completed = image_progress_state["completed"]
@@ -2175,16 +3446,13 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                                     )
                                     _print_pipeline_progress(
                                         "image_mm_empty_desc",
-                                        image_index=i,
+                                        image_index=image_index,
                                         completed=completed,
                                         total_images=total_images,
                                         image_name=image_name,
+                                        image_description_mode=image_description_mode,
                                     )
                                 return ""
-                            combined_desc = await env_openai_complete(
-                                prompt="image_Illustration_front:" + image_illustration_front + "image_Illustration_behind：" + image_illustration_behind + "\n" + "image_discription:" + image_description,
-                                system_prompt="请结合两端文本（分别是图片的上下文和LLM生成的描述），进行全面描述",
-                            )
                             async with image_progress_lock:
                                 image_progress_state["completed"] += 1
                                 completed = image_progress_state["completed"]
@@ -2195,10 +3463,11 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                                 )
                                 _print_pipeline_progress(
                                     "image_mm_done",
-                                    image_index=i,
+                                    image_index=image_index,
                                     completed=completed,
                                     total_images=total_images,
                                     image_name=image_name,
+                                    image_description_mode=image_description_mode,
                                     desc_len=len(combined_desc or ""),
                                 )
                             return combined_desc
@@ -2214,18 +3483,22 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                                 )
                                 _print_pipeline_progress(
                                     "image_mm_failed",
-                                    image_index=i,
+                                    image_index=image_index,
                                     completed=completed,
                                     total_images=total_images,
                                     image_name=image_name,
+                                    image_description_mode=image_description_mode,
                                     error=str(e),
                                 )
                             return ""
 
                 res_dismantles = await asyncio.gather(
-                    *(process_image(i, text) for i, text in enumerate(text_list))
+                    *(
+                        process_image(image_index, image_ref)
+                        for image_index, image_ref in enumerate(image_refs, start=1)
+                    )
                 )
-                non_empty_desc_count = sum(1 for x in res_dismantles[1:] if x and str(x).strip())
+                non_empty_desc_count = sum(1 for x in res_dismantles if x and str(x).strip())
                 progress_tracker.update(0.85, "image_mm", f"{non_empty_desc_count} image descriptions generated")
                 _print_pipeline_progress(
                     "image_mm_all_done",
@@ -2233,27 +3506,23 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                     generated_descriptions=non_empty_desc_count,
                 )
 
-                for i, text in enumerate(text_list):
-                    if i == 0:
+                for image_index, (image_ref, combined_desc) in enumerate(
+                    zip(image_refs, res_dismantles),
+                    start=1,
+                ):
+                    image_file_name = image_ref.get("image_file")
+                    if not image_file_name:
                         continue
-                    image_match = re.match(r"^([^)]+?\.(?:jpg|jpeg|png))\)", text, re.IGNORECASE)
-                    if not image_match:
-                        _print_pipeline_progress(
-                            "image_desc_write_skip_invalid_chunk",
-                            image_index=i,
-                            total_images=total_images,
-                        )
-                        continue
-                    image_stem = os.path.splitext(image_match.group(1))[0]
+                    image_stem = os.path.splitext(image_file_name)[0]
                     image_dismantle = os.path.join(image_dir, image_stem + ".txt")
                     async with aiofiles.open(image_dismantle, "w", encoding="utf-8") as f:
-                        await f.write(res_dismantles[i] or "")
+                        await f.write(combined_desc or "")
                     _print_pipeline_progress(
                         "image_desc_written",
-                        image_index=i,
+                        image_index=image_index,
                         total_images=total_images,
                         txt_path=os.path.abspath(image_dismantle),
-                        text_len=len(res_dismantles[i] or ""),
+                        text_len=len(combined_desc or ""),
                     )
 
                 # 将图片描述回写到 md 中，并加标记避免重复注入
@@ -2261,9 +3530,8 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                     async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
                         current_md_content = await f.read()
 
-                    image_pattern = re.compile(r"!\[\]\(images/([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
-                    image_matches = list(image_pattern.finditer(current_md_content))
-                    total_md_images = len(image_matches)
+                    image_occurrences = _find_markdown_image_occurrences(current_md_content)
+                    total_md_images = len(image_occurrences)
                     _print_pipeline_progress(
                         "md_injection_start",
                         md_path=os.path.abspath(md_path),
@@ -2279,8 +3547,8 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                     injected_count = 0
                     skipped_existing_count = 0
 
-                    for idx, match in enumerate(image_matches, start=1):
-                        image_file_name = match.group(1)
+                    for idx, occurrence in enumerate(image_occurrences, start=1):
+                        image_file_name = occurrence["image_file"]
                         marker_start = f"<!-- image_description:{image_file_name}:start -->"
                         marker_end = f"<!-- image_description:{image_file_name}:end -->"
 
@@ -2298,16 +3566,15 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                             )
                             continue
 
-                        new_content_parts.append(current_md_content[last_pos:match.end()])
+                        insert_after = occurrence["insert_after"]
+                        new_content_parts.append(current_md_content[last_pos:insert_after])
 
-                        txt_file_path = os.path.join(image_dir, os.path.splitext(image_file_name)[0] + ".txt")
-                        image_desc_text = ""
-                        if os.path.exists(txt_file_path):
-                            try:
-                                async with aiofiles.open(txt_file_path, "r", encoding="utf-8") as tf:
-                                    image_desc_text = (await tf.read()).strip()
-                            except Exception:
-                                image_desc_text = ""
+                        txt_file_path = os.path.join(
+                            image_dir, os.path.splitext(image_file_name)[0] + ".txt"
+                        )
+                        image_desc_text = _load_image_description_text(
+                            image_dir, image_file_name
+                        )
 
                         if image_desc_text:
                             insertion_block = "\n" + marker_start + "\n```image_description_start\n\n" + image_desc_text + "\n\n```\n" + marker_end + "\n"
@@ -2333,7 +3600,7 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                             "md_injection",
                             f"{idx}/{total_md_images} markdown injections checked",
                         )
-                        last_pos = match.end()
+                        last_pos = insert_after
 
                     new_content_parts.append(current_md_content[last_pos:])
 
@@ -2437,11 +3704,93 @@ async def index_md_to_rag(
                     content_list, source_pdf_path
                 )
 
-                text_list = md_text.split("images/")
                 doc_name_with_ext = pdf_file_path.split("/")[-1]
                 doc_name_without_ext = pdf_file_path.split("/")[-1].split(".")[0]
-                total_chunks = len(text_list)
-                total_image_chunks = max(total_chunks - 1, 0)
+                md_split_mode = (os.getenv("RAG_MD_SPLIT_MODE", "legacy") or "legacy").strip().lower()
+                insert_units: list[dict[str, Any]] = []
+                total_chunks = 0
+                total_image_chunks = 0
+
+                if md_split_mode == "parser":
+                    parser_text_units = _build_md_parser_text_insert_units(
+                        md_text,
+                        source_pdf_path,
+                        text_blocks,
+                        rag.tokenizer,
+                        max_token_size=rag.chunk_token_size,
+                        overlap_token_size=rag.chunk_overlap_token_size,
+                    )
+                    parser_image_units = _build_md_parser_image_insert_units(
+                        md_text,
+                        image_dir,
+                        image_metadata_map,
+                        doc_name_without_ext,
+                    )
+                    if parser_text_units or parser_image_units:
+                        parser_units: list[dict[str, Any]] = []
+                        for unit in parser_text_units:
+                            parser_units.append(
+                                {
+                                    **unit,
+                                    "doc_name": doc_name_with_ext,
+                                    "file_paths": source_pdf_path,
+                                }
+                            )
+                        parser_units.extend(parser_image_units)
+                        parser_units.sort(
+                            key=lambda item: (
+                                item.get("line_start")
+                                if isinstance(item.get("line_start"), int)
+                                else 10**9,
+                                0 if item.get("chunk_type") == "image_desc" else 1,
+                                item.get("chunk_index", 0),
+                            )
+                        )
+                        for index, unit in enumerate(parser_units):
+                            insert_units.append(
+                                {
+                                    **unit,
+                                    "sort_order": index,
+                                }
+                            )
+                        total_chunks = sum(
+                            1
+                            for unit in parser_units
+                            if unit.get("chunk_type") == "text_md_parser"
+                        )
+                        total_image_chunks = sum(
+                            1 for unit in parser_units if unit.get("chunk_type") == "image_desc"
+                        )
+                    else:
+                        logger.warning(
+                            "RAG_MD_SPLIT_MODE=parser produced no insert units for %s, falling back to legacy split.",
+                            md_path,
+                        )
+                        md_split_mode = "legacy"
+
+                if md_split_mode != "parser":
+                    insert_units.extend(
+                        _build_legacy_md_insert_units(
+                            md_text,
+                            source_pdf_path,
+                            text_blocks,
+                            image_dir,
+                            image_metadata_map,
+                            doc_name_with_ext,
+                            doc_name_without_ext,
+                        )
+                    )
+
+                    total_chunks = sum(
+                        1
+                        for unit in insert_units
+                        if unit.get("chunk_type") in {"text_first", "text"}
+                    )
+                    total_image_chunks = sum(
+                        1 for unit in insert_units if unit.get("chunk_type") == "image_desc"
+                    )
+
+                insert_units.sort(key=lambda item: item.get("sort_order", 0))
                 _print_pipeline_progress(
                     "rag_index_start",
                     source_pdf=os.path.abspath(pdf_file_path),
@@ -2471,30 +3820,7 @@ async def index_md_to_rag(
                     progress_state["last_update_monotonic"] = now
                     progress_state["elapsed_sec"] = round(now - progress_state.get("started_monotonic", now), 3)
 
-                image_name_pattern = re.compile(r"^([^)]+?\.(?:jpg|jpeg|png))\)", re.IGNORECASE)
-                image_desc_cache: dict[str, str] = {}
-                total_units = 0
-                for i, text in enumerate(text_list):
-                    if i == 0:
-                        if text.strip():
-                            total_units += 1
-                        continue
-                    image_match = image_name_pattern.match(text)
-                    if image_match:
-                        image_file_name = image_match.group(1)
-                        image_dismantle = os.path.join(image_dir, os.path.splitext(image_file_name)[0] + ".txt")
-                        image_desc_text = ""
-                        if os.path.exists(image_dismantle):
-                            try:
-                                async with aiofiles.open(image_dismantle, "r", encoding="utf-8") as f:
-                                    image_desc_text = (await f.read()).strip()
-                            except Exception:
-                                image_desc_text = ""
-                        image_desc_cache[image_file_name] = image_desc_text
-                        if image_desc_text:
-                            total_units += 1
-                    if text.strip():
-                        total_units += 1
+                total_units = len(insert_units)
                 total_units = max(total_units, 1)
                 progress_tracker.update(0.10, "rag_plan", f"0/{total_units} insert units completed")
 
@@ -2585,6 +3911,7 @@ async def index_md_to_rag(
                     total_chunks=total_chunks,
                     doc=doc_name_with_ext,
                     md_path=md_path,
+                    split_mode=md_split_mode,
                 )
 
                 completed_units = 0
@@ -2626,95 +3953,41 @@ async def index_md_to_rag(
                         f"{completed_units}/{total_units} {detail}",
                     )
 
-                for i, text in enumerate(text_list):
-                    if i == 0:
-                        _print_pipeline_progress(
-                            "rag_insert_chunk_start",
-                            progress=f"{i + 1}/{total_chunks}",
-                            chunk_index=0,
-                            chunk_type="text_first",
-                            text_len=len(text),
-                        )
-                        _update_progress(
-                            phase="insert_text_first",
-                            chunk_index=0,
-                            chunk_type="text_first",
-                            file_paths=source_pdf_path,
-                            text_len=len(text),
-                            preview=_content_preview(text),
-                        )
-                        await _insert_with_progress(
-                            text,
-                            doc_name=doc_name_with_ext,
-                            file_paths=source_pdf_path,
-                            metadata=_build_text_segment_metadata(
-                                text, source_pdf_path, text_blocks
-                            ),
-                            chunk_index=0,
-                            chunk_type="text_first",
-                            detail="text block inserted",
-                        )
-                        continue
-
-                    image_match = image_name_pattern.match(text)
-                    if image_match:
-                        image_file_name = image_match.group(1)
-                        image_path = os.path.abspath(os.path.join(image_dir, image_file_name))
-                        image_desc_text = image_desc_cache.get(image_file_name, "")
-                        if image_desc_text:
-                            _print_pipeline_progress(
-                                "rag_insert_chunk_start",
-                                progress=f"{i + 1}/{total_chunks}",
-                                chunk_index=i,
-                                chunk_type="image_desc",
-                                image_file=image_file_name,
-                                image_path=os.path.abspath(image_path),
-                                text_len=len(image_desc_text),
-                            )
-                            _update_progress(
-                                phase="insert_image_desc",
-                                chunk_index=i,
-                                chunk_type="image_desc",
-                                image_file=image_file_name,
-                                file_paths=image_path,
-                                text_len=len(image_desc_text),
-                                preview=_content_preview(image_desc_text),
-                            )
-                            await _insert_with_progress(
-                                image_desc_text,
-                                doc_name=doc_name_without_ext,
-                                file_paths=image_path,
-                                metadata=image_metadata_map.get(image_file_name, {}),
-                                chunk_index=i,
-                                chunk_type="image_desc",
-                                detail=f"image {image_file_name}",
-                            )
-
+                for display_index, unit in enumerate(insert_units, start=1):
+                    text = unit.get("text", "")
+                    chunk_index = unit.get("chunk_index", display_index - 1)
+                    chunk_type = unit.get("chunk_type", "text")
+                    file_paths = unit.get("file_paths", source_pdf_path)
                     _print_pipeline_progress(
                         "rag_insert_chunk_start",
-                        progress=f"{i + 1}/{total_chunks}",
-                        chunk_index=i,
-                        chunk_type="text",
+                        progress=f"{display_index}/{total_units}",
+                        chunk_index=chunk_index,
+                        chunk_type=chunk_type,
                         text_len=len(text),
+                        image_file=unit.get("image_file"),
+                        image_path=file_paths if chunk_type == "image_desc" else None,
+                        line_start=unit.get("line_start"),
+                        line_end=unit.get("line_end"),
                     )
                     _update_progress(
-                        phase="insert_text",
-                        chunk_index=i,
-                        chunk_type="text",
-                        file_paths=source_pdf_path,
+                        phase=f"insert_{chunk_type}",
+                        chunk_index=chunk_index,
+                        chunk_type=chunk_type,
+                        file_paths=file_paths,
                         text_len=len(text),
                         preview=_content_preview(text),
+                        line_start=unit.get("line_start"),
+                        line_end=unit.get("line_end"),
+                        section_path=unit.get("section_path", ""),
                     )
                     await _insert_with_progress(
                         text,
-                        doc_name=doc_name_with_ext,
-                        file_paths=source_pdf_path,
-                        metadata=_build_text_segment_metadata(
-                            text, source_pdf_path, text_blocks
-                        ),
-                        chunk_index=i,
-                        chunk_type="text",
-                        detail="text block inserted",
+                        doc_name=unit.get("doc_name", doc_name_with_ext),
+                        file_paths=file_paths,
+                        metadata=unit.get("metadata"),
+                        chunk_index=chunk_index,
+                        chunk_type=chunk_type,
+                        detail=unit.get("detail", "text block inserted"),
                     )
 
                 _update_progress(phase="completed")

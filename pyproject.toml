@@ -30,7 +30,8 @@ dependencies = [
     "future",
     "httpx",
     "litellm",
-    "mineru[pipeline]",
+    "markdown-it-py",
+    "mineru[pipeline,vlm]==3.0.8",
     "nano-vectordb",
     "networkx",
     "numpy",
@@ -104,9 +105,6 @@ include-package-data = true
 
 [tool.setuptools.dynamic]
 version = {attr = "ragent.__version__"}
-
-[tool.uv.sources]
-mineru = { path = "MinerU-master", editable = true }
 
 [tool.ruff]
 target-version = "py310"

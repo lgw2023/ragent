@@ -41,8 +41,9 @@ cd ragent_master
 
 `README` 中下面的命令按当前代码入口整理过：
 
-- 当前 `integrations.py` / `singlefile.py` 会在导入阶段直接加载 `MinerU pipeline` 相关模块，所以即使只跑 `onehop` / `multihop` / `chat`，环境里也必须具备 `MinerU` 的 `pipeline` 依赖（如 `torch`、`torchvision`、`transformers`、`doclayout_yolo`）。
-- 仓库的 `pyproject.toml` 已将根依赖切换为 `mineru[pipeline]`，因此 `uv sync` 会一并安装这组依赖。
+- 当前 `integrations.py` / `singlefile.py` 会在导入阶段直接加载 `MinerU` 的 `pipeline` / `vlm` 内部模块，所以即使只跑 `onehop` / `multihop` / `chat`，环境里也必须具备对应依赖。
+- 当前仓库只按 `mineru[pipeline,vlm]==3.0.8` 这一路径维护，不再兼容旧版 `MinerU` API，也不再依赖仓库内置源码。
+- 对本仓库来说，`pipeline + vlm` 已覆盖当前代码实际 import 的模块；不需要额外安装更重的 `mineru[all]`。
 - 如果你要直接运行 `integrations.py` / `singlefile.py` 的主流程，建议至少安装 `openai` 和 `api` 两组 extra。
   这里的 `openai` extra 现在实际包含 `litellm`，用于统一适配 OpenAI-compatible / 多提供商模型调用。
 - `api` 这个名字虽然偏服务端，但当前文档解析主流程里实际用到了其中的 `aiofiles` 依赖。
@@ -54,7 +55,7 @@ cd ragent_master
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 推荐：可直接跑当前 README 中的 parse / onehop / multihop / chat 全流程
-# 其中会自动带上本地 MinerU 的 pipeline 依赖
+# 会自动安装锁定版标准包 MinerU 依赖
 uv sync --extra openai --extra api
 
 # 其他可选依赖
@@ -66,6 +67,9 @@ uv sync --extra faiss     # FAISS 向量库后端
 
 # 或一次性安装全部
 uv sync --all-extras
+
+# 如果你只想单独安装本仓库依赖的 MinerU 版本，也可以显式执行
+uv pip install "mineru[pipeline,vlm]==3.0.8" -i https://mirrors.aliyun.com/pypi/simple
 ```
 
 **使用 pip：**
@@ -74,10 +78,7 @@ uv sync --all-extras
 python -m venv env
 source env/bin/activate   # Windows: env\Scripts\activate
 
-# 先安装随仓库附带的 MinerU 源码及 pipeline 依赖
-pip install -e "./MinerU-master[pipeline]"
-
-# 再安装当前项目及推荐 extra
+# 直接安装当前项目及推荐 extra；其中已包含标准包 MinerU 依赖
 pip install -e ".[openai,api]"
 ```
 
@@ -87,14 +88,20 @@ pip install -e ".[openai,api]"
 当前仓库中用于解析 PDF 的是 `MinerU`。推荐使用 `MinerU` 自带的 CLI 下载模型，而不是根目录下的 `models_download.py`。
 
 ```bash
-# 推荐：下载 pipeline 模型
+# pipeline / hybrid-engine 推荐：下载 pipeline 模型
 uv run mineru-models-download --source modelscope --model_type pipeline
+
+# vlm-engine 推荐：下载 vlm 模型
+uv run mineru-models-download --source modelscope --model_type vlm
 
 # 如果你用的是 pip 虚拟环境，也可以这样执行
 python -m mineru.cli.models_download --source modelscope --model_type pipeline
+python -m mineru.cli.models_download --source modelscope --model_type vlm
 ```
 
 执行完成后，`MinerU` 会在用户目录下生成或更新 `~/mineru.json` 配置文件。
+
+如果你准备使用 `vlm-engine` 且希望走 `sglang-engine`，还需要额外安装 `sglang` 相关运行时；当前仓库默认依赖并不会自动补齐这部分环境。
 
 ### 4. 安装 LibreOffice（处理 DOCX 时需要）
 
@@ -138,6 +145,10 @@ IMAGE_MODEL_KEY=""
 IMAGE_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 IMAGE_MODEL="qwen3-vl-flash"
 IMAGE_MODEL_TIMEOUT="300"
+# 图片描述模式:
+# - single_multimodal: 单次多模态调用，直接结合图片和上下文生成最终描述
+# - two_stage: 先看图，再用文本模型结合上下文二次整合
+IMAGE_DESCRIPTION_MODE="single_multimodal"
 
 # ========== 可选开关 / 调优 ==========
 MODEL_STARTUP_CHECK_ENABLED="1"
@@ -153,6 +164,30 @@ RAG_INSERT_TIMEOUT_SECONDS="30"
 RAG_INSERT_TIMEOUT_MAX_SECONDS="60"
 RAG_INDEX_TIMEOUT_SECONDS="1800"
 RAG_PROGRESS_BAR="1"
+
+# ========== MinerU 解析模式（可选）==========
+# 支持: pipeline | vlm-engine | hybrid-engine
+MINERU_PARSE_MODE="pipeline"
+
+# pipeline 模式默认保持当前仓库的旧行为：优先文本提取，输出到 <mineru_output_dir>/txt/
+MINERU_PIPELINE_METHOD="txt"
+
+# hybrid-engine 在当前仓库里兼容映射到 MinerU 的 pipeline 路径，
+# 默认使用 auto 方法，以便对扫描页/OCR页更友好，输出仍保持在 txt/ 下
+MINERU_HYBRID_METHOD="auto"
+
+# vlm-engine 会输出到 <mineru_output_dir>/vlm/
+# auto: 有 MINERU_VLM_SERVER_URL 时优先 client；否则有 sglang 环境就走 sglang-engine；再否则回退 transformers
+MINERU_VLM_BACKEND="auto"
+
+# 仅当 MINERU_VLM_BACKEND=sglang-client 时需要
+# MINERU_VLM_SERVER_URL="http://127.0.0.1:30000"
+
+# 模型来源：local | modelscope | huggingface
+MINERU_MODEL_SOURCE="local"
+
+# 可选：显式指定本地 VLM 模型目录
+# MINERU_VLM_MODEL_PATH="/absolute/path/to/mineru-vlm"
 ```
 
 如果你暂时不打算接 rerank 服务，至少同时设置：
@@ -195,6 +230,8 @@ uv run python singlefile.py parse \
 - `content_list.json`
 - `images/` 目录
 - 每张图对应的描述 `.txt`
+
+如果你把 `.env` 里的 `MINERU_PARSE_MODE` 切到 `vlm-engine`，对应输出目录会改为 `demo_md/vlm/`；`pipeline` 与 `hybrid-engine` 仍保持 `demo_md/txt/`。
 
 ### 2. 继续构建知识库
 
@@ -299,6 +336,12 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+```
+
+如果希望第二阶段使用基于 Markdown 结构解析的切分，而不是默认的 legacy 逻辑，可在运行前设置：
+
+```bash
+export RAG_MD_SPLIT_MODE=parser
 ```
 
 ## 命令行用法（singlefile.py）
