@@ -408,23 +408,18 @@ def _print_document_chunks_json(parsed_json: Any):
     for item in parsed_json:
         if isinstance(item, dict):
             if _USE_MARKDOWN:
-                meta_lines = [
-                    f"id: {item.get('id', 'n/a')}",
-                    f"file_path: {item.get('file_path', 'unknown_source')}",
-                ]
-                if "chunk_id" in item:
-                    meta_lines.append(f"chunk_id: {item.get('chunk_id')}")
+                meta_lines = [f"id: {item.get('id', 'n/a')}"]
                 body_sections = []
-                if "content" in item:
-                    body_sections.append(("content", str(item.get("content", ""))))
-                else:
-                    for key, value in item.items():
-                        if key in {"id", "file_path", "chunk_id"}:
-                            continue
-                        if isinstance(value, str) and "\n" in value:
-                            body_sections.append((key, value))
-                        else:
-                            meta_lines.append(f"{key}: {value}")
+                for key, value in item.items():
+                    if key == "id":
+                        continue
+                    if key == "content":
+                        body_sections.append(("content", str(value)))
+                        continue
+                    if isinstance(value, str) and "\n" in value:
+                        body_sections.append((key, value))
+                    else:
+                        meta_lines.append(f"{key}: {value}")
                 _print_markdown_entry(
                     f"Document Chunk {item.get('id', 'n/a')}",
                     meta_lines,
@@ -437,20 +432,15 @@ def _print_document_chunks_json(parsed_json: Any):
                     print(str(value).strip("\n") or _muted("(空)"))
                     print()
                 continue
-            lines = [
-                f"id: {item.get('id', 'n/a')}",
-                f"file_path: {item.get('file_path', 'unknown_source')}",
-            ]
-            if "chunk_id" in item:
-                lines.append(f"chunk_id: {item.get('chunk_id')}")
-            if "content" in item:
-                lines.append("content:")
-                lines.extend(str(item.get("content", "")).splitlines() or [""])
-            else:
-                for key, value in item.items():
-                    if key in {"id", "file_path", "chunk_id"}:
-                        continue
-                    lines.append(f"{key}: {value}")
+            lines = [f"id: {item.get('id', 'n/a')}"]
+            for key, value in item.items():
+                if key == "id":
+                    continue
+                if key == "content":
+                    lines.append("content:")
+                    lines.extend(str(value).splitlines() or [""])
+                    continue
+                lines.append(f"{key}: {value}")
             _print_item_box(lines, _WHITE)
         else:
             _print_item_box([str(item)], _WHITE)
