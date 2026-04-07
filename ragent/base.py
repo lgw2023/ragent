@@ -117,6 +117,14 @@ class QueryParam:
     Default is True to enable reranking when rerank model is available.
     """
 
+    answer_prompt_mode: str | None = None
+    """Optional override for answer generation prompt strategy.
+    Supported values:
+    - "single_prompt": one merged prompt, one LLM call
+    - "two_stage": generate first, then polish with a second LLM call
+    If None, inherits the global setting from `RAG_ANSWER_PROMPT_MODE`.
+    """
+
 
 @dataclass
 class StorageNameSpace(ABC):

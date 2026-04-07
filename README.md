@@ -150,6 +150,11 @@ IMAGE_MODEL_TIMEOUT="300"
 # - two_stage: 先看图，再用文本模型结合上下文二次整合
 IMAGE_DESCRIPTION_MODE="single_multimodal"
 
+# 回答阶段提示词模式:
+# - single_prompt: 单次 LLM 调用，直接生成自然答案（默认，延迟更低）
+# - two_stage: 先生成带 RAG 痕迹的答案，再用第二轮 LLM 做润色
+RAG_ANSWER_PROMPT_MODE="single_prompt"
+
 # ========== 可选开关 / 调优 ==========
 MODEL_STARTUP_CHECK_ENABLED="1"
 # 可选：不设置时，启动健康检查超时会自动跟随 LLM_API_TIMEOUT_SECONDS
@@ -160,6 +165,12 @@ num_chars_of_front="512"
 num_chars_of_behind="512"
 chunk_size="1024"
 overlap_size="128"
+# 实体抽取补抽策略:
+# 1 = 首轮后直接进入第一轮 gleaning，不先做 YES/NO 判断（默认）
+# 2 = 首轮后先做 YES/NO 判断，只有明确回答 YES 才进入第一轮 gleaning
+ENTITY_EXTRACT_GLEANING_LEVEL="1"
+# 每个 chunk 最多额外补抽几轮；为 0 时只做首轮抽取
+MAX_GLEANING="1"
 RAG_INSERT_TIMEOUT_SECONDS="30"
 RAG_INSERT_TIMEOUT_MAX_SECONDS="60"
 RAG_INDEX_TIMEOUT_SECONDS="1800"
@@ -338,10 +349,12 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-如果希望第二阶段使用基于 Markdown 结构解析的切分，而不是默认的 legacy 逻辑，可在运行前设置：
+第二阶段默认使用基于 Markdown 结构解析的切分（`parser` 模式）。
+
+如果希望切回旧的 `legacy` 逻辑，可在运行前设置：
 
 ```bash
-export RAG_MD_SPLIT_MODE=parser
+export RAG_MD_SPLIT_MODE=legacy
 ```
 
 ## 命令行用法（singlefile.py）

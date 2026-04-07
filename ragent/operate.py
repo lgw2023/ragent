@@ -75,6 +75,34 @@ def _record_stage_timing(
     _append_stage_timing(stage_timings, stage, label, time.perf_counter() - started_at)
 
 
+def _resolve_answer_prompt_mode(
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+) -> str:
+    raw_value = (
+        getattr(query_param, "answer_prompt_mode", None)
+        or global_config.get("answer_prompt_mode")
+        or "single_prompt"
+    )
+    normalized = str(raw_value).strip().lower()
+    aliases = {
+        "single": "single_prompt",
+        "single_prompt": "single_prompt",
+        "one_stage": "single_prompt",
+        "one_pass": "single_prompt",
+        "two_stage": "two_stage",
+        "two_pass": "two_stage",
+    }
+    resolved = aliases.get(normalized)
+    if resolved is None:
+        logger.warning(
+            "Unknown answer prompt mode %r, fallback to 'single_prompt'.",
+            raw_value,
+        )
+        return "single_prompt"
+    return resolved
+
+
 def _coerce_embedding_array(embedding: Any) -> np.ndarray | None:
     if embedding is None:
         return None
@@ -325,6 +353,15 @@ def chunking_by_token_size(
 ) -> list[dict[str, Any]]:
     tokens = tokenizer.encode(content)
     results: list[dict[str, Any]] = []
+    if doc_metadata and doc_metadata.get("preserve_chunking"):
+        chunk_content = _strip_doc_name_markers(content).strip()
+        chunk_data = {
+            "tokens": len(tokenizer.encode(chunk_content)),
+            "content": doc_name + "#####" + chunk_content,
+            "chunk_order_index": 0,
+        }
+        return [_annotate_chunk_with_source_metadata(chunk_data, doc_metadata)]
+
     if split_by_character:
         raw_chunks = content.split(split_by_character)
         new_chunks = []
@@ -953,21 +990,6 @@ async def merge_nodes_and_edges(
                     pipeline_status_lock,
                     llm_response_cache,
                 )
-                if entity_vdb is not None:
-                    data_for_vdb = {
-                        compute_mdhash_id(entity_data["entity_name"], prefix="ent-"): {
-                            "entity_name": entity_data["entity_name"],
-                            "entity_type": entity_data["entity_type"],
-                            "content": f"{entity_data['entity_name']}\n{entity_data['description']}",
-                            "embeddings" : entity_data["embeddings"],
-                            "source_id": entity_data["source_id"],
-                            "source_chunk_ids": entity_data.get(
-                                "source_chunk_ids", entity_data["source_id"]
-                            ),
-                            "file_path": entity_data.get("file_path", "unknown_source"),
-                        }
-                    }
-                    await entity_vdb.upsert(data_for_vdb)
                 return entity_data
 
     async def _locked_process_edges(edge_key, edges):
@@ -992,23 +1014,6 @@ async def merge_nodes_and_edges(
                 if edge_data is None:
                     return None
 
-                if relationships_vdb is not None:
-                    data_for_vdb = {
-                        compute_mdhash_id(
-                            edge_data["src_id"] + edge_data["tgt_id"], prefix="rel-"
-                        ): {
-                            "src_id": edge_data["src_id"],
-                            "tgt_id": edge_data["tgt_id"],
-                            "keywords": edge_data["keywords"],
-                            "content": f"{edge_data['src_id']}\t{edge_data['tgt_id']}\n{edge_data['keywords']}\n{edge_data['description']}",
-                            "source_id": edge_data["source_id"],
-                            "source_chunk_ids": edge_data.get(
-                                "source_chunk_ids", edge_data["source_id"]
-                            ),
-                            "file_path": edge_data.get("file_path", "unknown_source"),
-                        }
-                    }
-                    await relationships_vdb.upsert(data_for_vdb)
                 return edge_data
 
     # Create a single task queue for both entities and edges
@@ -1050,12 +1055,51 @@ async def merge_nodes_and_edges(
     merged_entities = 0
     merged_relations = 0
     total_merge_items = total_entities_count + total_relations_count
+    entity_vdb_payload: dict[str, dict[str, Any]] = {}
+    relationship_vdb_payload: dict[str, dict[str, Any]] = {}
     for task in asyncio.as_completed(tasks):
-        task_kind, task_key, _ = await task
+        task_kind, task_key, task_result = await task
         if task_kind == "entity":
             merged_entities += 1
+            if task_result is not None and entity_vdb is not None:
+                entity_vdb_payload[
+                    compute_mdhash_id(task_result["entity_name"], prefix="ent-")
+                ] = {
+                    "entity_name": task_result["entity_name"],
+                    "entity_type": task_result["entity_type"],
+                    "content": (
+                        f"{task_result['entity_name']}\n"
+                        f"{task_result['description']}"
+                    ),
+                    "embeddings": task_result["embeddings"],
+                    "source_id": task_result["source_id"],
+                    "source_chunk_ids": task_result.get(
+                        "source_chunk_ids", task_result["source_id"]
+                    ),
+                    "file_path": task_result.get("file_path", "unknown_source"),
+                }
         else:
             merged_relations += 1
+            if task_result is not None and relationships_vdb is not None:
+                relationship_vdb_payload[
+                    compute_mdhash_id(
+                        task_result["src_id"] + task_result["tgt_id"],
+                        prefix="rel-",
+                    )
+                ] = {
+                    "src_id": task_result["src_id"],
+                    "tgt_id": task_result["tgt_id"],
+                    "keywords": task_result["keywords"],
+                    "content": (
+                        f"{task_result['src_id']}\t{task_result['tgt_id']}\n"
+                        f"{task_result['keywords']}\n{task_result['description']}"
+                    ),
+                    "source_id": task_result["source_id"],
+                    "source_chunk_ids": task_result.get(
+                        "source_chunk_ids", task_result["source_id"]
+                    ),
+                    "file_path": task_result.get("file_path", "unknown_source"),
+                }
         if progress_callback is not None:
             progress_callback(
                 {
@@ -1072,6 +1116,14 @@ async def merge_nodes_and_edges(
                 }
             )
 
+    upsert_tasks = []
+    if entity_vdb is not None and entity_vdb_payload:
+        upsert_tasks.append(entity_vdb.upsert(entity_vdb_payload))
+    if relationships_vdb is not None and relationship_vdb_payload:
+        upsert_tasks.append(relationships_vdb.upsert(relationship_vdb_payload))
+    if upsert_tasks:
+        await asyncio.gather(*upsert_tasks)
+
 
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
@@ -1083,6 +1135,12 @@ async def extract_entities(
 ) -> list:
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
+    entity_extract_gleaning_level = global_config.get(
+        "entity_extract_gleaning_level", 1
+    )
+    if not isinstance(entity_extract_gleaning_level, int):
+        entity_extract_gleaning_level = 1
+    entity_extract_gleaning_level = max(1, min(2, entity_extract_gleaning_level))
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
@@ -1211,8 +1269,29 @@ async def extract_entities(
             final_result, chunk_key, file_path
         )
 
+        async def _should_continue_gleaning(history_messages: list[dict[str, str]]) -> bool:
+            if_loop_result: str = await use_llm_func_with_cache(
+                if_loop_prompt,
+                use_llm_func,
+                llm_response_cache=llm_response_cache,
+                history_messages=history_messages,
+                cache_type="extract",
+                cache_keys_collector=cache_keys_collector,
+            )
+            if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
+            return if_loop_result == "yes"
+
         # Process additional gleaning results
         for now_glean_index in range(entity_extract_max_gleaning):
+            if now_glean_index == 0:
+                if entity_extract_gleaning_level >= 2 and not (
+                    await _should_continue_gleaning(history)
+                ):
+                    break
+            else:
+                if not await _should_continue_gleaning(history):
+                    break
+
             glean_result = await use_llm_func_with_cache(
                 continue_prompt,
                 use_llm_func,
@@ -1242,21 +1321,6 @@ async def extract_entities(
                 ):  # Only accetp edges with new name in gleaning stage
                     maybe_edges[edge_key].extend(edges)
 
-            if now_glean_index == entity_extract_max_gleaning - 1:
-                break
-
-            if_loop_result: str = await use_llm_func_with_cache(
-                if_loop_prompt,
-                use_llm_func,
-                llm_response_cache=llm_response_cache,
-                history_messages=history,
-                cache_type="extract",
-                cache_keys_collector=cache_keys_collector,
-            )
-            if_loop_result = if_loop_result.strip().strip('"').strip("'").lower()
-            if if_loop_result != "yes":
-                break
-
         # Batch update chunk's llm_cache_list with all collected cache keys
         if cache_keys_collector and text_chunks_storage:
             await update_chunk_cache_list(
@@ -1276,14 +1340,20 @@ async def extract_entities(
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
         
-        content_list = [content]
-        embeddings = await openai_embed(content_list)
+        chunk_embedding = chunk_dp.get("embeddings")
+        if chunk_embedding is None:
+            chunk_embedding = (
+                await _generate_chunk_text_embeddings(
+                    [(chunk_key, content)],
+                    global_config,
+                )
+            )[chunk_key]
 
         chunk_data = {
         'entity_name': chunk_key,
         'entity_type': "chunk_text",
         'description': content,
-        'embeddings': embeddings[0],
+        'embeddings': chunk_embedding,
         'source_id': chunk_key,
         'file_path': file_path
          }
@@ -1363,9 +1433,10 @@ async def graph_query(
         use_model_func = global_config["llm_model_func"]
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
+    answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
 
     # Handle cache
-    args_hash = compute_args_hash(query_param.mode, query)
+    args_hash = compute_args_hash(query_param.mode, query, answer_prompt_mode)
     stage_started_at = time.perf_counter()
     cached_response, quantized, min_val, max_val = await handle_cache(
         hashing_kv, args_hash, query, query_param.mode, cache_type="query"
@@ -1476,7 +1547,12 @@ async def graph_query(
         if query_param.user_prompt
         else PROMPTS["DEFAULT_USER_PROMPT"]
     )
-    sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
+    default_prompt_key = (
+        "rag_response_single_prompt"
+        if answer_prompt_mode == "single_prompt"
+        else "rag_response"
+    )
+    sys_prompt_temp = system_prompt if system_prompt else PROMPTS[default_prompt_key]
     sys_prompt = sys_prompt_temp.format(
         context_data=context,
         response_type=query_param.response_type,
@@ -1520,7 +1596,9 @@ async def graph_query(
         _record_stage_timing(
             stage_timings,
             "answer_generation",
-            "回答生成 / 第一轮 LLM",
+            "回答生成 / 单轮 LLM"
+            if answer_prompt_mode == "single_prompt"
+            else "回答生成 / 第一轮 LLM",
             stage_started_at,
         )
         if isinstance(response, str) and len(response) > len(sys_prompt):
@@ -1533,18 +1611,19 @@ async def graph_query(
                 .replace("</system>", "")
                 .strip()
             )
-        stage_started_at = time.perf_counter()
-        response = await use_model_func(
-            response,
-            system_prompt=PROMPTS["rag_response_new"],
-            stream=query_param.stream,
-        )
-        _record_stage_timing(
-            stage_timings,
-            "answer_polish",
-            "回答润色 / 第二轮 LLM",
-            stage_started_at,
-        )
+        if answer_prompt_mode == "two_stage":
+            stage_started_at = time.perf_counter()
+            response = await use_model_func(
+                response,
+                system_prompt=PROMPTS["rag_response_new"],
+                stream=query_param.stream,
+            )
+            _record_stage_timing(
+                stage_timings,
+                "answer_polish",
+                "回答润色 / 第二轮 LLM",
+                stage_started_at,
+            )
     image_file_path_list = []
     if cached_response is None and hashing_kv.global_config.get("enable_llm_cache"):
         # Save to cache
@@ -3066,7 +3145,8 @@ async def hybrid_query(
         use_model_func = global_config["llm_model_func"]
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
-    args_hash = compute_args_hash(query_param.mode, query)
+    answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
+    args_hash = compute_args_hash(query_param.mode, query, answer_prompt_mode)
     stage_started_at = time.perf_counter()
     cached_response, quantized, min_val, max_val = await handle_cache(
         hashing_kv, args_hash, query, query_param.mode, cache_type="query"
@@ -3144,7 +3224,12 @@ async def hybrid_query(
         if query_param.user_prompt
         else PROMPTS["DEFAULT_USER_PROMPT"]
     )
-    sys_prompt_temp = system_prompt if system_prompt else PROMPTS["naive_rag_response"]
+    default_prompt_key = (
+        "naive_rag_response_single_prompt"
+        if answer_prompt_mode == "single_prompt"
+        else "naive_rag_response"
+    )
+    sys_prompt_temp = system_prompt if system_prompt else PROMPTS[default_prompt_key]
     sys_prompt = sys_prompt_temp.format(
         content_data=text_units_str,
         response_type=query_param.response_type,
@@ -3183,7 +3268,9 @@ async def hybrid_query(
     _record_stage_timing(
         stage_timings,
         "answer_generation",
-        "回答生成 / 第一轮 LLM",
+        "回答生成 / 单轮 LLM"
+        if answer_prompt_mode == "single_prompt"
+        else "回答生成 / 第一轮 LLM",
         stage_started_at,
     )
 
@@ -3198,18 +3285,19 @@ async def hybrid_query(
             .replace("</system>", "")
             .strip()
         )
-    stage_started_at = time.perf_counter()
-    response = await use_model_func(
-        response,
-        system_prompt=PROMPTS["naive_rag_response_new"],
-        stream=query_param.stream,
-    )
-    _record_stage_timing(
-        stage_timings,
-        "answer_polish",
-        "回答润色 / 第二轮 LLM",
-        stage_started_at,
-    )
+    if answer_prompt_mode == "two_stage":
+        stage_started_at = time.perf_counter()
+        response = await use_model_func(
+            response,
+            system_prompt=PROMPTS["naive_rag_response_new"],
+            stream=query_param.stream,
+        )
+        _record_stage_timing(
+            stage_timings,
+            "answer_polish",
+            "回答润色 / 第二轮 LLM",
+            stage_started_at,
+        )
     if hashing_kv.global_config.get("enable_llm_cache"):
         # Save to cache
         await save_to_cache(
@@ -3269,8 +3357,9 @@ async def kg_query_with_keywords(
         use_model_func = global_config["llm_model_func"]
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
+    answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
 
-    args_hash = compute_args_hash(query_param.mode, query)
+    args_hash = compute_args_hash(query_param.mode, query, answer_prompt_mode)
     cached_response, quantized, min_val, max_val = await handle_cache(
         hashing_kv, args_hash, query, query_param.mode, cache_type="query"
     )
@@ -3312,11 +3401,22 @@ async def kg_query_with_keywords(
             query_param.conversation_history, query_param.history_turns
         )
 
-    sys_prompt_temp = PROMPTS["rag_response"]
+    user_prompt = (
+        query_param.user_prompt
+        if query_param.user_prompt
+        else PROMPTS["DEFAULT_USER_PROMPT"]
+    )
+    default_prompt_key = (
+        "rag_response_single_prompt"
+        if answer_prompt_mode == "single_prompt"
+        else "rag_response"
+    )
+    sys_prompt_temp = PROMPTS[default_prompt_key]
     sys_prompt = sys_prompt_temp.format(
         context_data=context,
         response_type=query_param.response_type,
         history=history_context,
+        user_prompt=user_prompt,
     )
 
     if query_param.only_need_prompt:
@@ -3347,20 +3447,27 @@ async def kg_query_with_keywords(
             .strip()
         )
 
-        if hashing_kv.global_config.get("enable_llm_cache"):
-            await save_to_cache(
-                hashing_kv,
-                CacheData(
-                    args_hash=args_hash,
-                    content=response,
-                    prompt=query,
-                    quantized=quantized,
-                    min_val=min_val,
-                    max_val=max_val,
-                    mode=query_param.mode,
-                    cache_type="query",
-                ),
-            )
+    if answer_prompt_mode == "two_stage":
+        response = await use_model_func(
+            response,
+            system_prompt=PROMPTS["rag_response_new"],
+            stream=query_param.stream,
+        )
+
+    if hashing_kv is not None and hashing_kv.global_config.get("enable_llm_cache"):
+        await save_to_cache(
+            hashing_kv,
+            CacheData(
+                args_hash=args_hash,
+                content=response,
+                prompt=query,
+                quantized=quantized,
+                min_val=min_val,
+                max_val=max_val,
+                mode=query_param.mode,
+                cache_type="query",
+            ),
+        )
 
     return response
 

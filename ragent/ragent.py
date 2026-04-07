@@ -21,6 +21,7 @@ from typing import (
 )
 from ragent.constants import (
     DEFAULT_MAX_GLEANING,
+    DEFAULT_ENTITY_EXTRACT_GLEANING_LEVEL,
     DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
     DEFAULT_TOP_K,
     DEFAULT_CHUNK_TOP_K,
@@ -104,6 +105,13 @@ def clean_text_for_xml(text):
     # Keep newlines, tabs, and carriage returns as they are valid XML characters
     cleaned_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
     return cleaned_text
+
+
+def _strip_enqueued_doc_name_marker(content: str) -> str:
+    text = content or ""
+    if "#######" not in text:
+        return text
+    return text.split("#######", 1)[1]
 
 
 class _EstimatedCharRatioTokenizerImpl:
@@ -259,6 +267,14 @@ class Ragent:
     )
     """Number of related chunks to grab from single entity or relation."""
 
+    answer_prompt_mode: str = field(
+        default=get_env_value("RAG_ANSWER_PROMPT_MODE", "single_prompt", str)
+    )
+    """Answer generation strategy.
+    - "single_prompt": use one merged prompt and a single LLM call
+    - "two_stage": generate an answer first, then polish it with a second LLM call
+    """
+
     # Entity extraction
     # ---
 
@@ -266,6 +282,21 @@ class Ragent:
         default=get_env_value("MAX_GLEANING", DEFAULT_MAX_GLEANING, int)
     )
     """Maximum number of entity extraction attempts for ambiguous content."""
+
+    entity_extract_gleaning_level: int = field(
+        default=max(
+            1,
+            min(
+                2,
+                get_env_value(
+                    "ENTITY_EXTRACT_GLEANING_LEVEL",
+                    DEFAULT_ENTITY_EXTRACT_GLEANING_LEVEL,
+                    int,
+                ),
+            ),
+        )
+    )
+    """Controls when to run the YES/NO gleaning gate. 1 skips the initial gate, 2 checks before the first glean."""
 
     force_llm_summary_on_merge: int = field(
         default=get_env_value(
@@ -975,26 +1006,25 @@ class Ragent:
 
         # 4. Filter out already processed documents
         # Get docs ids
-        all_new_doc_ids = set(new_docs.keys())
+        all_new_doc_ids = list(new_docs.keys())
         # Exclude IDs of documents that are already in progress
-        unique_new_doc_ids = await self.doc_status.filter_keys(all_new_doc_ids)
+        unique_new_doc_ids = await self.doc_status.filter_keys(set(all_new_doc_ids))
 
         # Log ignored document IDs
         ignored_ids = [
-            doc_id for doc_id in unique_new_doc_ids if doc_id not in new_docs
+            doc_id for doc_id in all_new_doc_ids if doc_id not in unique_new_doc_ids
         ]
         if ignored_ids:
-            logger.warning(
-                f"Ignoring {len(ignored_ids)} document IDs not found in new_docs"
+            logger.debug(
+                "Skipping %s document IDs that are already queued or persisted",
+                len(ignored_ids),
             )
-            for doc_id in ignored_ids:
-                logger.warning(f"Ignored document ID: {doc_id}")
 
         # Filter new_docs to only include documents with unique IDs
         new_docs = {
             doc_id: new_docs[doc_id]
-            for doc_id in unique_new_doc_ids
-            if doc_id in new_docs
+            for doc_id in all_new_doc_ids
+            if doc_id in unique_new_doc_ids
         }
 
         if not new_docs:
@@ -1063,6 +1093,47 @@ class Ragent:
         chunk_results: list,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, dict[str, Any]]:
+        def _build_progress_payload(
+            chunk_id: str,
+            chunk: dict[str, Any],
+            completed_chunks: int,
+            total_chunks: int,
+        ) -> dict[str, Any]:
+            return {
+                "stage": "embed_rows",
+                "current": completed_chunks,
+                "total": total_chunks,
+                "row_index": int(chunk.get("chunk_order_index", 0)) + 1,
+                "entity_name": chunk.get("section_path", ""),
+                "source_ref": chunk.get("source_ref", ""),
+                "chunk_id": chunk_id,
+            }
+
+        vector_chunks, chunk_embeddings = await self._build_vector_chunks(
+            chunks,
+            progress_callback=progress_callback,
+            progress_payload_builder=_build_progress_payload,
+        )
+
+        for maybe_nodes, _ in chunk_results:
+            for entity_name, entities in maybe_nodes.items():
+                if entity_name not in chunk_embeddings:
+                    continue
+                for entity in entities:
+                    if entity.get("entity_type") == "chunk_text":
+                        entity["embeddings"] = chunk_embeddings[entity_name]
+
+        return vector_chunks
+
+    async def _build_chunk_embeddings(
+        self,
+        chunks: dict[str, dict[str, Any]],
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        progress_payload_builder: Callable[
+            [str, dict[str, Any], int, int], dict[str, Any] | None
+        ]
+        | None = None,
+    ) -> dict[str, Any]:
         if not chunks:
             return {}
 
@@ -1094,33 +1165,32 @@ class Ragent:
             batch_chunk_ids, batch_embeddings = await task
             if len(batch_embeddings) != len(batch_chunk_ids):
                 raise ValueError(
-                    "Generated wide-table chunk embeddings count does not match chunk count."
+                    "Generated chunk embeddings count does not match chunk count."
                 )
             for chunk_id, embedding in zip(batch_chunk_ids, batch_embeddings):
                 chunk_embeddings[chunk_id] = embedding
                 completed_chunks += 1
-                if progress_callback is not None:
+                if (
+                    progress_callback is not None
+                    and progress_payload_builder is not None
+                ):
                     chunk = chunks[chunk_id]
-                    progress_callback(
-                        {
-                            "stage": "embed_rows",
-                            "current": completed_chunks,
-                            "total": total_chunks,
-                            "row_index": int(chunk.get("chunk_order_index", 0)) + 1,
-                            "entity_name": chunk.get("section_path", ""),
-                            "source_ref": chunk.get("source_ref", ""),
-                            "chunk_id": chunk_id,
-                        }
+                    progress_payload = progress_payload_builder(
+                        chunk_id,
+                        chunk,
+                        completed_chunks,
+                        total_chunks,
                     )
+                    if progress_payload is not None:
+                        progress_callback(progress_payload)
 
-        for maybe_nodes, _ in chunk_results:
-            for entity_name, entities in maybe_nodes.items():
-                if entity_name not in chunk_embeddings:
-                    continue
-                for entity in entities:
-                    if entity.get("entity_type") == "chunk_text":
-                        entity["embeddings"] = chunk_embeddings[entity_name]
+        return chunk_embeddings
 
+    @staticmethod
+    def _attach_chunk_embeddings(
+        chunks: dict[str, dict[str, Any]],
+        chunk_embeddings: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
         return {
             chunk_id: {
                 **chunk,
@@ -1128,6 +1198,22 @@ class Ragent:
             }
             for chunk_id, chunk in chunks.items()
         }
+
+    async def _build_vector_chunks(
+        self,
+        chunks: dict[str, dict[str, Any]],
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        progress_payload_builder: Callable[
+            [str, dict[str, Any], int, int], dict[str, Any] | None
+        ]
+        | None = None,
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+        chunk_embeddings = await self._build_chunk_embeddings(
+            chunks,
+            progress_callback=progress_callback,
+            progress_payload_builder=progress_payload_builder,
+        )
+        return self._attach_chunk_embeddings(chunks, chunk_embeddings), chunk_embeddings
 
     def _compute_wide_table_doc_id(
         self,
@@ -1467,6 +1553,7 @@ class Ragent:
                     file_path = getattr(status_doc, "file_path", "unknown_source")
                     current_file_number = 0
                     chunks: dict[str, Any] = {}
+                    vector_chunks: dict[str, Any] = {}
                     first_stage_tasks: list[asyncio.Task[Any]] = []
                     entity_relation_task: asyncio.Task[Any] | None = None
 
@@ -1488,11 +1575,14 @@ class Ragent:
                             pipeline_status["history_messages"].append(log_message)
 
                         chunking_start_ts = time.perf_counter()
+                        chunking_content = _strip_enqueued_doc_name_marker(
+                            status_doc.content
+                        )
                         try:
                             raw_chunks = self.chunking_func(
                                 doc_name,
                                 self.tokenizer,
-                                status_doc.content,
+                                chunking_content,
                                 doc_metadata=status_doc.metadata,
                                 split_by_character=split_by_character,
                                 split_by_character_only=split_by_character_only,
@@ -1503,7 +1593,7 @@ class Ragent:
                             raw_chunks = self.chunking_func(
                                 doc_name,
                                 self.tokenizer,
-                                status_doc.content,
+                                chunking_content,
                                 split_by_character,
                                 split_by_character_only,
                                 self.chunk_overlap_token_size,
@@ -1525,6 +1615,8 @@ class Ragent:
 
                         if not chunks:
                             logger.warning("No document chunks to process")
+                        else:
+                            vector_chunks, _ = await self._build_vector_chunks(chunks)
 
                         first_stage_tasks = [
                             asyncio.create_task(
@@ -1538,7 +1630,9 @@ class Ragent:
                                     )
                                 )
                             ),
-                            asyncio.create_task(self.chunks_vdb.upsert(chunks)),
+                            asyncio.create_task(
+                                self.chunks_vdb.upsert(vector_chunks or chunks)
+                            ),
                             asyncio.create_task(
                                 self.full_docs.upsert(
                                     {doc_id: {"content": status_doc.content}}
@@ -1557,7 +1651,9 @@ class Ragent:
                         entity_stage_start_ts = time.perf_counter()
                         entity_relation_task = asyncio.create_task(
                             self._process_entity_relation_graph(
-                                chunks, pipeline_status, pipeline_status_lock
+                                vector_chunks or chunks,
+                                pipeline_status,
+                                pipeline_status_lock,
                             )
                         )
                         chunk_results = await entity_relation_task
@@ -1629,36 +1725,62 @@ class Ragent:
                 ) -> None:
                     async with semaphore:
                         staged_records: list[dict[str, Any]] = []
+                        failed_stage_records: list[dict[str, Any]] = []
                         rollback_reason = ""
+                        stage_limit = max(
+                            1,
+                            min(len(group_docs), self.llm_model_max_async),
+                        )
+                        stage_semaphore = asyncio.Semaphore(stage_limit)
 
-                        for doc_id, status_doc in group_docs:
-                            try:
-                                staged_records.append(
-                                    await _stage_document(doc_name, doc_id, status_doc)
+                        async def _stage_with_limit(
+                            group_doc_id: str,
+                            group_status_doc: DocProcessingStatus,
+                        ) -> dict[str, Any]:
+                            async with stage_semaphore:
+                                return await _stage_document(
+                                    doc_name, group_doc_id, group_status_doc
                                 )
-                            except _GroupStageError as stage_error:
-                                rollback_reason = (
-                                    "Rolled back because another segment from the same "
-                                    f"source file failed: {source_group_key}"
-                                )
-                                await self._rollback_staged_group_data(
-                                    staged_records + [stage_error.stage_record]
-                                )
-                                for record in staged_records:
-                                    await self.doc_status.upsert(
-                                        self._build_doc_status_record(
-                                            record["doc_id"],
-                                            record["status_doc"],
-                                            status=DocStatus.FAILED,
-                                            file_path=record["file_path"],
-                                            chunks=record["chunks"],
-                                            error=rollback_reason,
-                                        )
+
+                        stage_tasks = [
+                            asyncio.create_task(_stage_with_limit(doc_id, status_doc))
+                            for doc_id, status_doc in group_docs
+                        ]
+                        stage_results = await asyncio.gather(
+                            *stage_tasks, return_exceptions=True
+                        )
+
+                        for result in stage_results:
+                            if isinstance(result, _GroupStageError):
+                                failed_stage_records.append(result.stage_record)
+                            elif isinstance(result, Exception):
+                                raise result
+                            else:
+                                staged_records.append(result)
+
+                        if failed_stage_records:
+                            rollback_reason = (
+                                "Rolled back because another segment from the same "
+                                f"source file failed: {source_group_key}"
+                            )
+                            await self._rollback_staged_group_data(
+                                staged_records + failed_stage_records
+                            )
+                            for record in staged_records:
+                                await self.doc_status.upsert(
+                                    self._build_doc_status_record(
+                                        record["doc_id"],
+                                        record["status_doc"],
+                                        status=DocStatus.FAILED,
+                                        file_path=record["file_path"],
+                                        chunks=record["chunks"],
+                                        error=rollback_reason,
                                     )
-                                await self._insert_done(
-                                    pipeline_status, pipeline_status_lock
                                 )
-                                return
+                            await self._insert_done(
+                                pipeline_status, pipeline_status_lock
+                            )
+                            return
 
                         if not staged_records:
                             return

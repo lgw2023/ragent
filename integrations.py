@@ -1001,6 +1001,21 @@ def _token_count(tokenizer, text: str) -> int:
     return len(tokenizer.encode(text))
 
 
+def _looks_like_table_caption(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if not normalized:
+        return False
+
+    normalized = re.sub(r"^\s{0,3}#{1,6}\s*", "", normalized)
+    return bool(
+        re.match(
+            r"^(?:表|附表|table)\s*[A-Za-z0-9一二三四五六七八九十百千零〇\.\-．_]+",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _split_text_by_token_window(
     text: str,
     tokenizer,
@@ -1025,11 +1040,137 @@ def _split_text_by_token_window(
     return parts
 
 
+def _join_wrapped_chunk(
+    prefix_text: str,
+    body_text: str,
+    suffix_text: str = "",
+) -> str:
+    parts = []
+    for part in (prefix_text, body_text, suffix_text):
+        normalized = (part or "").strip()
+        if normalized:
+            parts.append(normalized)
+    return "\n".join(parts).strip()
+
+
+def _wrapped_chunk_fixed_tokens(
+    tokenizer,
+    *,
+    prefix_text: str = "",
+    suffix_text: str = "",
+) -> int:
+    prefix_text = (prefix_text or "").strip()
+    suffix_text = (suffix_text or "").strip()
+    if not prefix_text and not suffix_text:
+        return 0
+
+    sentinel = "__body__"
+    wrapped = _join_wrapped_chunk(prefix_text, sentinel, suffix_text)
+    return max(
+        _token_count(tokenizer, wrapped) - _token_count(tokenizer, sentinel),
+        0,
+    )
+
+
+def _split_text_by_token_window_with_wrapper(
+    body_text: str,
+    tokenizer,
+    *,
+    prefix_text: str = "",
+    suffix_text: str = "",
+    max_token_size: int,
+    overlap_token_size: int,
+) -> list[str]:
+    body_text = (body_text or "").strip()
+    prefix_text = (prefix_text or "").strip()
+    suffix_text = (suffix_text or "").strip()
+    if not body_text:
+        wrapped = _join_wrapped_chunk(prefix_text, "", suffix_text)
+        return [wrapped] if wrapped else []
+
+    if not prefix_text and not suffix_text:
+        return _split_text_by_token_window(
+            body_text,
+            tokenizer,
+            max_token_size=max_token_size,
+            overlap_token_size=overlap_token_size,
+        )
+
+    wrapped_text = _join_wrapped_chunk(prefix_text, body_text, suffix_text)
+    fixed_tokens = _wrapped_chunk_fixed_tokens(
+        tokenizer,
+        prefix_text=prefix_text,
+        suffix_text=suffix_text,
+    )
+    if fixed_tokens >= max_token_size:
+        return _split_text_by_token_window(
+            wrapped_text,
+            tokenizer,
+            max_token_size=max_token_size,
+            overlap_token_size=overlap_token_size,
+        )
+
+    body_tokens = tokenizer.encode(body_text)
+    available_tokens = max(max_token_size - fixed_tokens, 1)
+    body_overlap = min(overlap_token_size, max(available_tokens - 1, 0))
+    step = max(available_tokens - body_overlap, 1)
+    parts: list[str] = []
+    for start in range(0, len(body_tokens), step):
+        piece_body = tokenizer.decode(body_tokens[start : start + available_tokens]).strip()
+        if not piece_body:
+            continue
+        parts.append(_join_wrapped_chunk(prefix_text, piece_body, suffix_text))
+
+    return parts or [wrapped_text]
+
+
+def _is_markdown_table_separator_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped or "|" not in stripped:
+        return False
+
+    cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+    if not cells:
+        return False
+
+    return all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells)
+
+
+def _append_suffix_to_last_piece(
+    pieces: list[str],
+    suffix_text: str,
+    tokenizer,
+    *,
+    max_token_size: int,
+    overlap_token_size: int,
+) -> list[str]:
+    suffix_text = (suffix_text or "").strip()
+    if not suffix_text:
+        return pieces
+
+    if pieces:
+        candidate = f"{pieces[-1]}\n{suffix_text}".strip()
+        if _token_count(tokenizer, candidate) <= max_token_size:
+            pieces[-1] = candidate
+            return pieces
+
+    pieces.extend(
+        _split_text_by_token_window(
+            suffix_text,
+            tokenizer,
+            max_token_size=max_token_size,
+            overlap_token_size=overlap_token_size,
+        )
+    )
+    return pieces
+
+
 def _split_html_table_by_rows(
     table_text: str,
     tokenizer,
     *,
     max_token_size: int,
+    overlap_token_size: int,
 ) -> list[str]:
     table_text = (table_text or "").strip()
     if not table_text:
@@ -1039,6 +1180,8 @@ def _split_html_table_by_rows(
     if not table_match:
         return [table_text]
 
+    prefix_text = table_text[: table_match.start()].strip()
+    suffix_text = table_text[table_match.end() :].strip()
     start_tag, inner_html, end_tag = table_match.groups()
     rows = re.findall(r"(?is)<tr\b.*?</tr>", inner_html)
     if len(rows) <= 1:
@@ -1056,27 +1199,179 @@ def _split_html_table_by_rows(
         return [table_text]
 
     fixed_prefix = start_tag + "".join(header_rows)
-    fixed_tokens = _token_count(tokenizer, fixed_prefix + end_tag)
+    piece_prefix = f"{prefix_text}\n{fixed_prefix}" if prefix_text else fixed_prefix
+    fixed_tokens = _wrapped_chunk_fixed_tokens(
+        tokenizer,
+        prefix_text=piece_prefix,
+        suffix_text=end_tag,
+    )
     if fixed_tokens >= max_token_size:
-        return [table_text]
+        return _split_text_by_token_window(
+            table_text,
+            tokenizer,
+            max_token_size=max_token_size,
+            overlap_token_size=overlap_token_size,
+        )
 
     pieces: list[str] = []
     current_rows: list[str] = []
-    current_tokens = fixed_tokens
     for row in body_rows:
-        row_tokens = _token_count(tokenizer, row)
-        if current_rows and current_tokens + row_tokens > max_token_size:
-            pieces.append(fixed_prefix + "".join(current_rows) + end_tag)
-            current_rows = [row]
-            current_tokens = fixed_tokens + row_tokens
+        candidate_body = "".join(current_rows + [row]).strip()
+        candidate_piece = _join_wrapped_chunk(piece_prefix, candidate_body, end_tag)
+        if current_rows and _token_count(tokenizer, candidate_piece) > max_token_size:
+            pieces.append(_join_wrapped_chunk(piece_prefix, "".join(current_rows), end_tag))
+            current_rows = []
+            candidate_body = row.strip()
+            candidate_piece = _join_wrapped_chunk(piece_prefix, candidate_body, end_tag)
+        if _token_count(tokenizer, candidate_piece) > max_token_size:
+            pieces.extend(
+                _split_text_by_token_window_with_wrapper(
+                    row,
+                    tokenizer,
+                    prefix_text=piece_prefix,
+                    suffix_text=end_tag,
+                    max_token_size=max_token_size,
+                    overlap_token_size=overlap_token_size,
+                )
+            )
             continue
         current_rows.append(row)
-        current_tokens += row_tokens
 
     if current_rows:
-        pieces.append(fixed_prefix + "".join(current_rows) + end_tag)
+        pieces.append(_join_wrapped_chunk(piece_prefix, "".join(current_rows), end_tag))
 
-    return [piece.strip() for piece in pieces if piece.strip()] or [table_text]
+    return _append_suffix_to_last_piece(
+        [piece.strip() for piece in pieces if piece.strip()],
+        suffix_text,
+        tokenizer,
+        max_token_size=max_token_size,
+        overlap_token_size=overlap_token_size,
+    ) or [table_text]
+
+
+def _split_markdown_table_by_rows(
+    table_text: str,
+    tokenizer,
+    *,
+    max_token_size: int,
+    overlap_token_size: int,
+) -> list[str]:
+    table_text = (table_text or "").strip()
+    if not table_text:
+        return []
+
+    lines = table_text.splitlines()
+    table_start = None
+    for index in range(len(lines) - 1):
+        if "|" not in lines[index]:
+            continue
+        if _is_markdown_table_separator_line(lines[index + 1]):
+            table_start = index
+            break
+
+    if table_start is None:
+        return [table_text]
+
+    table_end = table_start + 2
+    while table_end < len(lines):
+        stripped = lines[table_end].strip()
+        if stripped and "|" in stripped:
+            table_end += 1
+            continue
+        break
+
+    prefix_text = "\n".join(lines[:table_start]).strip()
+    suffix_text = "\n".join(lines[table_end:]).strip()
+    header_lines = [lines[table_start].rstrip(), lines[table_start + 1].rstrip()]
+    body_lines = [line.rstrip() for line in lines[table_start + 2 : table_end] if line.strip()]
+    if not body_lines:
+        return [table_text]
+
+    piece_prefix = "\n".join(part for part in [prefix_text, *header_lines] if part).strip()
+    fixed_tokens = _wrapped_chunk_fixed_tokens(
+        tokenizer,
+        prefix_text=piece_prefix,
+    )
+    if fixed_tokens >= max_token_size:
+        return _split_text_by_token_window(
+            table_text,
+            tokenizer,
+            max_token_size=max_token_size,
+            overlap_token_size=overlap_token_size,
+        )
+
+    pieces: list[str] = []
+    current_rows: list[str] = []
+    for row in body_lines:
+        candidate_body = "\n".join(current_rows + [row]).strip()
+        candidate_piece = _join_wrapped_chunk(piece_prefix, candidate_body)
+        if current_rows and _token_count(tokenizer, candidate_piece) > max_token_size:
+            pieces.append(_join_wrapped_chunk(piece_prefix, "\n".join(current_rows)))
+            current_rows = []
+            candidate_body = row.strip()
+            candidate_piece = _join_wrapped_chunk(piece_prefix, candidate_body)
+        if _token_count(tokenizer, candidate_piece) > max_token_size:
+            pieces.extend(
+                _split_text_by_token_window_with_wrapper(
+                    row,
+                    tokenizer,
+                    prefix_text=piece_prefix,
+                    max_token_size=max_token_size,
+                    overlap_token_size=overlap_token_size,
+                )
+            )
+            continue
+        current_rows.append(row)
+
+    if current_rows:
+        pieces.append(_join_wrapped_chunk(piece_prefix, "\n".join(current_rows)))
+
+    return _append_suffix_to_last_piece(
+        [piece.strip() for piece in pieces if piece.strip()],
+        suffix_text,
+        tokenizer,
+        max_token_size=max_token_size,
+        overlap_token_size=overlap_token_size,
+    ) or [table_text]
+
+
+def _split_table_by_rows(
+    table_text: str,
+    tokenizer,
+    *,
+    max_token_size: int,
+    overlap_token_size: int,
+) -> list[str]:
+    table_text = (table_text or "").strip()
+    if not table_text:
+        return []
+
+    lowered = table_text.lower()
+    if "<table" in lowered:
+        pieces = _split_html_table_by_rows(
+            table_text,
+            tokenizer,
+            max_token_size=max_token_size,
+            overlap_token_size=overlap_token_size,
+        )
+        if pieces:
+            return pieces
+
+    pieces = _split_markdown_table_by_rows(
+        table_text,
+        tokenizer,
+        max_token_size=max_token_size,
+        overlap_token_size=overlap_token_size,
+    )
+    if pieces:
+        return pieces
+
+    return _split_text_by_token_window(
+        table_text,
+        tokenizer,
+        max_token_size=max_token_size,
+        overlap_token_size=overlap_token_size,
+    )
 
 
 def _syntax_tree_node_is_single_image(node) -> bool:
@@ -1120,10 +1415,10 @@ def _classify_markdown_block(node, block_text: str) -> tuple[str, int | None]:
         lowered = block_text.lower()
         if "image_description:" in lowered:
             return "image_description_marker", None
-        if "<img" in lowered:
-            return "image", None
         if "<table" in lowered:
             return "table", None
+        if "<img" in lowered:
+            return "image", None
         return "html", None
 
     return node_type or "unknown", None
@@ -1158,6 +1453,15 @@ def _extract_markdown_image_file_name(block_text: str) -> str | None:
     return image_file_name or None
 
 
+def _find_html_table_ranges(content: str) -> list[tuple[int, int]]:
+    if not content:
+        return []
+    return [
+        (match.start(), match.end())
+        for match in re.finditer(r"(?is)<table\b[^>]*>.*?</table>", content)
+    ]
+
+
 def _find_markdown_image_occurrences(content: str) -> list[dict[str, Any]]:
     occurrences: list[dict[str, Any]] = []
     patterns = [
@@ -1167,12 +1471,14 @@ def _find_markdown_image_occurrences(content: str) -> list[dict[str, Any]]:
 
     for pattern in patterns:
         for match in pattern.finditer(content):
-            image_file_name = _extract_markdown_image_file_name(match.group(0))
+            matched_text = match.group(0)
+            image_file_name = _extract_markdown_image_file_name(matched_text)
             if not image_file_name:
                 continue
             occurrences.append(
                 {
                     "image_file": image_file_name,
+                    "image_src": _extract_markdown_image_src(matched_text),
                     "match_start": match.start(),
                     "match_end": match.end(),
                     "insert_after": match.end(),
@@ -1186,6 +1492,27 @@ def _find_markdown_image_occurrences(content: str) -> list[dict[str, Any]]:
             continue
         deduped_occurrences.append(occurrence)
 
+    table_ranges = _find_html_table_ranges(content)
+    table_index = 0
+    for occurrence in deduped_occurrences:
+        match_start = occurrence["match_start"]
+        match_end = occurrence["match_end"]
+        while table_index < len(table_ranges) and match_start >= table_ranges[table_index][1]:
+            table_index += 1
+
+        inside_html_table = False
+        table_start = None
+        table_end = None
+        if table_index < len(table_ranges):
+            table_start, table_end = table_ranges[table_index]
+            if match_start >= table_start and match_end <= table_end:
+                inside_html_table = True
+
+        occurrence["inside_html_table"] = inside_html_table
+        occurrence["table_start"] = table_start if inside_html_table else None
+        occurrence["table_end"] = table_end if inside_html_table else None
+        occurrence["insert_after"] = table_end if inside_html_table else match_end
+
     return deduped_occurrences
 
 
@@ -1195,6 +1522,9 @@ def _parse_markdown_blocks(content: str) -> list[dict[str, Any]]:
         return []
 
     lines = content.splitlines(keepends=True)
+    line_offsets = [0]
+    for line in lines:
+        line_offsets.append(line_offsets[-1] + len(line))
     root = syntax_tree_node_cls(parser.parse(content))
     section_stack: list[str] = []
     raw_blocks: list[dict[str, Any]] = []
@@ -1216,6 +1546,8 @@ def _parse_markdown_blocks(content: str) -> list[dict[str, Any]]:
             "heading_level": heading_level,
             "line_start": start_line,
             "line_end": end_line,
+            "char_start": line_offsets[start_line],
+            "char_end": line_offsets[end_line],
             "node": node,
         }
 
@@ -1291,6 +1623,87 @@ def _build_legacy_markdown_image_refs(
     return image_refs
 
 
+def _build_md_parser_image_ref_context(
+    raw_blocks: list[dict[str, Any]],
+    anchor_index: int,
+    *,
+    context_front_chars: int,
+    context_behind_chars: int,
+) -> dict[str, Any]:
+    block = raw_blocks[anchor_index]
+    image_context_kinds = {"paragraph", "list", "blockquote"}
+    skip_kinds = {"image", "image_description", "image_description_marker"}
+
+    front_parts: list[str] = []
+    cursor = anchor_index - 1
+    while cursor >= 0:
+        prev_block = raw_blocks[cursor]
+        prev_kind = prev_block.get("kind")
+        if prev_kind == "heading":
+            break
+        if prev_kind in skip_kinds:
+            cursor -= 1
+            continue
+        if prev_kind in image_context_kinds:
+            prev_text = (prev_block.get("text") or "").strip()
+            if prev_text:
+                front_parts.append(prev_text)
+                front_candidate = "\n\n".join(
+                    part
+                    for part in [
+                        block.get("section_context", "").strip(),
+                        "\n\n".join(reversed(front_parts)).strip(),
+                    ]
+                    if part
+                ).strip()
+                if context_front_chars > 0 and len(front_candidate) >= context_front_chars:
+                    break
+        cursor -= 1
+    front_parts.reverse()
+    front_context = "\n\n".join(
+        part
+        for part in [block.get("section_context", "").strip(), *front_parts]
+        if part
+    ).strip()
+    if context_front_chars > 0:
+        front_context = front_context[-context_front_chars:]
+    else:
+        front_context = ""
+
+    behind_parts: list[str] = []
+    cursor = anchor_index + 1
+    while cursor < len(raw_blocks):
+        next_block = raw_blocks[cursor]
+        next_kind = next_block.get("kind")
+        if next_kind == "heading":
+            break
+        if next_kind in skip_kinds:
+            cursor += 1
+            continue
+        if next_kind in image_context_kinds:
+            next_text = (next_block.get("text") or "").strip()
+            if next_text:
+                behind_parts.append(next_text)
+                behind_candidate = "\n\n".join(behind_parts).strip()
+                if context_behind_chars > 0 and len(behind_candidate) >= context_behind_chars:
+                    break
+        cursor += 1
+    behind_context = "\n\n".join(part for part in behind_parts if part).strip()
+    if context_behind_chars > 0:
+        behind_context = behind_context[:context_behind_chars]
+    else:
+        behind_context = ""
+
+    return {
+        "section_path": block.get("section_path", ""),
+        "section_context": block.get("section_context", ""),
+        "context_front": front_context,
+        "context_behind": behind_context,
+        "line_start": block.get("line_start"),
+        "line_end": block.get("line_end"),
+    }
+
+
 def _build_md_parser_image_refs(
     md_text: str,
     *,
@@ -1301,93 +1714,80 @@ def _build_md_parser_image_refs(
     if not raw_blocks:
         return []
 
-    image_context_kinds = {"paragraph", "list", "blockquote"}
-    skip_kinds = {"image", "image_description", "image_description_marker"}
+    image_occurrences = _find_markdown_image_occurrences(md_text)
+    if not image_occurrences:
+        return []
+
     image_refs: list[dict[str, Any]] = []
+    anchor_index = 0
 
-    for index, block in enumerate(raw_blocks):
-        if block.get("kind") != "image":
-            continue
-
-        image_file_name = block.get("image_file")
+    for occurrence_index, occurrence in enumerate(image_occurrences):
+        image_file_name = occurrence.get("image_file")
         if not image_file_name:
             continue
 
-        section_path = block.get("section_path", "")
-        if section_path.split(" > ", 1)[0].replace(" ", "") == "目录":
+        match_start = occurrence.get("match_start")
+        if not isinstance(match_start, int):
             continue
 
-        front_parts: list[str] = []
-        cursor = index - 1
-        while cursor >= 0:
-            prev_block = raw_blocks[cursor]
-            prev_kind = prev_block.get("kind")
-            if prev_kind == "heading":
+        while anchor_index + 1 < len(raw_blocks):
+            next_block = raw_blocks[anchor_index + 1]
+            next_char_start = next_block.get("char_start")
+            if not isinstance(next_char_start, int) or next_char_start > match_start:
                 break
-            if prev_kind in skip_kinds:
-                cursor -= 1
-                continue
-            if prev_kind in image_context_kinds:
-                prev_text = (prev_block.get("text") or "").strip()
-                if prev_text:
-                    front_parts.append(prev_text)
-                    front_candidate = "\n\n".join(
-                        part
-                        for part in [
-                            block.get("section_context", "").strip(),
-                            "\n\n".join(reversed(front_parts)).strip(),
-                        ]
-                        if part
-                    ).strip()
-                    if context_front_chars > 0 and len(front_candidate) >= context_front_chars:
-                        break
-            cursor -= 1
-        front_parts.reverse()
-        front_context = "\n\n".join(
-            part
-            for part in [block.get("section_context", "").strip(), *front_parts]
-            if part
-        ).strip()
-        if context_front_chars > 0:
-            front_context = front_context[-context_front_chars:]
-        else:
-            front_context = ""
+            anchor_index += 1
 
-        behind_parts: list[str] = []
-        cursor = index + 1
-        while cursor < len(raw_blocks):
-            next_block = raw_blocks[cursor]
-            next_kind = next_block.get("kind")
-            if next_kind == "heading":
-                break
-            if next_kind in skip_kinds:
-                cursor += 1
+        resolved_anchor_index = None
+        for candidate_index in range(anchor_index, len(raw_blocks)):
+            candidate = raw_blocks[candidate_index]
+            char_start = candidate.get("char_start")
+            char_end = candidate.get("char_end")
+            if not isinstance(char_start, int) or not isinstance(char_end, int):
                 continue
-            if next_kind in image_context_kinds:
-                next_text = (next_block.get("text") or "").strip()
-                if next_text:
-                    behind_parts.append(next_text)
-                    behind_candidate = "\n\n".join(behind_parts).strip()
-                    if context_behind_chars > 0 and len(behind_candidate) >= context_behind_chars:
-                        break
-            cursor += 1
-        behind_context = "\n\n".join(part for part in behind_parts if part).strip()
-        if context_behind_chars > 0:
-            behind_context = behind_context[:context_behind_chars]
-        else:
-            behind_context = ""
+            if char_start <= match_start < char_end:
+                resolved_anchor_index = candidate_index
+                anchor_index = candidate_index
+                break
+            if char_start > match_start:
+                break
+        if resolved_anchor_index is None:
+            for candidate_index in range(anchor_index, -1, -1):
+                candidate = raw_blocks[candidate_index]
+                char_start = candidate.get("char_start")
+                char_end = candidate.get("char_end")
+                if (
+                    isinstance(char_start, int)
+                    and isinstance(char_end, int)
+                    and char_start <= match_start <= char_end
+                ):
+                    resolved_anchor_index = candidate_index
+                    anchor_index = candidate_index
+                    break
+        if resolved_anchor_index is None:
+            continue
+
+        context = _build_md_parser_image_ref_context(
+            raw_blocks,
+            resolved_anchor_index,
+            context_front_chars=context_front_chars,
+            context_behind_chars=context_behind_chars,
+        )
+        section_path = context.get("section_path", "")
+        if section_path.split(" > ", 1)[0].replace(" ", "") == "目录":
+            continue
 
         image_refs.append(
             {
                 "image_file": image_file_name,
-                "image_src": block.get("image_src"),
+                "image_src": occurrence.get("image_src"),
                 "section_path": section_path,
-                "section_context": block.get("section_context", ""),
-                "context_front": front_context,
-                "context_behind": behind_context,
-                "line_start": block.get("line_start"),
-                "line_end": block.get("line_end"),
-                "ordinal": block.get("ordinal", index),
+                "section_context": context.get("section_context", ""),
+                "context_front": context.get("context_front", ""),
+                "context_behind": context.get("context_behind", ""),
+                "line_start": context.get("line_start"),
+                "line_end": context.get("line_end"),
+                "ordinal": occurrence_index,
+                "inside_html_table": bool(occurrence.get("inside_html_table")),
             }
         )
 
@@ -1439,10 +1839,11 @@ def split_by_md_parser(
 
     def split_large_block(block_text: str, block_kind: str) -> list[str]:
         if block_kind == "table":
-            pieces = _split_html_table_by_rows(
+            pieces = _split_table_by_rows(
                 block_text,
                 tokenizer,
                 max_token_size=max_token_size,
+                overlap_token_size=overlap_token_size,
             )
             if pieces:
                 return pieces
@@ -1453,11 +1854,41 @@ def split_by_md_parser(
             overlap_token_size=overlap_token_size,
         )
 
-    for block in raw_blocks:
+    index = 0
+    while index < len(raw_blocks):
+        block = raw_blocks[index]
         block_kind = block["kind"]
         block_text = block["text"]
         line_start = block["line_start"]
         line_end = block["line_end"]
+
+        if (
+            block_kind == "paragraph"
+            and _looks_like_table_caption(block_text)
+            and index + 1 < len(raw_blocks)
+        ):
+            next_block = raw_blocks[index + 1]
+            if (
+                next_block.get("kind") == "table"
+                and next_block.get("section_path", "") == block.get("section_path", "")
+            ):
+                block_kind = "table"
+                block_text = f"{block_text}\n{next_block.get('text', '')}".strip()
+                line_end = next_block.get("line_end", line_end)
+                block = {
+                    **next_block,
+                    "kind": block_kind,
+                    "text": block_text,
+                    "line_start": line_start,
+                    "line_end": line_end,
+                    "section_path": block.get("section_path", ""),
+                    "section_context": block.get("section_context", ""),
+                }
+                index += 2
+            else:
+                index += 1
+        else:
+            index += 1
 
         if block_kind == "heading":
             flush_current()
@@ -1490,6 +1921,7 @@ def split_by_md_parser(
                         "line_end": line_end,
                         "section_path": section_path,
                         "block_types": [block_kind],
+                        "preserve_chunking": block_kind == "table",
                     }
                 )
             continue
@@ -1542,12 +1974,15 @@ def _build_md_parser_text_insert_units(
         chunk_text = (chunk.get("content") or "").strip()
         if not chunk_text:
             continue
+        metadata = _build_text_segment_metadata(
+            chunk_text, source_file_path, text_blocks
+        )
+        if chunk.get("preserve_chunking"):
+            metadata["preserve_chunking"] = True
         insert_units.append(
             {
                 "text": chunk_text,
-                "metadata": _build_text_segment_metadata(
-                    chunk_text, source_file_path, text_blocks
-                ),
+                "metadata": metadata,
                 "chunk_index": index,
                 "chunk_type": "text_md_parser",
                 "detail": "markdown parser block inserted",
@@ -3577,7 +4012,20 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                         )
 
                         if image_desc_text:
-                            insertion_block = "\n" + marker_start + "\n```image_description_start\n\n" + image_desc_text + "\n\n```\n" + marker_end + "\n"
+                            block_prefix = (
+                                "\n\n"
+                                if occurrence.get("inside_html_table")
+                                else "\n"
+                            )
+                            insertion_block = (
+                                block_prefix
+                                + marker_start
+                                + "\n```image_description_start\n\n"
+                                + image_desc_text
+                                + "\n\n```\n"
+                                + marker_end
+                                + "\n"
+                            )
                             new_content_parts.append(insertion_block)
                             has_modification = True
                             injected_count += 1
@@ -3706,7 +4154,7 @@ async def index_md_to_rag(
 
                 doc_name_with_ext = pdf_file_path.split("/")[-1]
                 doc_name_without_ext = pdf_file_path.split("/")[-1].split(".")[0]
-                md_split_mode = (os.getenv("RAG_MD_SPLIT_MODE", "legacy") or "legacy").strip().lower()
+                md_split_mode = (os.getenv("RAG_MD_SPLIT_MODE", "parser") or "parser").strip().lower()
                 insert_units: list[dict[str, Any]] = []
                 total_chunks = 0
                 total_image_chunks = 0
@@ -3820,91 +4268,128 @@ async def index_md_to_rag(
                     progress_state["last_update_monotonic"] = now
                     progress_state["elapsed_sec"] = round(now - progress_state.get("started_monotonic", now), 3)
 
-                total_units = len(insert_units)
+                total_units = sum(
+                    1 for unit in insert_units if (unit.get("text") or "").strip()
+                )
                 total_units = max(total_units, 1)
                 progress_tracker.update(0.10, "rag_plan", f"0/{total_units} insert units completed")
-
-                async def safe_rag_insert(
-                    text: str,
-                    doc_name: str,
-                    file_paths: str | None = None,
-                    metadata: dict[str, Any] | None = None,
-                    *,
-                    chunk_index: int | None = None,
-                    chunk_type: str = "text",
-                ):
-                    if not text or not text.strip():
-                        return
-
-                    async def _ainsert_once():
-                        resolved_file_path = os.path.abspath(file_paths) if file_paths else source_pdf_path
-                        await rag.ainsert(
-                            text,
-                            doc_name=doc_name,
-                            file_paths=resolved_file_path,
-                            metadata=metadata,
+                insert_batch_size = max(
+                    1,
+                    int(
+                        os.getenv(
+                            "RAG_INSERT_BATCH_SIZE",
+                            str(max(1, getattr(rag, "llm_model_max_async", 4))),
                         )
+                    ),
+                )
+
+                def _clean_text_for_xml(text: str) -> str:
+                    return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
+
+                async def safe_rag_insert_batch(
+                    batch_units: list[dict[str, Any]],
+                    *,
+                    batch_index: int,
+                    total_batches: int,
+                ) -> int:
+                    valid_units: list[dict[str, Any]] = []
+                    batch_doc_name: str | None = None
+
+                    for unit in batch_units:
+                        text = unit.get("text", "")
+                        if not text or not text.strip():
+                            continue
+                        unit_doc_name = unit.get("doc_name", doc_name_with_ext)
+                        if batch_doc_name is None:
+                            batch_doc_name = unit_doc_name
+                        elif unit_doc_name != batch_doc_name:
+                            raise ValueError(
+                                "Insert batch contains mixed doc names; batching must preserve chunk markers."
+                            )
+                        valid_units.append(
+                            {
+                                **unit,
+                                "text": _clean_text_for_xml(text),
+                                "file_paths": (
+                                    os.path.abspath(unit.get("file_paths", source_pdf_path))
+                                    if unit.get("file_paths")
+                                    else source_pdf_path
+                                ),
+                                "metadata": unit.get("metadata") or {},
+                            }
+                        )
+
+                    if not valid_units or batch_doc_name is None:
+                        return 0
+
+                    batch_start = valid_units[0]["display_index"]
+                    batch_end = valid_units[-1]["display_index"]
+                    batch_types = dict(
+                        Counter(unit.get("chunk_type", "text") for unit in valid_units)
+                    )
+
+                    async def _ainsert_batch_once():
+                        await rag.apipeline_enqueue_documents(
+                            [unit["text"] for unit in valid_units],
+                            file_paths=[unit["file_paths"] for unit in valid_units],
+                            doc_name=batch_doc_name,
+                            metadata=[unit["metadata"] for unit in valid_units],
+                        )
+                        await rag.apipeline_process_enqueue_documents(doc_name=batch_doc_name)
 
                     if insert_timeout <= 0:
                         try:
-                            await _ainsert_once()
+                            await _ainsert_batch_once()
+                            return len(valid_units)
                         except Exception as e:
-                            parts = [
-                                f"doc={doc_name}",
-                                f"err={_format_err(e)}",
-                                f"chunk_index={chunk_index}",
-                                f"chunk_type={chunk_type}",
-                                f"len={len(text)}",
-                                f"preview={repr(_content_preview(text))}",
-                            ]
-                            if file_paths:
-                                parts.append(f"file_paths={file_paths}")
-                            logger.warning(f"rag insert failed, skip this chunk. " + ", ".join(parts))
-                        return
+                            logger.warning(
+                                "rag insert batch failed, skip batch. "
+                                f"doc={batch_doc_name}, batch={batch_index}/{total_batches}, "
+                                f"range={batch_start}-{batch_end}, size={len(valid_units)}, "
+                                f"types={batch_types}, err={_format_err(e)}"
+                            )
+                            return 0
 
                     for attempt in range(max_retries + 1):
-                        cur_timeout = min(int(insert_timeout * (timeout_backoff ** attempt)), max_timeout)
+                        cur_timeout = min(
+                            int(insert_timeout * (timeout_backoff ** attempt)),
+                            max_timeout,
+                        )
                         try:
-                            await asyncio.wait_for(_ainsert_once(), timeout=cur_timeout)
+                            await asyncio.wait_for(
+                                _ainsert_batch_once(), timeout=cur_timeout
+                            )
                             if attempt > 0:
                                 logger.info(
-                                    f"rag insert retry succeeded. doc={doc_name}, chunk_index={chunk_index}, chunk_type={chunk_type}, attempt={attempt + 1}, timeout={cur_timeout}s"
+                                    "rag insert batch retry succeeded. "
+                                    f"doc={batch_doc_name}, batch={batch_index}/{total_batches}, "
+                                    f"range={batch_start}-{batch_end}, size={len(valid_units)}, "
+                                    f"attempt={attempt + 1}, timeout={cur_timeout}s"
                                 )
-                            return
+                            return len(valid_units)
                         except asyncio.TimeoutError as e:
                             if attempt >= max_retries:
-                                parts = [
-                                    f"doc={doc_name}",
-                                    f"err={_format_err(e)}",
-                                    f"chunk_index={chunk_index}",
-                                    f"chunk_type={chunk_type}",
-                                    f"len={len(text)}",
-                                    f"preview={repr(_content_preview(text))}",
-                                ]
-                                if file_paths:
-                                    parts.append(f"file_paths={file_paths}")
                                 logger.warning(
-                                    f"rag insert timeout after retries, skip this chunk. retries={max_retries}, last_timeout={cur_timeout}s, "
-                                    + ", ".join(parts)
+                                    "rag insert batch timeout after retries, skip batch. "
+                                    f"doc={batch_doc_name}, batch={batch_index}/{total_batches}, "
+                                    f"range={batch_start}-{batch_end}, size={len(valid_units)}, "
+                                    f"types={batch_types}, last_timeout={cur_timeout}s, err={_format_err(e)}"
                                 )
-                                return
+                                return 0
                             logger.warning(
-                                f"rag insert timeout, retrying. doc={doc_name}, chunk_index={chunk_index}, chunk_type={chunk_type}, "
+                                "rag insert batch timeout, retrying. "
+                                f"doc={batch_doc_name}, batch={batch_index}/{total_batches}, "
+                                f"range={batch_start}-{batch_end}, size={len(valid_units)}, "
                                 f"attempt={attempt + 1}/{max_retries}, timeout={cur_timeout}s"
                             )
                         except Exception as e:
-                            parts = [
-                                f"doc={doc_name}",
-                                f"err={_format_err(e)}",
-                                f"chunk_index={chunk_index}",
-                                f"chunk_type={chunk_type}",
-                                f"len={len(text)}",
-                                f"preview={repr(_content_preview(text))}",
-                            ]
-                            if file_paths:
-                                parts.append(f"file_paths={file_paths}")
-                            logger.warning(f"rag insert failed, skip this chunk. " + ", ".join(parts))
-                            return
+                            logger.warning(
+                                "rag insert batch failed, skip batch. "
+                                f"doc={batch_doc_name}, batch={batch_index}/{total_batches}, "
+                                f"range={batch_start}-{batch_end}, size={len(valid_units)}, "
+                                f"types={batch_types}, err={_format_err(e)}"
+                            )
+                            return 0
 
                 _update_progress(
                     phase="split_md",
@@ -3916,51 +4401,23 @@ async def index_md_to_rag(
 
                 completed_units = 0
 
-                async def _insert_with_progress(
-                    text: str,
-                    *,
-                    doc_name: str,
-                    file_paths: str | None,
-                    metadata: dict[str, Any] | None,
-                    chunk_index: int,
-                    chunk_type: str,
-                    detail: str,
-                ) -> None:
-                    nonlocal completed_units
-                    if not text or not text.strip():
-                        return
-                    start_progress = _weighted_ratio(0.10, 1.0, completed_units, total_units)
-                    soft_end_progress = _weighted_ratio(0.10, 1.0, completed_units + 0.8, total_units)
-                    progress_tracker.start_estimated_phase(
-                        chunk_type,
-                        f"{completed_units + 1}/{total_units} {detail}",
-                        start_progress=start_progress,
-                        end_progress=soft_end_progress,
-                        estimate_seconds=float(os.getenv("KG_PROGRESS_UNIT_ESTIMATE_SECONDS", "35")),
-                    )
-                    await safe_rag_insert(
-                        text,
-                        doc_name,
-                        file_paths=file_paths,
-                        metadata=metadata,
-                        chunk_index=chunk_index,
-                        chunk_type=chunk_type,
-                    )
-                    completed_units += 1
-                    progress_tracker.update(
-                        _weighted_ratio(0.10, 1.0, completed_units, total_units),
-                        chunk_type,
-                        f"{completed_units}/{total_units} {detail}",
-                    )
+                batched_units: list[list[dict[str, Any]]] = []
+                current_batch: list[dict[str, Any]] = []
+                current_doc_name: str | None = None
+                unit_display_index = 0
 
-                for display_index, unit in enumerate(insert_units, start=1):
+                for unit in insert_units:
                     text = unit.get("text", "")
-                    chunk_index = unit.get("chunk_index", display_index - 1)
+                    if not text or not text.strip():
+                        continue
+                    unit_display_index += 1
+                    chunk_index = unit.get("chunk_index", unit_display_index - 1)
                     chunk_type = unit.get("chunk_type", "text")
                     file_paths = unit.get("file_paths", source_pdf_path)
+                    unit_doc_name = unit.get("doc_name", doc_name_with_ext)
                     _print_pipeline_progress(
                         "rag_insert_chunk_start",
-                        progress=f"{display_index}/{total_units}",
+                        progress=f"{unit_display_index}/{total_units}",
                         chunk_index=chunk_index,
                         chunk_type=chunk_type,
                         text_len=len(text),
@@ -3980,14 +4437,79 @@ async def index_md_to_rag(
                         line_end=unit.get("line_end"),
                         section_path=unit.get("section_path", ""),
                     )
-                    await _insert_with_progress(
-                        text,
-                        doc_name=unit.get("doc_name", doc_name_with_ext),
-                        file_paths=file_paths,
-                        metadata=unit.get("metadata"),
-                        chunk_index=chunk_index,
-                        chunk_type=chunk_type,
-                        detail=unit.get("detail", "text block inserted"),
+                    if current_batch and (
+                        len(current_batch) >= insert_batch_size
+                        or unit_doc_name != current_doc_name
+                    ):
+                        batched_units.append(current_batch)
+                        current_batch = []
+                        current_doc_name = None
+                    if not current_batch:
+                        current_doc_name = unit_doc_name
+                    current_batch.append(
+                        {
+                            **unit,
+                            "display_index": unit_display_index,
+                            "chunk_index": chunk_index,
+                            "chunk_type": chunk_type,
+                            "file_paths": file_paths,
+                            "doc_name": unit_doc_name,
+                            "detail": unit.get("detail", "text block inserted"),
+                        }
+                    )
+
+                if current_batch:
+                    batched_units.append(current_batch)
+
+                total_batches = len(batched_units)
+                for batch_index, batch_units in enumerate(batched_units, start=1):
+                    batch_start = batch_units[0]["display_index"]
+                    batch_end = batch_units[-1]["display_index"]
+                    start_progress = _weighted_ratio(
+                        0.10, 1.0, completed_units, total_units
+                    )
+                    soft_end_progress = _weighted_ratio(
+                        0.10,
+                        1.0,
+                        min(total_units, completed_units + len(batch_units)),
+                        total_units,
+                    )
+                    progress_tracker.start_estimated_phase(
+                        "rag_batch",
+                        f"{batch_start}-{batch_end}/{total_units} insert batch",
+                        start_progress=start_progress,
+                        end_progress=soft_end_progress,
+                        estimate_seconds=(
+                            float(
+                                os.getenv(
+                                    "KG_PROGRESS_UNIT_ESTIMATE_SECONDS", "35"
+                                )
+                            )
+                            * len(batch_units)
+                        ),
+                    )
+                    _update_progress(
+                        phase="insert_batch",
+                        batch_index=batch_index,
+                        batch_total=total_batches,
+                        chunk_index=batch_units[0]["chunk_index"],
+                        chunk_type=batch_units[0]["chunk_type"],
+                        file_paths=batch_units[0]["file_paths"],
+                        text_len=sum(len(unit["text"]) for unit in batch_units),
+                        preview=_content_preview(batch_units[0]["text"]),
+                        line_start=batch_units[0].get("line_start"),
+                        line_end=batch_units[-1].get("line_end"),
+                        section_path=batch_units[0].get("section_path", ""),
+                    )
+                    completed_units += await safe_rag_insert_batch(
+                        batch_units,
+                        batch_index=batch_index,
+                        total_batches=total_batches,
+                    )
+                    progress_tracker.update(
+                        _weighted_ratio(0.10, 1.0, completed_units, total_units),
+                        "rag_batch",
+                        f"{completed_units}/{total_units} insert units completed",
                     )
 
                 _update_progress(phase="completed")

@@ -393,6 +393,43 @@ When handling relationships with timestamps:
 Response:"""
 
 
+PROMPTS["rag_response_single_prompt"] = """---Role---
+
+You are a helpful assistant responding to user query about Knowledge Graph and Document Chunks provided in JSON format below.
+
+
+---Goal---
+
+Generate a concise, natural response grounded in the provided Knowledge Base, considering both the conversation history and the current query. Summarize the relevant information in the provided Knowledge Base and incorporate only general knowledge that is necessary to explain that information clearly. Do not include information not supported by the Knowledge Base.
+
+When handling relationships with timestamps:
+1. Each relationship has a "created_at" timestamp indicating when we acquired this knowledge
+2. When encountering conflicting relationships, consider both the semantic content and the timestamp
+3. Don't automatically prefer the most recently created relationships - use judgment based on the context
+4. For time-specific queries, prioritize temporal information in the content before considering creation timestamps
+
+---Conversation History---
+{history}
+
+---Knowledge Graph and Document Chunks---
+{context_data}
+
+---Response Rules---
+
+- Target format and length: {response_type}
+- Use markdown formatting with appropriate section headings
+- Please respond in the same language as the user's question.
+- Ensure the response maintains continuity with the conversation history.
+- Keep the answer natural, fluent, and easy to read.
+- Do not mention internal retrieval or system terms such as "knowledge graph", "knowledge base", "chunk", "reference", "document chunk (DC)", "KG", "DC", or similar wording that exposes the answer-generation process.
+- Do not include a "References" section or inline markers such as [KG] and [DC].
+- If you don't know the answer, just say so.
+- Do not make anything up. Do not include information not provided by the Knowledge Base.
+- Addtional user prompt: {user_prompt}
+
+Response:"""
+
+
 PROMPTS["rag_response_new"]="""# Answer Grader Prompt
 
 **System Prompt**
@@ -517,6 +554,42 @@ When handling content with timestamps:
 - Please respond in the same language as the user's question.
 - Ensure the response maintains continuity with the conversation history.
 - List up to 5 most important reference sources at the end under "References" section. Clearly indicating each source from Document Chunks(DC), and include the file path if available, in the following format: [DC] file_path
+- If you don't know the answer, just say so.
+- Do not include information not provided by the Document Chunks.
+- Addtional user prompt: {user_prompt}
+
+Response:"""
+
+
+PROMPTS["naive_rag_response_single_prompt"] = """---Role---
+
+You are a helpful assistant responding to user query about Document Chunks provided in JSON format below.
+
+---Goal---
+
+Generate a concise, natural response grounded in the provided Document Chunks, considering both the conversation history and the current query. Summarize the relevant information in the provided Document Chunks and incorporate only general knowledge that is necessary to explain that information clearly. Do not include information not supported by the Document Chunks.
+
+When handling content with timestamps:
+1. Each piece of content has a "created_at" timestamp indicating when we acquired this knowledge
+2. When encountering conflicting information, consider both the content and the timestamp
+3. Don't automatically prefer the most recent content - use judgment based on the context
+4. For time-specific queries, prioritize temporal information in the content before considering creation timestamps
+
+---Conversation History---
+{history}
+
+---Document Chunks(DC)---
+{content_data}
+
+---Response Rules---
+
+- Target format and length: {response_type}
+- Use markdown formatting with appropriate section headings
+- Please respond in the same language as the user's question.
+- Ensure the response maintains continuity with the conversation history.
+- Keep the answer natural, fluent, and easy to read.
+- Do not mention internal retrieval or system terms such as "knowledge graph", "knowledge base", "chunk", "reference", "document chunk (DC)", "KG", "DC", or similar wording that exposes the answer-generation process.
+- Do not include a "References" section or inline markers such as [KG] and [DC].
 - If you don't know the answer, just say so.
 - Do not include information not provided by the Document Chunks.
 - Addtional user prompt: {user_prompt}
