@@ -475,6 +475,13 @@ Given the query and conversation history, list both high-level and low-level key
 - The JSON should have two keys:
   - "high_level_keywords" for overarching concepts or themes
   - "low_level_keywords" for specific entities or details
+- High-level keywords should prefer stable semantic concepts that are suitable for knowledge-graph retrieval, such as disease/state, nutrient/topic, intervention, behavior, or evaluation dimension
+- Avoid vague conversational phrases that are weak retrieval anchors, such as generic goals or planning language when a more concrete semantic concept is available
+- Low-level keywords should prefer concrete named items such as foods, nutrients, diseases, symptoms, body indicators, activities, or interventions
+- If the query contains numbers, units, ranges, calories, durations, blood-pressure values, body measurements, or other thresholds, convert them into semantic labels instead of outputting raw numbers
+- Never output standalone numeric values or numeric-plus-unit strings as keywords
+- If a quantity is attached to a noun phrase, keep the noun phrase and drop the quantity
+- Deduplicate near-duplicate keywords and keep the same language as the query
 
 ######################
 ---Examples---
@@ -523,6 +530,36 @@ Output:
 {
   "high_level_keywords": ["Education", "Poverty reduction", "Socioeconomic development"],
   "low_level_keywords": ["School access", "Literacy rates", "Job training", "Income inequality"]
+}
+#############################""",
+    """Example 4:
+
+Query: "今天油24g、盐4.8g、添加糖22g、酒精18g，先戒哪个？"
+################
+Output:
+{
+  "high_level_keywords": ["少盐少油", "控糖限酒", "摄入超标风险"],
+  "low_level_keywords": ["油", "盐", "添加糖", "酒精"]
+}
+#############################""",
+    """Example 5:
+
+Query: "35岁男 170cm/86kg/腰围95，3次血压146/92、144/90、148/94，一天2250千卡减到1750够吗？"
+################
+Output:
+{
+  "high_level_keywords": ["高血压", "超重肥胖", "能量控制", "减重干预"],
+  "low_level_keywords": ["男性", "腰围", "血压", "能量摄入"]
+}
+#############################""",
+    """Example 6:
+
+Query: "我有点胖，现在90kg，想6个月减到75kg，会不会太猛？"
+################
+Output:
+{
+  "high_level_keywords": ["安全减重", "减重速度", "体重管理"],
+  "low_level_keywords": ["减重目标", "目标体重"]
 }
 #############################""",
 ]
