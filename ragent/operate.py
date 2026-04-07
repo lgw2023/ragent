@@ -103,6 +103,87 @@ def _resolve_answer_prompt_mode(
     return resolved
 
 
+def _sanitize_llm_context_payload(
+    payload: Any,
+    *,
+    answer_prompt_mode: str,
+) -> Any:
+    if answer_prompt_mode != "single_prompt":
+        return payload
+    if isinstance(payload, dict):
+        has_chunk_like_fields = any(
+            key in payload
+            for key in (
+                "content",
+                "page_numbers",
+                "page_number_start",
+                "page_number_end",
+                "section_path",
+                "source_ref",
+            )
+        )
+        source_ref = str(payload.get("source_ref") or "").strip()
+        base_name = ""
+        if source_ref:
+            base_name = source_ref.split(" | ", 1)[0].strip()
+        file_path = str(payload.get("file_path") or "").strip()
+        if not base_name and file_path and file_path != "unknown_source":
+            base_name = os.path.basename(file_path)
+
+        page_label = ""
+        page_start = payload.get("page_number_start")
+        page_end = payload.get("page_number_end")
+        if isinstance(page_start, int) and isinstance(page_end, int):
+            page_label = f"p.{page_start}" if page_start == page_end else f"p.{page_start}-{page_end}"
+        else:
+            page_numbers = payload.get("page_numbers")
+            if isinstance(page_numbers, list):
+                ordered_pages = sorted({int(page) for page in page_numbers if isinstance(page, int)})
+                if ordered_pages:
+                    page_label = (
+                        f"p.{ordered_pages[0]}"
+                        if len(ordered_pages) == 1
+                        else f"p.{ordered_pages[0]}-{ordered_pages[-1]}"
+                    )
+        compact_source_ref = ""
+        if has_chunk_like_fields and base_name:
+            compact_source_ref = f"{base_name} | {page_label}" if page_label else base_name
+
+        sanitized: dict[str, Any] = {}
+        if "id" in payload:
+            sanitized["id"] = _sanitize_llm_context_payload(
+                payload.get("id"),
+                answer_prompt_mode=answer_prompt_mode,
+            )
+        if compact_source_ref:
+            sanitized["source_ref"] = compact_source_ref
+        for key, value in payload.items():
+            if key in {
+                "id",
+                "file_path",
+                "page_numbers",
+                "page_number_start",
+                "page_number_end",
+                "section_path",
+                "source_ref",
+            }:
+                continue
+            sanitized[key] = _sanitize_llm_context_payload(
+                value,
+                answer_prompt_mode=answer_prompt_mode,
+            )
+        return sanitized
+    if isinstance(payload, list):
+        return [
+            _sanitize_llm_context_payload(
+                item,
+                answer_prompt_mode=answer_prompt_mode,
+            )
+            for item in payload
+        ]
+    return payload
+
+
 _KEYWORD_EXTRACTION_CACHE_VERSION = "v2"
 _MEASUREMENT_UNITS_PATTERN = (
     r"(?:kg|千克|g|克|斤|千卡|kcal|卡|大卡|cm|厘米|mm|毫米|m|米|ml|毫升|l|升|"
@@ -1870,6 +1951,7 @@ async def graph_query(
         query_param,
         chunks_vdb,
         timing_collector=stage_timings,
+        answer_prompt_mode=answer_prompt_mode,
     )
 
     debug_payload = {
@@ -2274,6 +2356,7 @@ async def _build_query_context(
     query_param: QueryParam,
     chunks_vdb: BaseVectorStorage = None,
     timing_collector: list[dict[str, Any]] | None = None,
+    answer_prompt_mode: str = "single_prompt",
 ):
     logger.info(f"Process {os.getpid()} building query context...")
     stage_timings = timing_collector if timing_collector is not None else []
@@ -2610,9 +2693,21 @@ async def _build_query_context(
         return None
 
     stage_started_at = time.perf_counter()
-    entities_str = json.dumps(entities_context, ensure_ascii=False)
-    relations_str = json.dumps(relations_context, ensure_ascii=False)
-    text_units_str = json.dumps(text_units_context, ensure_ascii=False)
+    llm_entities_context = _sanitize_llm_context_payload(
+        entities_context,
+        answer_prompt_mode=answer_prompt_mode,
+    )
+    llm_relations_context = _sanitize_llm_context_payload(
+        relations_context,
+        answer_prompt_mode=answer_prompt_mode,
+    )
+    llm_text_units_context = _sanitize_llm_context_payload(
+        text_units_context,
+        answer_prompt_mode=answer_prompt_mode,
+    )
+    entities_str = json.dumps(llm_entities_context, ensure_ascii=False)
+    relations_str = json.dumps(llm_relations_context, ensure_ascii=False)
+    text_units_str = json.dumps(llm_text_units_context, ensure_ascii=False)
 
     result = f"""-----Entities(KG)-----
 
@@ -3604,8 +3699,12 @@ async def hybrid_query(
 
     image_file_path_list = retrieval_debug["image_file_path_list"]
     text_units_context = retrieval_debug["text_units_context"]
+    llm_text_units_context = _sanitize_llm_context_payload(
+        text_units_context,
+        answer_prompt_mode=answer_prompt_mode,
+    )
 
-    text_units_str = json.dumps(text_units_context, ensure_ascii=False)
+    text_units_str = json.dumps(llm_text_units_context, ensure_ascii=False)
     context_text = f"""
 ---Document Chunks---
 
@@ -3619,7 +3718,7 @@ async def hybrid_query(
         if return_debug:
             debug_payload = {
                 **retrieval_debug,
-                "final_context_document_chunks": text_units_context,
+                "final_context_document_chunks": llm_text_units_context,
                 "final_context_text": context_text,
                 "final_prompt_text": "",
                 "stage_timings": stage_timings,
@@ -3661,7 +3760,7 @@ async def hybrid_query(
         if return_debug:
             debug_payload = {
                 **retrieval_debug,
-                "final_context_document_chunks": text_units_context,
+                "final_context_document_chunks": llm_text_units_context,
                 "final_context_text": context_text,
                 "final_prompt_text": sys_prompt,
                 "stage_timings": stage_timings,
@@ -3738,7 +3837,7 @@ async def hybrid_query(
     if return_debug:
         debug_payload = {
             **retrieval_debug,
-            "final_context_document_chunks": text_units_context,
+            "final_context_document_chunks": llm_text_units_context,
             "final_context_text": context_text,
             "final_prompt_text": sys_prompt,
             "stage_timings": stage_timings,
@@ -3802,6 +3901,7 @@ async def kg_query_with_keywords(
         text_chunks_db,
         query_param,
         chunks_vdb=chunks_vdb,
+        answer_prompt_mode=answer_prompt_mode,
     )
     if not context:
         return PROMPTS["fail_response"]
