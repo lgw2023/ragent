@@ -112,17 +112,6 @@ _STANDALONE_NUMERIC_KEYWORD_RE = re.compile(
     rf"^[<>~≈约≤≥]?\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?(?:\s*(?:/|~|～|-|—|–|到|至)\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?)*$",
     re.IGNORECASE,
 )
-_TRAILING_MEASURED_KEYWORD_RE = re.compile(
-    rf"^(?P<label>.*?[A-Za-z\u4e00-\u9fff])\s*[:：]?\s*\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})$",
-    re.IGNORECASE,
-)
-_TRAILING_CJK_NUMERIC_KEYWORD_RE = re.compile(
-    r"^(?P<label>.*[\u4e00-\u9fff].*?)\s*[:：]?\s*\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?$"
-)
-_LEADING_CJK_NUMERIC_KEYWORD_RE = re.compile(
-    rf"^\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?\s*(?P<label>[\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9/（）()·_-]*)$",
-    re.IGNORECASE,
-)
 _LOW_SIGNAL_LOW_LEVEL_KEYWORDS = {"补回", "超量", "达标"}
 
 
@@ -357,6 +346,286 @@ def _build_chunk_context_entry(rank: int, chunk: dict[str, Any]) -> dict[str, An
     }
     entry.update(_extract_chunk_citation_fields(chunk))
     return entry
+
+
+_IMAGE_FILE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg")
+_LOW_SIGNAL_SECTION_HINTS = ("食谱示例", "地区", "图片", "附录")
+_NORMATIVE_SECTION_HINTS = ("原则", "建议", "要点", "说明", "规范", "标准", "推荐", "控制", "限制", "范围")
+_NORMATIVE_CONTENT_HINTS = (
+    "建议",
+    "推荐",
+    "应",
+    "宜",
+    "控制",
+    "限制",
+    "减少",
+    "摄入",
+    "能量",
+    "热量",
+    "kcal",
+    "千卡",
+    "每日",
+    "男性",
+    "女性",
+)
+
+
+def _coerce_score(value: Any) -> float:
+    try:
+        if value in (None, "", [], {}, ()):
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _chunk_file_group_key(file_path: str) -> str:
+    normalized = str(file_path or "").strip()
+    if not normalized:
+        return "unknown_source"
+    return os.path.basename(normalized) or normalized
+
+
+def _dedupe_graph_node_seeds(node_datas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged_nodes: dict[str, dict[str, Any]] = {}
+    for node in node_datas or []:
+        if not isinstance(node, dict):
+            continue
+        entity_name = str(node.get("entity_name") or node.get("entity_id") or "").strip()
+        if not entity_name:
+            continue
+        normalized_source_ids = _serialize_source_chunk_ids(
+            node.get("source_chunk_ids"),
+            node.get("source_id"),
+        )
+        if entity_name not in merged_nodes:
+            merged_nodes[entity_name] = {
+                **node,
+                "query_score": _coerce_score(node.get("query_score")),
+            }
+            if normalized_source_ids:
+                merged_nodes[entity_name]["source_chunk_ids"] = normalized_source_ids
+            continue
+
+        existing = merged_nodes[entity_name]
+        existing["query_score"] = max(
+            _coerce_score(existing.get("query_score")),
+            _coerce_score(node.get("query_score")),
+        )
+        existing["rank"] = max(
+            _coerce_score(existing.get("rank")),
+            _coerce_score(node.get("rank")),
+        )
+        merged_source_ids = _serialize_source_chunk_ids(
+            existing.get("source_chunk_ids"),
+            existing.get("source_id"),
+            normalized_source_ids,
+        )
+        if merged_source_ids:
+            existing["source_chunk_ids"] = merged_source_ids
+        for key in ("description", "file_path", "entity_type", "entity_id", "created_at"):
+            if existing.get(key) in (None, "", [], {}):
+                existing[key] = node.get(key)
+
+    return list(merged_nodes.values())
+
+
+def _get_edge_seed_key(edge_data: dict[str, Any]) -> tuple[str, str] | None:
+    if not isinstance(edge_data, dict):
+        return None
+    src_tgt = edge_data.get("src_tgt")
+    if isinstance(src_tgt, (list, tuple)) and len(src_tgt) >= 2:
+        return (str(src_tgt[0]), str(src_tgt[1]))
+    src = edge_data.get("src_id") or edge_data.get("src")
+    tgt = edge_data.get("tgt_id") or edge_data.get("tgt")
+    if src in (None, "") or tgt in (None, ""):
+        return None
+    return (str(src), str(tgt))
+
+
+def _dedupe_graph_edge_seeds(edge_datas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged_edges: dict[tuple[str, str], dict[str, Any]] = {}
+    for edge in edge_datas or []:
+        edge_key = _get_edge_seed_key(edge)
+        if edge_key is None:
+            continue
+        normalized_source_ids = _serialize_source_chunk_ids(
+            edge.get("source_chunk_ids"),
+            edge.get("source_id"),
+        )
+        if edge_key not in merged_edges:
+            merged_edges[edge_key] = {
+                **edge,
+                "src_tgt": edge_key,
+                "src_id": edge_key[0],
+                "tgt_id": edge_key[1],
+                "query_score": _coerce_score(edge.get("query_score")),
+            }
+            if normalized_source_ids:
+                merged_edges[edge_key]["source_chunk_ids"] = normalized_source_ids
+            continue
+
+        existing = merged_edges[edge_key]
+        existing["query_score"] = max(
+            _coerce_score(existing.get("query_score")),
+            _coerce_score(edge.get("query_score")),
+        )
+        existing["rank"] = max(
+            _coerce_score(existing.get("rank")),
+            _coerce_score(edge.get("rank")),
+        )
+        existing["weight"] = max(
+            _coerce_score(existing.get("weight")),
+            _coerce_score(edge.get("weight")),
+        )
+        merged_source_ids = _serialize_source_chunk_ids(
+            existing.get("source_chunk_ids"),
+            existing.get("source_id"),
+            normalized_source_ids,
+        )
+        if merged_source_ids:
+            existing["source_chunk_ids"] = merged_source_ids
+        for key in ("description", "file_path", "created_at"):
+            if existing.get(key) in (None, "", [], {}):
+                existing[key] = edge.get(key)
+
+    return list(merged_edges.values())
+
+
+def _compute_graph_chunk_support_score(chunk: dict[str, Any]) -> float:
+    return (
+        0.6 * _coerce_score(chunk.get("graph_query_score"))
+        + 0.25 * math.log1p(max(int(_coerce_score(chunk.get("graph_matched_seed_count"))), 0))
+        + 0.15 * math.log1p(max(int(_coerce_score(chunk.get("graph_relation_support"))), 0))
+    )
+
+
+def _is_low_signal_chunk_candidate(
+    file_path: str,
+    metadata: dict[str, Any],
+    content: str,
+) -> bool:
+    normalized_file_path = str(file_path or "").lower()
+    if normalized_file_path.endswith(_IMAGE_FILE_SUFFIXES):
+        return True
+
+    section_haystack = " ".join(
+        [
+            str(metadata.get("section_path", "")),
+            str(metadata.get("source_ref", "")),
+        ]
+    )
+    if any(hint in section_haystack for hint in _LOW_SIGNAL_SECTION_HINTS):
+        return True
+
+    content_preview = str(content or "")[:240]
+    return "食谱示例" in content_preview
+
+
+def _is_normative_chunk_candidate(
+    metadata: dict[str, Any],
+    content: str,
+) -> bool:
+    section_haystack = " ".join(
+        [
+            str(metadata.get("section_path", "")),
+            str(metadata.get("source_ref", "")),
+        ]
+    )
+    if any(hint in section_haystack for hint in _NORMATIVE_SECTION_HINTS):
+        return True
+
+    content_preview = str(content or "")[:320]
+    return any(hint in content_preview for hint in _NORMATIVE_CONTENT_HINTS)
+
+
+def _build_candidate_order(rerank_results: list[dict[str, Any]], total_count: int) -> list[int]:
+    ordered_indexes: list[int] = []
+    seen_indexes: set[int] = set()
+
+    for item in rerank_results or []:
+        index = item.get("index")
+        if not isinstance(index, int) or not (0 <= index < total_count):
+            continue
+        if index in seen_indexes:
+            continue
+        seen_indexes.add(index)
+        ordered_indexes.append(index)
+
+    for index in range(total_count):
+        if index not in seen_indexes:
+            ordered_indexes.append(index)
+
+    return ordered_indexes
+
+
+def _select_hybrid_context_entries(
+    rerank_results: list[dict[str, Any]],
+    results_text: list[str],
+    results_file_paths: list[str],
+    results_chunk_metadata: list[dict[str, Any]],
+    query_param: QueryParam,
+) -> tuple[list[int], list[dict[str, Any]]]:
+    if not results_text:
+        return [], []
+
+    chunk_limit = query_param.chunk_top_k or 10
+    final_limit = min(len(results_text), max(1, min(chunk_limit, 10)))
+    ordered_indexes = _build_candidate_order(rerank_results, len(results_text))
+
+    candidate_meta: dict[int, dict[str, Any]] = {}
+    for index in ordered_indexes:
+        file_path = results_file_paths[index]
+        metadata = results_chunk_metadata[index]
+        content = results_text[index]
+        candidate_meta[index] = {
+            "file_key": _chunk_file_group_key(file_path),
+            "low_signal": _is_low_signal_chunk_candidate(file_path, metadata, content),
+            "normative": _is_normative_chunk_candidate(metadata, content),
+        }
+
+    selected_indexes: list[int] = []
+    selected_set: set[int] = set()
+    file_counts: Counter[str] = Counter()
+
+    def _try_select(index: int) -> bool:
+        if index in selected_set:
+            return False
+        file_key = candidate_meta[index]["file_key"]
+        if file_counts[file_key] >= 2:
+            return False
+        selected_indexes.append(index)
+        selected_set.add(index)
+        file_counts[file_key] += 1
+        return True
+
+    selection_passes = (
+        lambda meta: meta["normative"] and not meta["low_signal"] and file_counts[meta["file_key"]] == 0,
+        lambda meta: not meta["low_signal"] and file_counts[meta["file_key"]] == 0,
+        lambda meta: meta["normative"] and not meta["low_signal"],
+        lambda meta: not meta["low_signal"],
+        lambda meta: True,
+    )
+
+    for predicate in selection_passes:
+        for index in ordered_indexes:
+            if len(selected_indexes) >= final_limit:
+                break
+            if predicate(candidate_meta[index]):
+                _try_select(index)
+        if len(selected_indexes) >= final_limit:
+            break
+
+    text_units_context: list[dict[str, Any]] = []
+    for rank, index in enumerate(selected_indexes, 1):
+        chunk_entry = {
+            "content": results_text[index],
+            "file_path": results_file_paths[index],
+        }
+        chunk_entry.update(results_chunk_metadata[index])
+        text_units_context.append(_build_chunk_context_entry(rank, chunk_entry))
+
+    return selected_indexes, text_units_context
 
 
 def _annotate_chunk_with_source_metadata(
@@ -2419,6 +2688,7 @@ async def _get_node_data(
             "entity_name": k["entity_name"],
             "rank": d,
             "created_at": k.get("created_at"),
+            "query_score": _coerce_score(k.get("distance") or k.get("__metrics__")),
         }
         for k, n, d in zip(results, node_datas, node_degrees)
         if n is not None
@@ -2533,14 +2803,37 @@ async def _find_most_related_text_unit_from_entities(
         if v is not None and (v.get("source_chunk_ids") or v.get("source_id"))
     }
 
-    all_text_units_lookup = {}
-    tasks = []
+    all_text_units_lookup: dict[str, dict[str, Any]] = {}
+    tasks: list[str] = []
 
-    for index, (this_text_units, this_edges) in enumerate(zip(text_units, edges)):
+    for index, (this_text_units, this_edges, node_data) in enumerate(
+        zip(text_units, edges, node_datas)
+    ):
+        seed_query_score = _coerce_score(node_data.get("query_score"))
         for c_id in this_text_units:
             if c_id not in all_text_units_lookup:
-                all_text_units_lookup[c_id] = index
-                tasks.append((c_id, index, this_edges))
+                all_text_units_lookup[c_id] = {
+                    "order": index,
+                    "matched_seed_count": 0,
+                    "relation_counts": 0,
+                    "max_query_score": 0.0,
+                }
+                tasks.append(c_id)
+
+            candidate = all_text_units_lookup[c_id]
+            candidate["order"] = min(candidate["order"], index)
+            candidate["matched_seed_count"] += 1
+            candidate["max_query_score"] = max(
+                candidate["max_query_score"],
+                seed_query_score,
+            )
+            if this_edges:
+                candidate["relation_counts"] += sum(
+                    1
+                    for e in this_edges
+                    if e[1] in all_one_hop_text_units_lookup
+                    and c_id in all_one_hop_text_units_lookup[e[1]]
+                )
 
     # Process in batches tasks at a time to avoid overwhelming resources
     batch_size = 5
@@ -2549,24 +2842,12 @@ async def _find_most_related_text_unit_from_entities(
     for i in range(0, len(tasks), batch_size):
         batch_tasks = tasks[i : i + batch_size]
         batch_results = await asyncio.gather(
-            *[text_chunks_db.get_by_id(c_id) for c_id, _, _ in batch_tasks]
+            *[text_chunks_db.get_by_id(c_id) for c_id in batch_tasks]
         )
         results.extend(batch_results)
 
-    for (c_id, index, this_edges), data in zip(tasks, results):
-        all_text_units_lookup[c_id] = {
-            "data": data,
-            "order": index,
-            "relation_counts": 0,
-        }
-
-        if this_edges:
-            for e in this_edges:
-                if (
-                    e[1] in all_one_hop_text_units_lookup
-                    and c_id in all_one_hop_text_units_lookup[e[1]]
-                ):
-                    all_text_units_lookup[c_id]["relation_counts"] += 1
+    for c_id, data in zip(tasks, results):
+        all_text_units_lookup[c_id]["data"] = data
 
     # Filter out None values and ensure data has content
     all_text_units = [
@@ -2581,7 +2862,13 @@ async def _find_most_related_text_unit_from_entities(
 
     # Sort by relation counts and order, but don't truncate
     all_text_units = sorted(
-        all_text_units, key=lambda x: (x["order"], -x["relation_counts"])
+        all_text_units,
+        key=lambda x: (
+            -x["max_query_score"],
+            -x["matched_seed_count"],
+            -x["relation_counts"],
+            x["order"],
+        ),
     )
 
     logger.debug(f"Found {len(all_text_units)} entity-related chunks")
@@ -2590,7 +2877,11 @@ async def _find_most_related_text_unit_from_entities(
     result_chunks = []
     for t in all_text_units:
         chunk_data = t["data"].copy()
+        chunk_data["chunk_id"] = t["id"]
         chunk_data["source_type"] = "entity"
+        chunk_data["graph_query_score"] = t["max_query_score"]
+        chunk_data["graph_matched_seed_count"] = t["matched_seed_count"]
+        chunk_data["graph_relation_support"] = t["relation_counts"]
         result_chunks.append(chunk_data)
 
     return result_chunks
@@ -2606,6 +2897,9 @@ async def _find_most_related_edges_from_entities(
 
     all_edges = []
     seen = set()
+    node_query_scores = {
+        dp["entity_name"]: _coerce_score(dp.get("query_score")) for dp in node_datas
+    }
 
     for node_name in node_names:
         this_edges = batch_edges_dict.get(node_name, [])
@@ -2641,6 +2935,10 @@ async def _find_most_related_edges_from_entities(
             combined = {
                 "src_tgt": pair,
                 "rank": edge_degrees_dict.get(pair, 0),
+                "query_score": max(
+                    node_query_scores.get(pair[0], 0.0),
+                    node_query_scores.get(pair[1], 0.0),
+                ),
                 **edge_props,
             }
             all_edges_data.append(combined)
@@ -2699,6 +2997,7 @@ async def _get_edge_data(
                 "tgt_id": k["tgt_id"],
                 "rank": edge_degrees_dict.get(pair, k.get("rank", 0)),
                 "created_at": k.get("created_at", None),
+                "query_score": _coerce_score(k.get("distance") or k.get("__metrics__")),
                 **edge_props,
             }
             edge_datas.append(combined)
@@ -2772,6 +3071,8 @@ async def _find_most_related_entities_from_relationships(
 ):
     entity_names = []
     seen = set()
+    entity_query_scores: dict[str, float] = defaultdict(float)
+    entity_relation_support: Counter[str] = Counter()
 
     for e in edge_datas:
         if e["src_id"] not in seen:
@@ -2780,6 +3081,17 @@ async def _find_most_related_entities_from_relationships(
         if e["tgt_id"] not in seen:
             entity_names.append(e["tgt_id"])
             seen.add(e["tgt_id"])
+        edge_query_score = _coerce_score(e.get("query_score"))
+        entity_query_scores[e["src_id"]] = max(
+            entity_query_scores[e["src_id"]],
+            edge_query_score,
+        )
+        entity_query_scores[e["tgt_id"]] = max(
+            entity_query_scores[e["tgt_id"]],
+            edge_query_score,
+        )
+        entity_relation_support[e["src_id"]] += 1
+        entity_relation_support[e["tgt_id"]] += 1
 
     # Batch approach: Retrieve nodes and their degrees concurrently with one query each.
     nodes_dict, degrees_dict = await asyncio.gather(
@@ -2796,7 +3108,13 @@ async def _find_most_related_entities_from_relationships(
             logger.warning(f"Node '{entity_name}' not found in batch retrieval.")
             continue
         # Combine the node data with the entity name and computed degree (as rank)
-        combined = {**node, "entity_name": entity_name, "rank": degree}
+        combined = {
+            **node,
+            "entity_name": entity_name,
+            "rank": degree,
+            "query_score": entity_query_scores.get(entity_name, 0.0),
+            "relation_support": entity_relation_support.get(entity_name, 0),
+        }
         node_datas.append(combined)
 
     return node_datas
@@ -2820,31 +3138,50 @@ async def _find_related_text_unit_from_relationships(
         for dp in edge_datas
         if (dp.get("source_chunk_ids") or dp.get("source_id")) is not None
     ]
-    all_text_units_lookup = {}
-
-    async def fetch_chunk_data(c_id, index):
-        if c_id not in all_text_units_lookup:
-            chunk_data = await text_chunks_db.get_by_id(c_id)
-            # Only store valid data
-            if chunk_data is not None and "content" in chunk_data:
-                all_text_units_lookup[c_id] = {
-                    "data": chunk_data,
-                    "order": index,
-                }
-
-    tasks = []
-    for index, unit_list in enumerate(text_units):
+    all_text_units_lookup: dict[str, dict[str, Any]] = {}
+    tasks: list[str] = []
+    for index, (unit_list, edge_data) in enumerate(zip(text_units, edge_datas)):
+        seed_query_score = _coerce_score(edge_data.get("query_score"))
         for c_id in unit_list:
-            tasks.append(fetch_chunk_data(c_id, index))
+            if c_id not in all_text_units_lookup:
+                all_text_units_lookup[c_id] = {
+                    "order": index,
+                    "matched_seed_count": 0,
+                    "relation_counts": 0,
+                    "max_query_score": 0.0,
+                }
+                tasks.append(c_id)
+            candidate = all_text_units_lookup[c_id]
+            candidate["order"] = min(candidate["order"], index)
+            candidate["matched_seed_count"] += 1
+            candidate["relation_counts"] += 1
+            candidate["max_query_score"] = max(
+                candidate["max_query_score"],
+                seed_query_score,
+            )
 
-    await asyncio.gather(*tasks)
+    if tasks:
+        fetched_chunks = await asyncio.gather(
+            *[text_chunks_db.get_by_id(c_id) for c_id in tasks]
+        )
+        for c_id, chunk_data in zip(tasks, fetched_chunks):
+            if chunk_data is not None and "content" in chunk_data:
+                all_text_units_lookup[c_id]["data"] = chunk_data
 
     if not all_text_units_lookup:
         logger.warning("No valid text chunks found")
         return []
 
     all_text_units = [{"id": k, **v} for k, v in all_text_units_lookup.items()]
-    all_text_units = sorted(all_text_units, key=lambda x: x["order"])
+    all_text_units = sorted(
+        all_text_units,
+        key=lambda x: (
+            -x["max_query_score"],
+            -x["matched_seed_count"],
+            -x["relation_counts"],
+            x["order"],
+        ),
+    )
 
     # Ensure all text chunks have content
     valid_text_units = [
@@ -2861,7 +3198,11 @@ async def _find_related_text_unit_from_relationships(
     result_chunks = []
     for t in valid_text_units:
         chunk_data = t["data"].copy()
+        chunk_data["chunk_id"] = t["id"]
         chunk_data["source_type"] = "relationship"
+        chunk_data["graph_query_score"] = t["max_query_score"]
+        chunk_data["graph_matched_seed_count"] = t["matched_seed_count"]
+        chunk_data["graph_relation_support"] = t["relation_counts"]
         result_chunks.append(chunk_data)
 
     return result_chunks
@@ -2906,30 +3247,6 @@ def weightd_merge(
 
     return merged
 
-def cosine_similarity(query_embedding, chunk_embedding_list) -> list:
-    query_vector = _coerce_embedding_array(query_embedding)
-    if query_vector is None:
-        logger.warning(
-            "Skipping graph chunk rescoring because the query embedding is empty or invalid."
-        )
-        return [0.0] * len(chunk_embedding_list)
-
-    similarity_list = []
-    for ce in chunk_embedding_list:
-        np_ce = _coerce_embedding_array(ce)
-        if np_ce is None or np_ce.shape != query_vector.shape:
-            similarity_list.append(0.0)
-            continue
-        dot_product = np.dot(np_ce, query_vector)
-        norm_a = np.linalg.norm(np_ce)
-        norm_b = np.linalg.norm(query_vector)
-        if norm_a == 0 or norm_b == 0:
-            similarity_list.append(0.0)
-        else:
-            similarity_list.append(float(dot_product / (norm_a * norm_b)))
-    return similarity_list
-
-
 def _resolve_hybrid_chunk_candidate(
     chunk_id: str,
     vector_text_map: dict[str, str],
@@ -2971,6 +3288,7 @@ async def _build_hybrid_retrieval_debug_data(
     knowledge_graph_inst: BaseGraphStorage,
     relationships_vdb: BaseVectorStorage,
     entities_vdb: BaseVectorStorage,
+    text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
     global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
@@ -3006,7 +3324,12 @@ async def _build_hybrid_retrieval_debug_data(
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
 
     stage_started_at = time.perf_counter()
-    ll_entities_context, ll_relations_context, ll_node_datas, _ = await _get_node_data(
+    (
+        ll_entities_context,
+        ll_relations_context,
+        ll_node_datas,
+        ll_use_relations,
+    ) = await _get_node_data(
         ll_keywords_str,
         knowledge_graph_inst,
         entities_vdb,
@@ -3019,7 +3342,12 @@ async def _build_hybrid_retrieval_debug_data(
         stage_started_at,
     )
     stage_started_at = time.perf_counter()
-    hl_entities_context, hl_relations_context, _, hl_use_entities = await _get_edge_data(
+    (
+        hl_entities_context,
+        hl_relations_context,
+        hl_edge_datas,
+        hl_use_entities,
+    ) = await _get_edge_data(
         hl_keywords_str,
         knowledge_graph_inst,
         relationships_vdb,
@@ -3039,73 +3367,66 @@ async def _build_hybrid_retrieval_debug_data(
         hl_relations_context, ll_relations_context
     )
 
-    chunk_ids = []
-    chunk_texts = []
-    chunk_embeddings = []
-    chunk_file_paths = []
-    chunk_metadata_list = []
-    seen_chunk_ids = set()
-
-    for item in ll_node_datas:
-        if item.get("entity_type") != "chunk_text":
-            continue
-        chunk_id = item.get("entity_id")
-        if chunk_id in seen_chunk_ids:
-            continue
-        seen_chunk_ids.add(chunk_id)
-        chunk_ids.append(chunk_id)
-        chunk_texts.append(item.get("description", ""))
-        chunk_embeddings.append(item.get("embeddings"))
-        chunk_file_paths.append(item.get("file_path", "unknown_source"))
-        chunk_metadata_list.append(_extract_chunk_citation_fields(item))
-
-    for item in hl_use_entities:
-        if item.get("entity_type") != "chunk_text":
-            continue
-        chunk_id = item.get("entity_id")
-        if chunk_id in seen_chunk_ids:
-            continue
-        seen_chunk_ids.add(chunk_id)
-        chunk_ids.append(chunk_id)
-        chunk_texts.append(item.get("description", ""))
-        chunk_embeddings.append(item.get("embeddings"))
-        chunk_file_paths.append(item.get("file_path", "unknown_source"))
-        chunk_metadata_list.append(_extract_chunk_citation_fields(item))
-
     graph_weights = {}
     graph_text_map = {}
     graph_file_path_map = {}
     graph_metadata_map = {}
-    valid_chunk_ids = []
-    valid_chunk_embeddings = []
-    skipped_invalid_graph_embeddings = 0
-
-    for chunk_id, text, embedding, file_path, chunk_metadata in zip(
-        chunk_ids, chunk_texts, chunk_embeddings, chunk_file_paths, chunk_metadata_list
-    ):
-        graph_text_map[chunk_id] = text
-        graph_file_path_map[chunk_id] = file_path
-        graph_metadata_map[chunk_id] = chunk_metadata
-        embedding_array = _coerce_embedding_array(embedding)
-        if embedding_array is None:
-            skipped_invalid_graph_embeddings += 1
-            continue
-        valid_chunk_ids.append(chunk_id)
-        valid_chunk_embeddings.append(embedding_array)
 
     stage_started_at = time.perf_counter()
-    if skipped_invalid_graph_embeddings:
-        logger.warning(
-            "Skipping %s graph chunk candidates with empty or invalid embeddings during hybrid rescoring.",
-            skipped_invalid_graph_embeddings,
+    graph_node_seeds = _dedupe_graph_node_seeds([*ll_node_datas, *hl_use_entities])
+    graph_edge_seeds = _dedupe_graph_edge_seeds([*ll_use_relations, *hl_edge_datas])
+
+    graph_chunk_candidates: list[dict[str, Any]] = []
+    text_chunk_tasks = []
+    if graph_node_seeds:
+        text_chunk_tasks.append(
+            _find_most_related_text_unit_from_entities(
+                graph_node_seeds,
+                query_param,
+                text_chunks_db,
+                knowledge_graph_inst,
+            )
         )
-    if valid_chunk_embeddings:
-        query_embedding = await openai_embed([query])
-        similarity_scores = cosine_similarity(
-            query_embedding[0], valid_chunk_embeddings
+    if graph_edge_seeds:
+        text_chunk_tasks.append(
+            _find_related_text_unit_from_relationships(
+                graph_edge_seeds,
+                query_param,
+                text_chunks_db,
+            )
         )
-        for chunk_id, score in zip(valid_chunk_ids, similarity_scores):
-            graph_weights[chunk_id] = score
+    if text_chunk_tasks:
+        text_chunk_results = await asyncio.gather(*text_chunk_tasks)
+        for chunks in text_chunk_results:
+            if chunks:
+                graph_chunk_candidates.extend(chunks)
+
+    for chunk in graph_chunk_candidates:
+        chunk_id = str(chunk.get("chunk_id") or "").strip()
+        if not chunk_id:
+            continue
+        graph_text_map[chunk_id] = chunk.get("content", "")
+        graph_file_path_map[chunk_id] = chunk.get("file_path", "unknown_source")
+        graph_weights[chunk_id] = graph_weights.get(chunk_id, 0.0) + _compute_graph_chunk_support_score(
+            chunk
+        )
+
+        metadata = graph_metadata_map.setdefault(chunk_id, {})
+        for key, value in _extract_chunk_citation_fields(chunk).items():
+            if value not in (None, "", [], {}):
+                metadata[key] = value
+        metadata["graph_query_score"] = max(
+            _coerce_score(metadata.get("graph_query_score")),
+            _coerce_score(chunk.get("graph_query_score")),
+        )
+        metadata["graph_matched_seed_count"] = (
+            int(_coerce_score(metadata.get("graph_matched_seed_count")))
+            + int(_coerce_score(chunk.get("graph_matched_seed_count")))
+        )
+        metadata["graph_relation_support"] = (
+            int(_coerce_score(metadata.get("graph_relation_support")))
+            + int(_coerce_score(chunk.get("graph_relation_support")))
+        )
     _record_stage_timing(
         stage_timings,
         "graph_chunk_rescoring",
@@ -3164,12 +3485,14 @@ async def _build_hybrid_retrieval_debug_data(
 
     rerank_results = []
     stage_started_at = time.perf_counter()
-    if results_text:
+    if results_text and query_param.enable_rerank:
         rerank_results = await rerank_from_env(
             query=query,
             documents=results_text,
-            top_k=10,
+            top_k=len(results_text),
         )
+    elif results_text:
+        rerank_results = [{"index": index} for index in range(len(results_text))]
     _record_stage_timing(
         stage_timings,
         "rerank",
@@ -3177,19 +3500,16 @@ async def _build_hybrid_retrieval_debug_data(
         stage_started_at,
     )
 
+    selected_candidate_indexes: list[int] = []
     text_units_context = []
     stage_started_at = time.perf_counter()
-    top_k_l = min(len(rerank_results), 10)
-    for i in range(top_k_l):
-        rerank_index = rerank_results[i]["index"]
-        if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
-            continue
-        chunk_entry = {
-            "content": results_text[rerank_index],
-            "file_path": results_file_paths[rerank_index],
-        }
-        chunk_entry.update(results_chunk_metadata[rerank_index])
-        text_units_context.append(_build_chunk_context_entry(i + 1, chunk_entry))
+    selected_candidate_indexes, text_units_context = _select_hybrid_context_entries(
+        rerank_results=rerank_results,
+        results_text=results_text,
+        results_file_paths=results_file_paths,
+        results_chunk_metadata=results_chunk_metadata,
+        query_param=query_param,
+    )
     _record_stage_timing(
         stage_timings,
         "final_context_selection",
@@ -3223,6 +3543,7 @@ async def _build_hybrid_retrieval_debug_data(
         "graph_metadata_map": graph_metadata_map,
         "merged_candidates": merged_candidates,
         "rerank_results": rerank_results,
+        "selected_candidate_indexes": selected_candidate_indexes,
         "results_text": results_text,
         "results_file_paths": results_file_paths,
         "results_chunk_ids": results_chunk_ids,
@@ -3240,6 +3561,7 @@ async def hybrid_query(
     knowledge_graph_inst: BaseGraphStorage,
     relationships_vdb: BaseVectorStorage,
     entities_vdb: BaseVectorStorage,
+    text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
     global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
@@ -3273,6 +3595,7 @@ async def hybrid_query(
         knowledge_graph_inst=knowledge_graph_inst,
         relationships_vdb=relationships_vdb,
         entities_vdb=entities_vdb,
+        text_chunks_db=text_chunks_db,
         query_param=query_param,
         global_config=global_config,
         hashing_kv=hashing_kv,
@@ -3280,24 +3603,7 @@ async def hybrid_query(
     stage_timings.extend(retrieval_debug.get("stage_timings", []))
 
     image_file_path_list = retrieval_debug["image_file_path_list"]
-    results_text = retrieval_debug["results_text"]
-    results_file_paths = retrieval_debug["results_file_paths"]
-    results_chunk_metadata = retrieval_debug["results_chunk_metadata"]
-    result_chunk = retrieval_debug["rerank_results"]
-
-    top_k_l = min(len(result_chunk), 10)
-    text_units_context = []
-
-    for i in range(top_k_l):
-        rerank_index = result_chunk[i]["index"]
-        if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
-            continue
-        chunk_entry = {
-            "content": results_text[rerank_index],
-            "file_path": results_file_paths[rerank_index],
-        }
-        chunk_entry.update(results_chunk_metadata[rerank_index])
-        text_units_context.append(_build_chunk_context_entry(i + 1, chunk_entry))
+    text_units_context = retrieval_debug["text_units_context"]
 
     text_units_str = json.dumps(text_units_context, ensure_ascii=False)
     context_text = f"""

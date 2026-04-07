@@ -213,7 +213,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
         client = await self._get_client()
         results = client.query(
             query=embedding,
-            top_k=20,
+            top_k=top_k,
             better_than_threshold=self.cosine_better_than_threshold,
         )
         results = [
