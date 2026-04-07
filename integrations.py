@@ -2336,14 +2336,29 @@ def _collect_final_context_chunks(
     results_chunk_ids: list[str],
     results_source_labels: list[str],
     results_chunk_metadata: list[dict[str, Any]] | None = None,
+    selected_indexes: list[int] | None = None,
     limit: int | None = None,
 ):
     final_chunks = []
-    top_k = len(rerank_results) if limit is None else min(len(rerank_results), limit)
-    for index in range(top_k):
-        rerank_index = rerank_results[index].get("index")
-        if not isinstance(rerank_index, int) or not (0 <= rerank_index < len(results_text)):
-            continue
+    if selected_indexes is not None:
+        ordered_indexes = [
+            index
+            for index in selected_indexes
+            if isinstance(index, int) and 0 <= index < len(results_text)
+        ]
+    else:
+        top_k = len(rerank_results) if limit is None else min(len(rerank_results), limit)
+        ordered_indexes = []
+        for index in range(top_k):
+            rerank_index = rerank_results[index].get("index")
+            if not isinstance(rerank_index, int) or not (
+                0 <= rerank_index < len(results_text)
+            ):
+                continue
+            ordered_indexes.append(rerank_index)
+    if limit is not None:
+        ordered_indexes = ordered_indexes[:limit]
+    for rerank_index in ordered_indexes:
         final_chunks.append(
             {
                 "rank": len(final_chunks) + 1,
@@ -2469,6 +2484,7 @@ def _build_one_hop_trace(
             debug_payload["results_chunk_ids"],
             debug_payload["results_source_labels"],
             debug_payload.get("results_chunk_metadata"),
+            selected_indexes=debug_payload.get("selected_candidate_indexes"),
             limit=len(debug_payload["final_context_document_chunks"]),
         )
         trace["final_context_document_chunks"] = debug_payload["final_context_document_chunks"]

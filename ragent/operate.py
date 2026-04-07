@@ -189,6 +189,24 @@ _MEASUREMENT_UNITS_PATTERN = (
     r"(?:kg|千克|g|克|斤|千卡|kcal|卡|大卡|cm|厘米|mm|毫米|m|米|ml|毫升|l|升|"
     r"mg|毫克|ug|微克|μg|mmhg|毫米汞柱|分钟|min|小时|h|天|周|月|个月|年|岁|次|%|％)"
 )
+_RETRIEVAL_QUERY_SPLIT_RE = re.compile(r"[,，;；、\n]+")
+_RETRIEVAL_VARIANT_TRANSLATION = str.maketrans(
+    {
+        "（": "(",
+        "）": ")",
+        "【": "[",
+        "】": "]",
+        "：": ":",
+        "～": "~",
+        "－": "-",
+        "—": "-",
+        "–": "-",
+        "　": " ",
+    }
+)
+_DIVERSIFIED_RETRIEVAL_RRF_K = 60
+_DIVERSIFIED_RETRIEVAL_MAX_TERMS = 8
+_DIVERSIFIED_RETRIEVAL_FULL_QUERY_WEIGHT = 0.75
 _STANDALONE_NUMERIC_KEYWORD_RE = re.compile(
     rf"^[<>~≈约≤≥]?\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?(?:\s*(?:/|~|～|-|—|–|到|至)\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?)*$",
     re.IGNORECASE,
@@ -201,6 +219,180 @@ def _clean_keyword_text(keyword: Any) -> str:
     cleaned = cleaned.replace("，", ",")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip(" ,;；、。.()（）[]【】")
+
+
+def _normalize_retrieval_query_text(value: Any) -> str:
+    normalized = clean_str(str(value or ""))
+    normalized = normalized.translate(_RETRIEVAL_VARIANT_TRANSLATION)
+    normalized = normalized.replace("，", ",")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip(" ,;；、。")
+
+
+def _build_diversified_retrieval_queries(query: Any) -> list[str]:
+    primary_query = _normalize_retrieval_query_text(query)
+    if not primary_query:
+        return []
+
+    diversified_queries = [primary_query]
+    split_queries = [
+        _normalize_retrieval_query_text(part)
+        for part in _RETRIEVAL_QUERY_SPLIT_RE.split(primary_query)
+    ]
+    diversified_queries.extend(part for part in split_queries if part)
+
+    deduped_queries: list[str] = []
+    seen: set[str] = set()
+    for item in diversified_queries:
+        normalized = item.casefold()
+        if not item or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped_queries.append(item)
+        if len(deduped_queries) >= _DIVERSIFIED_RETRIEVAL_MAX_TERMS:
+            break
+    return deduped_queries
+
+
+def _is_atomic_retrieval_variant(variant: Any) -> bool:
+    normalized = _normalize_retrieval_query_text(variant)
+    if not normalized:
+        return False
+    return not bool(_RETRIEVAL_QUERY_SPLIT_RE.search(normalized))
+
+
+def _get_vector_result_identity(result: dict[str, Any]) -> tuple[str, ...]:
+    entity_name = str(result.get("entity_name") or "").strip()
+    if entity_name:
+        return ("entity", entity_name)
+
+    src_id = str(result.get("src_id") or "").strip()
+    tgt_id = str(result.get("tgt_id") or "").strip()
+    if src_id and tgt_id:
+        return ("relationship", src_id, tgt_id)
+
+    record_id = str(result.get("id") or result.get("__id__") or "").strip()
+    if record_id:
+        return ("record", record_id)
+
+    return ("fallback", json.dumps(result, sort_keys=True, ensure_ascii=False))
+
+
+def _merge_diversified_vector_query_results(
+    query_variants: list[str],
+    result_sets: list[list[dict[str, Any]]],
+ ) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+
+    for variant_index, (variant, results) in enumerate(zip(query_variants, result_sets)):
+        weight = (
+            1.0
+            if len(query_variants) == 1 or variant_index > 0
+            else _DIVERSIFIED_RETRIEVAL_FULL_QUERY_WEIGHT
+        )
+        for rank, result in enumerate(results):
+            identity = _get_vector_result_identity(result)
+            distance = _coerce_score(result.get("distance") or result.get("__metrics__"))
+            entry = merged.setdefault(
+                identity,
+                {
+                    "identity": identity,
+                    "best_result": result,
+                    "best_distance": distance,
+                    "rrf_score": 0.0,
+                    "matched_variants": set(),
+                },
+            )
+            entry["rrf_score"] += weight / (_DIVERSIFIED_RETRIEVAL_RRF_K + rank + 1)
+            entry["matched_variants"].add(variant.casefold())
+            if distance > entry["best_distance"]:
+                entry["best_distance"] = distance
+                entry["best_result"] = result
+
+    merged_results: list[dict[str, Any]] = []
+    for entry in merged.values():
+        merged_result = dict(entry["best_result"])
+        merged_result["distance"] = entry["best_distance"]
+        merged_result["query_rrf_score"] = entry["rrf_score"]
+        merged_result["query_variant_hit_count"] = len(entry["matched_variants"])
+        merged_result["matched_query_variants"] = sorted(entry["matched_variants"])
+        merged_result["_vector_result_identity"] = entry["identity"]
+        merged_results.append(merged_result)
+
+    merged_results.sort(
+        key=lambda item: (
+            -_coerce_score(item.get("query_rrf_score")),
+            -_coerce_score(item.get("distance")),
+            -_coerce_score(item.get("query_variant_hit_count")),
+        )
+    )
+    return merged_results
+
+
+def _select_diversified_vector_results(
+    merged_results: list[dict[str, Any]],
+    query_variants: list[str],
+    top_k: int,
+) -> list[dict[str, Any]]:
+    if len(query_variants) <= 1:
+        selected_results = merged_results[:top_k]
+    else:
+        selected_results: list[dict[str, Any]] = []
+        selected_identities: set[tuple[str, ...]] = set()
+
+        for variant in [item.casefold() for item in query_variants[1:]]:
+            for result in merged_results:
+                matched_variants = {
+                    str(item).casefold()
+                    for item in result.get("matched_query_variants", [])
+                }
+                identity = result.get("_vector_result_identity")
+                if variant not in matched_variants or identity in selected_identities:
+                    continue
+                selected_results.append(result)
+                if identity is not None:
+                    selected_identities.add(identity)
+                break
+
+        for result in merged_results:
+            if len(selected_results) >= top_k:
+                break
+            identity = result.get("_vector_result_identity")
+            if identity in selected_identities:
+                continue
+            selected_results.append(result)
+            if identity is not None:
+                selected_identities.add(identity)
+
+    for result in selected_results:
+        result.pop("_vector_result_identity", None)
+    return selected_results[:top_k]
+
+
+async def _query_vector_storage_diversified(
+    query: Any,
+    vector_storage: BaseVectorStorage,
+    top_k: int,
+    ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    query_variants = _build_diversified_retrieval_queries(query)
+    if not query_variants:
+        return []
+    if len(query_variants) == 1:
+        return await vector_storage.query(query_variants[0], top_k=top_k, ids=ids)
+
+    per_query_top_k = min(
+        max(top_k * 3, len(query_variants) * 4, 6),
+        24,
+    )
+    result_sets = await asyncio.gather(
+        *[
+            vector_storage.query(variant, top_k=per_query_top_k, ids=ids)
+            for variant in query_variants
+        ]
+    )
+    merged_results = _merge_diversified_vector_query_results(query_variants, result_sets)
+    return _select_diversified_vector_results(merged_results, query_variants, top_k)
 
 
 def _dedupe_keywords(keywords: list[str]) -> list[str]:
@@ -449,18 +641,52 @@ _NORMATIVE_CONTENT_HINTS = (
     "男性",
     "女性",
 )
+_QUANTITATIVE_REFERENCE_HINTS = (
+    "kcal",
+    "千卡",
+    "热量",
+    "能量",
+    "MET",
+    "分钟",
+    "min",
+    "km/h",
+    "mmhg",
+    "%",
+    "％",
+)
+_QUERY_VARIANT_MATCH_STRIP_RE = re.compile(
+    r"[\s,;；、。:：()（）\[\]【】<>《》\"'“”‘’/\\|_~～+=*\-]+"
+)
+_QUERY_VARIANT_METADATA_SUPPORT_FLOOR = 0.3
+_QUERY_VARIANT_WEAK_SUPPORT_THRESHOLD = 0.2
+_QUERY_VARIANT_STRONG_SUPPORT_THRESHOLD = 0.45
 
 
 def _coerce_score(value: Any) -> float:
     try:
-        if value in (None, "", [], {}, ()):
+        if value is None:
             return 0.0
+        if isinstance(value, str):
+            if not value.strip():
+                return 0.0
+            return float(value)
+        if isinstance(value, np.ndarray):
+            if value.size != 1:
+                return 0.0
+            return float(value.reshape(-1)[0])
+        if isinstance(value, (list, tuple, set, dict)):
+            if not value:
+                return 0.0
         return float(value)
     except (TypeError, ValueError):
         return 0.0
 
 
-def _chunk_file_group_key(file_path: str) -> str:
+def _chunk_file_group_key(file_path: str, metadata: dict[str, Any] | None = None) -> str:
+    source_ref = str((metadata or {}).get("source_ref") or "").strip()
+    if source_ref:
+        return source_ref
+
     normalized = str(file_path or "").strip()
     if not normalized:
         return "unknown_source"
@@ -581,6 +807,114 @@ def _compute_graph_chunk_support_score(chunk: dict[str, Any]) -> float:
     )
 
 
+def _is_quantitative_reference_chunk(
+    metadata: dict[str, Any],
+    content: str,
+) -> bool:
+    haystack = " ".join(
+        [
+            str(metadata.get("section_path", "")),
+            str(metadata.get("source_ref", "")),
+            str(content or "")[:800],
+        ]
+    )
+    numeric_count = len(re.findall(r"\d+(?:\.\d+)?", haystack))
+    if numeric_count < 4:
+        return False
+    return any(hint in haystack for hint in _QUANTITATIVE_REFERENCE_HINTS)
+
+
+def _normalize_query_variant_match_text(value: Any) -> str:
+    normalized = _normalize_retrieval_query_text(value)
+    normalized = _QUERY_VARIANT_MATCH_STRIP_RE.sub("", normalized)
+    return normalized.casefold()
+
+
+def _build_character_ngrams(text: str, n: int) -> set[str]:
+    if not text or n <= 0:
+        return set()
+    if len(text) <= n:
+        return {text}
+    return {text[index : index + n] for index in range(len(text) - n + 1)}
+
+
+def _compute_ngram_overlap_score(query_text: str, haystack_text: str, n: int) -> float:
+    query_ngrams = _build_character_ngrams(query_text, n)
+    if not query_ngrams:
+        return 0.0
+    haystack_ngrams = _build_character_ngrams(haystack_text, n)
+    if not haystack_ngrams:
+        return 0.0
+    return len(query_ngrams & haystack_ngrams) / len(query_ngrams)
+
+
+def _compute_query_variant_content_evidence(
+    variant: str,
+    metadata: dict[str, Any],
+    content: str,
+) -> float:
+    normalized_variant = _normalize_query_variant_match_text(variant)
+    if not normalized_variant:
+        return 0.0
+
+    haystack = " ".join(
+        [
+            str(metadata.get("section_path", "")),
+            str(metadata.get("source_ref", "")),
+            str(content or "")[:1200],
+        ]
+    )
+    normalized_haystack = _normalize_query_variant_match_text(haystack)
+    if not normalized_haystack:
+        return 0.0
+    if normalized_variant in normalized_haystack:
+        return 1.0
+
+    unigram_overlap = _compute_ngram_overlap_score(
+        normalized_variant,
+        normalized_haystack,
+        1,
+    )
+    bigram_overlap = _compute_ngram_overlap_score(
+        normalized_variant,
+        normalized_haystack,
+        2,
+    )
+    trigram_overlap = _compute_ngram_overlap_score(
+        normalized_variant,
+        normalized_haystack,
+        3,
+    )
+    if len(normalized_variant) < 3:
+        return min(1.0, unigram_overlap * 0.55 + bigram_overlap * 0.45)
+    return min(
+        1.0,
+        unigram_overlap * 0.35 + bigram_overlap * 0.4 + trigram_overlap * 0.25,
+    )
+
+
+def _compute_query_variant_support_score(
+    variant: str,
+    metadata: dict[str, Any],
+    content: str,
+) -> float:
+    content_evidence = _compute_query_variant_content_evidence(
+        variant,
+        metadata,
+        content,
+    )
+    metadata_variants = {
+        str(item).casefold()
+        for item in metadata.get("matched_query_variants", [])
+        if _is_atomic_retrieval_variant(item)
+    }
+    if variant.casefold() not in metadata_variants:
+        return content_evidence
+    if content_evidence <= 0.0:
+        return _QUERY_VARIANT_METADATA_SUPPORT_FLOOR
+    return max(content_evidence, min(1.0, content_evidence * 0.7 + 0.3))
+
+
 def _is_low_signal_chunk_candidate(
     file_path: str,
     metadata: dict[str, Any],
@@ -597,6 +931,8 @@ def _is_low_signal_chunk_candidate(
         ]
     )
     if any(hint in section_haystack for hint in _LOW_SIGNAL_SECTION_HINTS):
+        if _is_quantitative_reference_chunk(metadata, content):
+            return False
         return True
 
     content_preview = str(content or "")[:240]
@@ -607,6 +943,9 @@ def _is_normative_chunk_candidate(
     metadata: dict[str, Any],
     content: str,
 ) -> bool:
+    if _is_quantitative_reference_chunk(metadata, content):
+        return True
+
     section_haystack = " ".join(
         [
             str(metadata.get("section_path", "")),
@@ -646,24 +985,82 @@ def _select_hybrid_context_entries(
     results_file_paths: list[str],
     results_chunk_metadata: list[dict[str, Any]],
     query_param: QueryParam,
+    query_variants: list[str] | None = None,
 ) -> tuple[list[int], list[dict[str, Any]]]:
     if not results_text:
         return [], []
 
     chunk_limit = query_param.chunk_top_k or 10
     final_limit = min(len(results_text), max(1, min(chunk_limit, 10)))
-    ordered_indexes = _build_candidate_order(rerank_results, len(results_text))
+    retrieval_indexes = list(range(len(results_text)))
+    rerank_indexes = _build_candidate_order(rerank_results, len(results_text))
 
     candidate_meta: dict[int, dict[str, Any]] = {}
-    for index in ordered_indexes:
+    for index in retrieval_indexes:
         file_path = results_file_paths[index]
         metadata = results_chunk_metadata[index]
         content = results_text[index]
         candidate_meta[index] = {
-            "file_key": _chunk_file_group_key(file_path),
+            "file_key": _chunk_file_group_key(file_path, metadata),
             "low_signal": _is_low_signal_chunk_candidate(file_path, metadata, content),
             "normative": _is_normative_chunk_candidate(metadata, content),
+            "quantitative": _is_quantitative_reference_chunk(metadata, content),
+            "matched_query_variants": {
+                variant
+                for variant in metadata.get("matched_query_variants", [])
+                if _is_atomic_retrieval_variant(variant)
+            },
+            "retrieval_rank": index,
         }
+
+    atomic_query_variants: list[str] = []
+    seen_variants: set[str] = set()
+
+    if query_variants:
+        for variant in query_variants:
+            normalized_variant = _normalize_retrieval_query_text(variant)
+            if not normalized_variant:
+                continue
+            if not _is_atomic_retrieval_variant(normalized_variant):
+                continue
+            normalized_key = normalized_variant.casefold()
+            if normalized_key in seen_variants:
+                continue
+            seen_variants.add(normalized_key)
+            atomic_query_variants.append(normalized_variant)
+    else:
+        for index in retrieval_indexes:
+            for variant in candidate_meta[index]["matched_query_variants"]:
+                normalized_variant = variant.casefold()
+                if normalized_variant in seen_variants:
+                    continue
+                seen_variants.add(normalized_variant)
+                atomic_query_variants.append(variant)
+
+    for index in retrieval_indexes:
+        metadata = results_chunk_metadata[index]
+        content = results_text[index]
+        support_scores: dict[str, float] = {}
+        for variant in atomic_query_variants:
+            support_score = _compute_query_variant_support_score(
+                variant,
+                metadata,
+                content,
+            )
+            if support_score <= 0.0:
+                continue
+            support_scores[variant.casefold()] = support_score
+        candidate_meta[index]["query_support_scores"] = support_scores
+        candidate_meta[index]["query_support_total"] = sum(
+            score
+            for score in support_scores.values()
+            if score >= _QUERY_VARIANT_WEAK_SUPPORT_THRESHOLD
+        )
+        candidate_meta[index]["query_support_hit_count"] = sum(
+            1
+            for score in support_scores.values()
+            if score >= _QUERY_VARIANT_STRONG_SUPPORT_THRESHOLD
+        )
 
     selected_indexes: list[int] = []
     selected_set: set[int] = set()
@@ -680,22 +1077,168 @@ def _select_hybrid_context_entries(
         file_counts[file_key] += 1
         return True
 
-    selection_passes = (
-        lambda meta: meta["normative"] and not meta["low_signal"] and file_counts[meta["file_key"]] == 0,
-        lambda meta: not meta["low_signal"] and file_counts[meta["file_key"]] == 0,
-        lambda meta: meta["normative"] and not meta["low_signal"],
-        lambda meta: not meta["low_signal"],
-        lambda meta: True,
-    )
-
-    for predicate in selection_passes:
+    def _run_selection_pass(
+        ordered_indexes: list[int],
+        predicate,
+        target_limit: int,
+    ) -> None:
         for index in ordered_indexes:
-            if len(selected_indexes) >= final_limit:
+            if len(selected_indexes) >= target_limit:
                 break
             if predicate(candidate_meta[index]):
                 _try_select(index)
+
+    retrieval_seed_limit = min(final_limit, max(2, min(5, (final_limit + 1) // 2)))
+    covered_query_variants: set[str] = set()
+
+    variant_support_counts: dict[str, int] = {}
+    for variant in atomic_query_variants:
+        variant_key = variant.casefold()
+        variant_support_counts[variant_key] = sum(
+            1
+            for index in retrieval_indexes
+            if candidate_meta[index]["query_support_scores"].get(variant_key, 0.0)
+            >= _QUERY_VARIANT_STRONG_SUPPORT_THRESHOLD
+        )
+
+    def _variant_priority_key(variant: str) -> tuple[float, int, int]:
+        variant_key = variant.casefold()
+        support_count = variant_support_counts.get(variant_key, 0)
+        return (
+            math.inf if support_count == 0 else support_count,
+            -len(_normalize_query_variant_match_text(variant)),
+            atomic_query_variants.index(variant),
+        )
+
+    prioritized_query_variants = sorted(
+        atomic_query_variants,
+        key=_variant_priority_key,
+    )
+
+    retrieval_priority_indexes = sorted(
+        retrieval_indexes,
+        key=lambda index: (
+            -candidate_meta[index]["query_support_hit_count"],
+            -candidate_meta[index]["query_support_total"],
+            index,
+        ),
+    )
+
+    for variant in prioritized_query_variants:
+        if len(selected_indexes) >= retrieval_seed_limit:
+            break
+        variant_key = variant.casefold()
+        best_index = None
+        best_key = None
+        for index in retrieval_priority_indexes:
+            meta = candidate_meta[index]
+            if meta["low_signal"]:
+                continue
+            support_score = meta["query_support_scores"].get(variant_key, 0.0)
+            if support_score < _QUERY_VARIANT_WEAK_SUPPORT_THRESHOLD:
+                continue
+            candidate_key = (
+                support_score,
+                meta["query_support_hit_count"],
+                meta["query_support_total"],
+                -meta["retrieval_rank"],
+            )
+            if best_key is None or candidate_key > best_key:
+                best_key = candidate_key
+                best_index = index
+        if best_index is None:
+            continue
+        if not _try_select(best_index):
+            continue
+        covered_query_variants.update(
+            variant.casefold()
+            for variant in candidate_meta[best_index]["matched_query_variants"]
+        )
+
+    retrieval_first_passes = (
+        lambda meta: meta["normative"] and not meta["low_signal"],
+        lambda meta: not meta["low_signal"],
+    )
+    rerank_passes = (
+        lambda meta: meta["normative"] and not meta["low_signal"],
+        lambda meta: not meta["low_signal"],
+        lambda meta: meta["normative"] and not meta["low_signal"] and file_counts[meta["file_key"]] == 0,
+        lambda meta: not meta["low_signal"] and file_counts[meta["file_key"]] == 0,
+        lambda meta: True,
+    )
+
+    for predicate in retrieval_first_passes:
+        _run_selection_pass(retrieval_priority_indexes, predicate, retrieval_seed_limit)
+        if len(selected_indexes) >= retrieval_seed_limit:
+            break
+
+    for index in selected_indexes:
+        covered_query_variants.update(
+            variant.casefold()
+            for variant in candidate_meta[index]["matched_query_variants"]
+        )
+
+    for predicate in rerank_passes:
+        _run_selection_pass(rerank_indexes, predicate, final_limit)
         if len(selected_indexes) >= final_limit:
             break
+
+    grouped_selected_indexes: dict[str, list[int]] = defaultdict(list)
+    for selected_index in selected_indexes:
+        grouped_selected_indexes[candidate_meta[selected_index]["file_key"]].append(
+            selected_index
+        )
+
+    for file_key, group_selected in grouped_selected_indexes.items():
+        if not group_selected:
+            continue
+        if not any(candidate_meta[index]["quantitative"] for index in group_selected):
+            continue
+
+        group_candidates = sorted(
+            [
+                index
+                for index in retrieval_indexes
+                if candidate_meta[index]["file_key"] == file_key
+                and candidate_meta[index]["quantitative"]
+                and not candidate_meta[index]["low_signal"]
+            ],
+            key=lambda index: (
+                -candidate_meta[index]["query_support_hit_count"],
+                -candidate_meta[index]["query_support_total"],
+                -int(candidate_meta[index]["normative"]),
+                candidate_meta[index]["retrieval_rank"],
+            ),
+        )
+        if not group_candidates:
+            continue
+
+        preferred_group_candidates = group_candidates[: len(group_selected)]
+        missing_candidates = [
+            index for index in preferred_group_candidates if index not in selected_set
+        ]
+        if not missing_candidates:
+            continue
+
+        replaceable_positions = sorted(
+            [
+                position
+                for position, index in enumerate(selected_indexes)
+                if candidate_meta[index]["file_key"] == file_key
+                and index not in preferred_group_candidates
+            ],
+            key=lambda position: (
+                candidate_meta[selected_indexes[position]]["query_support_hit_count"],
+                candidate_meta[selected_indexes[position]]["query_support_total"],
+                int(candidate_meta[selected_indexes[position]]["normative"]),
+                -candidate_meta[selected_indexes[position]]["retrieval_rank"],
+            ),
+        )
+        for new_index, replace_position in zip(missing_candidates, replaceable_positions):
+            old_index = selected_indexes[replace_position]
+            selected_indexes[replace_position] = new_index
+            selected_set.remove(old_index)
+            selected_set.add(new_index)
 
     text_units_context: list[dict[str, Any]] = []
     for rank, index in enumerate(selected_indexes, 1):
@@ -2750,13 +3293,21 @@ async def _get_node_data(
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
 ):
+    query_variants = _build_diversified_retrieval_queries(query)
     # get similar entities
     logger.info(
-        f"Query nodes: {query}, top_k: {query_param.top_k}, cosine: {entities_vdb.cosine_better_than_threshold}"
+        "Query nodes: %s, variants: %s, top_k: %s, cosine: %s",
+        query,
+        query_variants,
+        query_param.top_k,
+        entities_vdb.cosine_better_than_threshold,
     )
 
-    results = await entities_vdb.query(
-        query, top_k=query_param.top_k, ids=query_param.ids
+    results = await _query_vector_storage_diversified(
+        query,
+        entities_vdb,
+        top_k=query_param.top_k,
+        ids=query_param.ids,
     )
     if not len(results):
         return "", "", [], []
@@ -2784,6 +3335,10 @@ async def _get_node_data(
             "rank": d,
             "created_at": k.get("created_at"),
             "query_score": _coerce_score(k.get("distance") or k.get("__metrics__")),
+            "matched_query_variants": k.get("matched_query_variants", []),
+            "query_variant_hit_count": int(
+                _coerce_score(k.get("query_variant_hit_count"))
+            ),
         }
         for k, n, d in zip(results, node_datas, node_degrees)
         if n is not None
@@ -2912,6 +3467,7 @@ async def _find_most_related_text_unit_from_entities(
                     "matched_seed_count": 0,
                     "relation_counts": 0,
                     "max_query_score": 0.0,
+                    "matched_query_variants": set(),
                 }
                 tasks.append(c_id)
 
@@ -2921,6 +3477,13 @@ async def _find_most_related_text_unit_from_entities(
             candidate["max_query_score"] = max(
                 candidate["max_query_score"],
                 seed_query_score,
+            )
+            candidate["matched_query_variants"].update(
+                {
+                    variant
+                    for variant in node_data.get("matched_query_variants", [])
+                    if _is_atomic_retrieval_variant(variant)
+                }
             )
             if this_edges:
                 candidate["relation_counts"] += sum(
@@ -2977,6 +3540,8 @@ async def _find_most_related_text_unit_from_entities(
         chunk_data["graph_query_score"] = t["max_query_score"]
         chunk_data["graph_matched_seed_count"] = t["matched_seed_count"]
         chunk_data["graph_relation_support"] = t["relation_counts"]
+        if t.get("matched_query_variants"):
+            chunk_data["matched_query_variants"] = sorted(t["matched_query_variants"])
         result_chunks.append(chunk_data)
 
     return result_chunks
@@ -3051,12 +3616,20 @@ async def _get_edge_data(
     relationships_vdb: BaseVectorStorage,
     query_param: QueryParam,
 ):
+    query_variants = _build_diversified_retrieval_queries(keywords)
     logger.info(
-        f"Query edges: {keywords}, top_k: {query_param.top_k}, cosine: {relationships_vdb.cosine_better_than_threshold}"
+        "Query edges: %s, variants: %s, top_k: %s, cosine: %s",
+        keywords,
+        query_variants,
+        query_param.top_k,
+        relationships_vdb.cosine_better_than_threshold,
     )
 
-    results = await relationships_vdb.query(
-        keywords, top_k=query_param.top_k, ids=query_param.ids
+    results = await _query_vector_storage_diversified(
+        keywords,
+        relationships_vdb,
+        top_k=query_param.top_k,
+        ids=query_param.ids,
     )
 
     if not len(results):
@@ -3093,6 +3666,10 @@ async def _get_edge_data(
                 "rank": edge_degrees_dict.get(pair, k.get("rank", 0)),
                 "created_at": k.get("created_at", None),
                 "query_score": _coerce_score(k.get("distance") or k.get("__metrics__")),
+                "matched_query_variants": k.get("matched_query_variants", []),
+                "query_variant_hit_count": int(
+                    _coerce_score(k.get("query_variant_hit_count"))
+                ),
                 **edge_props,
             }
             edge_datas.append(combined)
@@ -3244,6 +3821,7 @@ async def _find_related_text_unit_from_relationships(
                     "matched_seed_count": 0,
                     "relation_counts": 0,
                     "max_query_score": 0.0,
+                    "matched_query_variants": set(),
                 }
                 tasks.append(c_id)
             candidate = all_text_units_lookup[c_id]
@@ -3253,6 +3831,13 @@ async def _find_related_text_unit_from_relationships(
             candidate["max_query_score"] = max(
                 candidate["max_query_score"],
                 seed_query_score,
+            )
+            candidate["matched_query_variants"].update(
+                {
+                    variant
+                    for variant in edge_data.get("matched_query_variants", [])
+                    if _is_atomic_retrieval_variant(variant)
+                }
             )
 
     if tasks:
@@ -3298,6 +3883,8 @@ async def _find_related_text_unit_from_relationships(
         chunk_data["graph_query_score"] = t["max_query_score"]
         chunk_data["graph_matched_seed_count"] = t["matched_seed_count"]
         chunk_data["graph_relation_support"] = t["relation_counts"]
+        if t.get("matched_query_variants"):
+            chunk_data["matched_query_variants"] = sorted(t["matched_query_variants"])
         result_chunks.append(chunk_data)
 
     return result_chunks
@@ -3510,6 +4097,21 @@ async def _build_hybrid_retrieval_debug_data(
         for key, value in _extract_chunk_citation_fields(chunk).items():
             if value not in (None, "", [], {}):
                 metadata[key] = value
+        metadata.setdefault("matched_query_variants", [])
+        merged_variants = {
+            variant
+            for variant in metadata.get("matched_query_variants", [])
+            if _is_atomic_retrieval_variant(variant)
+        }
+        merged_variants.update(
+            {
+                variant
+                for variant in chunk.get("matched_query_variants", [])
+                if _is_atomic_retrieval_variant(variant)
+            }
+        )
+        if merged_variants:
+            metadata["matched_query_variants"] = sorted(merged_variants)
         metadata["graph_query_score"] = max(
             _coerce_score(metadata.get("graph_query_score")),
             _coerce_score(chunk.get("graph_query_score")),
@@ -3604,6 +4206,7 @@ async def _build_hybrid_retrieval_debug_data(
         results_file_paths=results_file_paths,
         results_chunk_metadata=results_chunk_metadata,
         query_param=query_param,
+        query_variants=_dedupe_keywords([*ll_keywords, *hl_keywords]),
     )
     _record_stage_timing(
         stage_timings,
