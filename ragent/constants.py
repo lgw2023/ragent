@@ -8,6 +8,7 @@ consistency and makes maintenance easier.
 
 # Default values for environment variables
 DEFAULT_MAX_GLEANING = 1
+DEFAULT_ENTITY_EXTRACT_GLEANING_LEVEL = 1
 DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE = 4
 DEFAULT_WOKERS = 2
 DEFAULT_TIMEOUT = 150

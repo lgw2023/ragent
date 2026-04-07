@@ -41,6 +41,7 @@ htmlcov/
 .DS_Store
 
 # sample
+benchmark/
 example_v1/
 example/
 example_test/
