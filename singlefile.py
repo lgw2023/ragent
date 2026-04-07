@@ -35,8 +35,9 @@ else:
     )
     from ragent.utils import is_exception_logged, log_exception, logger
 
-
-_USE_COLOR = sys.stdout.isatty() and os.getenv("NO_COLOR") is None
+_IS_TTY = sys.stdout.isatty()
+_USE_COLOR = _IS_TTY and os.getenv("NO_COLOR") is None
+_USE_MARKDOWN = not _IS_TTY
 _RESET = "\033[0m" if _USE_COLOR else ""
 _BOLD = "\033[1m" if _USE_COLOR else ""
 _DIM = "\033[2m" if _USE_COLOR else ""
@@ -77,6 +78,34 @@ def _warn(text: str) -> str:
 def _section_rule(char: str = "=") -> str:
     return _style(char * 78, _DIM, _WHITE)
 
+
+def _markdown_heading(level: int, title: str) -> str:
+    normalized_level = min(max(level, 1), 6)
+    return f"{'#' * normalized_level} {title}"
+
+
+def _print_key_value(label: str, value: Any):
+    if _USE_MARKDOWN:
+        normalized_label = label.strip().strip("[]")
+        if normalized_label.endswith(":"):
+            normalized_label = normalized_label[:-1]
+        print(f"- {normalized_label}: {value}")
+        return
+    print(f"{_label(label)} {value}")
+
+
+def _print_markdown_entry(title: str, meta_lines: list[str] | None = None, body: str | None = None, level: int = 4):
+    print(_markdown_heading(level, title))
+    if meta_lines:
+        for line in meta_lines:
+            print(f"- {line}")
+    if body is not None:
+        body_text = str(body).strip("\n")
+        if body_text:
+            print()
+            print(body_text)
+    print()
+
 _WIDE_TABLE_EXTENSIONS = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm"}
 
 
@@ -107,24 +136,38 @@ def _temporary_log_level(logger_names: list[str], level: int):
             target_logger.setLevel(original_level)
 
 
-def _print_stage_header(title: str):
+def _print_stage_header(title: str, level: int = 2):
+    if _USE_MARKDOWN:
+        print(f"\n{_markdown_heading(level, title)}\n")
+        return
     print(f"\n{_section_rule('=')}")
     print(_accent(title))
     print(_section_rule('='))
 
 
-def _print_subsection_header(title: str):
+def _print_subsection_header(title: str, level: int = 3):
+    if _USE_MARKDOWN:
+        print(f"\n{_markdown_heading(level, title)}\n")
+        return
     print(f"\n{_section_rule('-')}")
     print(_style(title, _BOLD, _MAGENTA))
     print(_section_rule('-'))
 
 
-def _print_block_header(title: str):
+def _print_block_header(title: str, level: int = 3):
+    if _USE_MARKDOWN:
+        print(f"\n{_markdown_heading(level, title)}\n")
+        return
     print(_style(f"[{title}]", _BOLD, _YELLOW))
 
 
 def _print_item_box(lines: list[str], color: str = _DIM):
     if not lines:
+        return
+    if _USE_MARKDOWN:
+        for line in lines:
+            print(f"- {line}")
+        print()
         return
     prefix = _style("  | ", color)
     for line in lines:
@@ -136,21 +179,92 @@ def _print_multiline_value(label: str, value: str, color: str = _WHITE):
     _print_item_box([f"{label}: {lines[0]}", *lines[1:]], color)
 
 
-def _print_trace_list(title: str, items: list[dict], kind: str):
-    _print_block_header(title)
+def _print_trace_list(title: str, items: list[dict], kind: str, heading_level: int = 3):
+    _print_block_header(title, level=heading_level)
     if not items:
-        print(_muted("  - 无  "))
+        print("- 无" if _USE_MARKDOWN else _muted("  - 无  "))
         return
     if isinstance(items, (str, dict)):
         items = [items]
     for item in items:
         if kind == "keyword":
-            print(f"  - {_style(str(item), _GREEN)}  ")
+            if _USE_MARKDOWN:
+                print(f"- {str(item)}")
+            else:
+                print(f"  - {_style(str(item), _GREEN)}  ")
             continue
         if not isinstance(item, dict):
             _print_item_box([str(item)], _WHITE)
             continue
         source_label = item.get("source_ref") or item.get("source_refs_display") or item.get("file_path", "unknown_source")
+        if _USE_MARKDOWN:
+            if kind == "entity":
+                _print_markdown_entry(
+                    str(item["entity"]),
+                    [
+                        f"type: {item['type']}",
+                        f"source: {source_label}",
+                    ],
+                    item.get("preview"),
+                    level=min(heading_level + 1, 6),
+                )
+                continue
+            if kind == "relation":
+                _print_markdown_entry(
+                    f"{item['entity1']} -> {item['entity2']}",
+                    [f"source: {source_label}"],
+                    item.get("preview"),
+                    level=min(heading_level + 1, 6),
+                )
+                continue
+            if kind == "chunk":
+                meta_lines = [f"source: {source_label}"]
+                if "source" in item:
+                    meta_lines.append(f"recall_type: {item['source']}")
+                if item.get("score") is not None:
+                    meta_lines.append(f"score: {item['score']}")
+                meta_lines.append(f"chunk_id: {item.get('chunk_id', 'n/a')}")
+                _print_markdown_entry(
+                    f"候选 #{item['rank']}",
+                    meta_lines,
+                    item.get("preview"),
+                    level=min(heading_level + 1, 6),
+                )
+                continue
+            if kind == "final_chunk":
+                meta_lines = [f"source: {source_label}"]
+                if "source" in item:
+                    meta_lines.append(f"recall_type: {item['source']}")
+                meta_lines.append(f"chunk_id: {item.get('chunk_id', 'n/a')}")
+                _print_markdown_entry(
+                    f"证据 #{item['rank']}",
+                    meta_lines,
+                    item.get("preview"),
+                    level=min(heading_level + 1, 6),
+                )
+                continue
+            if kind == "rerank_chunk":
+                meta_lines = [f"source: {source_label}"]
+                if "source" in item:
+                    meta_lines.append(f"recall_type: {item['source']}")
+                if item.get("rerank_score") is not None:
+                    meta_lines.append(f"rerank_score: {item['rerank_score']}")
+                meta_lines.append(f"chunk_id: {item.get('chunk_id', 'n/a')}")
+                _print_markdown_entry(
+                    f"候选 #{item['rank']}",
+                    meta_lines,
+                    item.get("preview"),
+                    level=min(heading_level + 1, 6),
+                )
+                continue
+            if kind == "context_chunk":
+                _print_markdown_entry(
+                    f"Chunk {item.get('id', 'n/a')}",
+                    [f"source: {source_label}"],
+                    _truncate_console(item.get("content", ""), limit=320),
+                    level=min(heading_level + 1, 6),
+                )
+                continue
         if kind == "entity":
             _print_item_box(
                 [
@@ -260,6 +374,20 @@ def _extract_section_json(body: str):
 
 
 def _print_structured_json_item(item: dict, color: str = _WHITE):
+    if _USE_MARKDOWN:
+        multiline_fields = []
+        for key, value in item.items():
+            if isinstance(value, str) and "\n" in value:
+                multiline_fields.append((key, value))
+            else:
+                print(f"- {key}: {value}")
+        for key, value in multiline_fields:
+            print()
+            print(f"**{key}**")
+            print()
+            print(str(value).strip("\n") or _muted("(空)"))
+        print()
+        return
     lines = []
     for key, value in item.items():
         if isinstance(value, str) and "\n" in value:
@@ -279,6 +407,36 @@ def _print_document_chunks_json(parsed_json: Any):
         return
     for item in parsed_json:
         if isinstance(item, dict):
+            if _USE_MARKDOWN:
+                meta_lines = [
+                    f"id: {item.get('id', 'n/a')}",
+                    f"file_path: {item.get('file_path', 'unknown_source')}",
+                ]
+                if "chunk_id" in item:
+                    meta_lines.append(f"chunk_id: {item.get('chunk_id')}")
+                body_sections = []
+                if "content" in item:
+                    body_sections.append(("content", str(item.get("content", ""))))
+                else:
+                    for key, value in item.items():
+                        if key in {"id", "file_path", "chunk_id"}:
+                            continue
+                        if isinstance(value, str) and "\n" in value:
+                            body_sections.append((key, value))
+                        else:
+                            meta_lines.append(f"{key}: {value}")
+                _print_markdown_entry(
+                    f"Document Chunk {item.get('id', 'n/a')}",
+                    meta_lines,
+                    None,
+                    level=4,
+                )
+                for key, value in body_sections:
+                    print(f"**{key}**")
+                    print()
+                    print(str(value).strip("\n") or _muted("(空)"))
+                    print()
+                continue
             lines = [
                 f"id: {item.get('id', 'n/a')}",
                 f"file_path: {item.get('file_path', 'unknown_source')}",
@@ -298,8 +456,8 @@ def _print_document_chunks_json(parsed_json: Any):
             _print_item_box([str(item)], _WHITE)
 
 
-def _print_structured_section(title: str, body: str):
-    _print_subsection_header(title)
+def _print_structured_section(title: str, body: str, heading_level: int = 3):
+    _print_subsection_header(title, level=heading_level)
     parsed_json = _extract_section_json(body)
     if "Document Chunks" in title and parsed_json is not None:
         _print_document_chunks_json(parsed_json)
@@ -329,13 +487,13 @@ def _print_structured_section(title: str, body: str):
     print(parsed_json)
 
 
-def _print_structured_text_sections(text: str):
+def _print_structured_text_sections(text: str, heading_level: int = 3):
     sections = _parse_titled_sections(text)
     if not sections:
         print(_muted("(空)"))
         return
     for title, body in sections:
-        _print_structured_section(title, body)
+        _print_structured_section(title, body, heading_level=heading_level)
 
 
 def _print_stage_timing_summary(trace: dict):
@@ -347,76 +505,93 @@ def _print_stage_timing_summary(trace: dict):
         label = item.get("label") or item.get("stage") or "unknown"
         seconds = item.get("seconds")
         if isinstance(seconds, (int, float)):
-            print(f"  - {label}: {_style(f'{seconds:.3f}s', _BOLD, _CYAN)}")
+            prefix = "- " if _USE_MARKDOWN else "  - "
+            print(f"{prefix}{label}: {_style(f'{seconds:.3f}s', _BOLD, _CYAN)}")
         else:
-            print(f"  - {label}: {_muted('n/a')}")
+            prefix = "- " if _USE_MARKDOWN else "  - "
+            print(f"{prefix}{label}: {_muted('n/a')}")
 
 
-def _print_onehop_trace(trace: dict, header: str = "OneHop 图谱检索推理过程"):
-    _print_stage_header(header)
-    print(f"{_label('[输入问题]')} {trace['query']}")
-    print(f"{_label('[检索模式]')} {_style(trace['mode'], _BOLD, _GREEN)}")
+def _print_onehop_trace(trace: dict, header: str = "OneHop 图谱检索推理过程", header_level: int = 1):
+    stage_level = min(header_level + 1, 6)
+    block_level = min(stage_level + 1, 6)
 
-    _print_stage_header("阶段 0 / 耗时概览")
+    _print_stage_header(header, level=header_level)
+    _print_key_value("[输入问题]", trace["query"])
+    _print_key_value("[检索模式]", _style(trace["mode"], _BOLD, _GREEN))
+
+    _print_stage_header("阶段 0 / 耗时概览", level=stage_level)
     _print_stage_timing_summary(trace)
 
-    _print_stage_header("阶段 1 / 关键词提取")
-    _print_trace_list("高层关键词", trace.get("high_level_keywords", []), "keyword")
-    _print_trace_list("低层关键词", trace.get("low_level_keywords", []), "keyword")
+    _print_stage_header("阶段 1 / 关键词提取", level=stage_level)
+    _print_trace_list("高层关键词", trace.get("high_level_keywords", []), "keyword", heading_level=block_level)
+    _print_trace_list("低层关键词", trace.get("low_level_keywords", []), "keyword", heading_level=block_level)
 
-    _print_stage_header("阶段 2 / 图谱命中")
-    _print_trace_list("实体命中 Top", trace.get("graph_entity_hits", []), "entity")
-    _print_trace_list("关系命中 Top", trace.get("graph_relation_hits", []), "relation")
+    _print_stage_header("阶段 2 / 图谱命中", level=stage_level)
+    _print_trace_list("实体命中 Top", trace.get("graph_entity_hits", []), "entity", heading_level=block_level)
+    _print_trace_list("关系命中 Top", trace.get("graph_relation_hits", []), "relation", heading_level=block_level)
 
     if trace.get("mode") == "hybrid":
-        _print_stage_header("阶段 3 / 混合召回")
-        _print_trace_list("向量召回候选 Top", trace.get("vector_candidates", []), "chunk")
-        _print_trace_list("图谱关联候选 Top", trace.get("graph_chunk_candidates", []), "chunk")
-        _print_trace_list("融合候选池（完整）", trace.get("merged_candidates", []), "chunk")
-        _print_stage_header("阶段 4 / Rerank 重排")
-        print(f"{_label('Rerank 模型:')} {trace.get('rerank_model') or '未配置'}")
+        _print_stage_header("阶段 3 / 混合召回", level=stage_level)
+        _print_trace_list("向量召回候选 Top", trace.get("vector_candidates", []), "chunk", heading_level=block_level)
+        _print_trace_list("图谱关联候选 Top", trace.get("graph_chunk_candidates", []), "chunk", heading_level=block_level)
+        _print_trace_list("融合候选池（完整）", trace.get("merged_candidates", []), "chunk", heading_level=block_level)
+        _print_stage_header("阶段 4 / Rerank 重排", level=stage_level)
+        _print_key_value("Rerank 模型:", trace.get("rerank_model") or "未配置")
         _print_trace_list(
             "送入 Rerank 的候选池",
             trace.get("rerank_input_candidates", []),
             "chunk",
+            heading_level=block_level,
         )
         _print_trace_list(
             "Rerank 后排序结果",
             trace.get("rerank_output_candidates", []),
             "rerank_chunk",
+            heading_level=block_level,
         )
-        _print_trace_list("最终送入回答模型的证据", trace.get("final_context_chunks", []), "final_chunk")
+        _print_trace_list(
+            "最终送入回答模型的证据",
+            trace.get("final_context_chunks", []),
+            "final_chunk",
+            heading_level=block_level,
+        )
 
     if trace.get("image_list"):
-        _print_stage_header("阶段 5 / 引用到的文件")
+        _print_stage_header("阶段 5 / 引用到的文件", level=stage_level)
         for item in trace["image_list"]:
-            print(f"  - {_style(item, _MAGENTA)}")
+            prefix = "- " if _USE_MARKDOWN else "  - "
+            print(f"{prefix}{_style(item, _MAGENTA)}")
 
-    _print_stage_header("阶段 6 / 最终拼接上下文")
-    _print_structured_text_sections(trace.get("final_context_text", ""))
+    _print_stage_header("阶段 6 / 最终拼接上下文", level=stage_level)
+    _print_structured_text_sections(trace.get("final_context_text", ""), heading_level=block_level)
 
-    _print_stage_header("阶段 7 / 最终发送给回答模型的 Prompt")
-    _print_structured_text_sections(trace.get("final_prompt_text", ""))
+    _print_stage_header("阶段 7 / 最终发送给回答模型的 Prompt", level=stage_level)
+    _print_structured_text_sections(trace.get("final_prompt_text", ""), heading_level=block_level)
 
-    _print_stage_header("最终答案")
+    _print_stage_header("最终答案", level=stage_level)
     print(_success(trace["answer"]))
 
 
-def _print_multihop_trace(trace: dict):
-    _print_stage_header("MultiHop 图谱检索推理过程")
-    print(f"{_label('[原始问题]')} {trace['query']}")
+def _print_multihop_trace(trace: dict, header_level: int = 1):
+    stage_level = min(header_level + 1, 6)
+    block_level = min(stage_level + 1, 6)
 
-    _print_stage_header("阶段 1 / 问题拆解")
+    _print_stage_header("MultiHop 图谱检索推理过程", level=header_level)
+    _print_key_value("[原始问题]", trace["query"])
+
+    _print_stage_header("阶段 1 / 问题拆解", level=stage_level)
     reasoning = trace["decomposition"].get("reasoning", "")
     if reasoning:
-        print(f"{_label('[拆解理由]')} {reasoning}")
+        _print_key_value("[拆解理由]", reasoning)
     sub_questions = trace["decomposition"].get("sub_questions", [])
-    _print_block_header("子问题列表")
+    _print_block_header("子问题列表", level=block_level)
     if not sub_questions:
-        print(_muted("  - 无"))
+        print("- 无" if _USE_MARKDOWN else _muted("  - 无"))
     else:
         for index, sub_question in enumerate(sub_questions, 1):
-            print(f"  {index}. {_style(sub_question, _BOLD)}")
+            prefix = f"{index}. " if _USE_MARKDOWN else f"  {index}. "
+            print(f"{prefix}{_style(sub_question, _BOLD)}")
 
     for index, step in enumerate(trace.get("steps", []), 1):
         stage_type = step.get("stage_type", "sub_question")
@@ -432,11 +607,12 @@ def _print_multihop_trace(trace: dict):
                 "query": step["display_question"],
             },
             header=title,
+            header_level=stage_level,
         )
-        print(f"{_label('[内部检索提示]')} {_truncate_console(step.get('internal_query', ''))}")
-        print(f"{_label('[当前记忆快照]')} {step.get('memory_snapshot', '')}")
+        _print_key_value("[内部检索提示]", _truncate_console(step.get("internal_query", "")))
+        _print_key_value("[当前记忆快照]", step.get("memory_snapshot", ""))
 
-    _print_stage_header("最终答案")
+    _print_stage_header("最终答案", level=stage_level)
     print(_success(trace["answer"]))
 
 

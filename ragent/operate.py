@@ -103,6 +103,98 @@ def _resolve_answer_prompt_mode(
     return resolved
 
 
+_KEYWORD_EXTRACTION_CACHE_VERSION = "v2"
+_MEASUREMENT_UNITS_PATTERN = (
+    r"(?:kg|千克|g|克|斤|千卡|kcal|卡|大卡|cm|厘米|mm|毫米|m|米|ml|毫升|l|升|"
+    r"mg|毫克|ug|微克|μg|mmhg|毫米汞柱|分钟|min|小时|h|天|周|月|个月|年|岁|次|%|％)"
+)
+_STANDALONE_NUMERIC_KEYWORD_RE = re.compile(
+    rf"^[<>~≈约≤≥]?\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?(?:\s*(?:/|~|～|-|—|–|到|至)\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?)*$",
+    re.IGNORECASE,
+)
+_TRAILING_MEASURED_KEYWORD_RE = re.compile(
+    rf"^(?P<label>.*?[A-Za-z\u4e00-\u9fff])\s*[:：]?\s*\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})$",
+    re.IGNORECASE,
+)
+_TRAILING_CJK_NUMERIC_KEYWORD_RE = re.compile(
+    r"^(?P<label>.*[\u4e00-\u9fff].*?)\s*[:：]?\s*\d+(?:\.\d+)?(?:\s*/\s*\d+(?:\.\d+)?)?$"
+)
+_LEADING_CJK_NUMERIC_KEYWORD_RE = re.compile(
+    rf"^\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?\s*(?P<label>[\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9/（）()·_-]*)$",
+    re.IGNORECASE,
+)
+_LOW_SIGNAL_LOW_LEVEL_KEYWORDS = {"补回", "超量", "达标"}
+
+
+def _clean_keyword_text(keyword: Any) -> str:
+    cleaned = clean_str(str(keyword or ""))
+    cleaned = cleaned.replace("，", ",")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip(" ,;；、。.()（）[]【】")
+
+
+def _dedupe_keywords(keywords: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        normalized = keyword.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(keyword)
+    return deduped
+
+
+def _normalize_high_level_keyword(keyword: Any) -> str | None:
+    cleaned = _clean_keyword_text(keyword)
+    if not cleaned or _STANDALONE_NUMERIC_KEYWORD_RE.match(cleaned):
+        return None
+    return cleaned
+
+
+def _normalize_low_level_keyword(keyword: Any) -> str | None:
+    cleaned = _clean_keyword_text(keyword)
+    if not cleaned or cleaned in _LOW_SIGNAL_LOW_LEVEL_KEYWORDS:
+        return None
+
+    if _STANDALONE_NUMERIC_KEYWORD_RE.match(cleaned):
+        return cleaned
+
+    if cleaned in _LOW_SIGNAL_LOW_LEVEL_KEYWORDS:
+        return None
+    return cleaned
+
+
+def _postprocess_extracted_keywords(
+    hl_keywords: list[str],
+    ll_keywords: list[str],
+) -> tuple[list[str], list[str]]:
+    normalized_hl = _dedupe_keywords(
+        [
+            keyword
+            for keyword in (
+                _normalize_high_level_keyword(item) for item in (hl_keywords or [])
+            )
+            if keyword
+        ]
+    )
+    normalized_ll = _dedupe_keywords(
+        [
+            keyword
+            for keyword in (
+                _normalize_low_level_keyword(item) for item in (ll_keywords or [])
+            )
+            if keyword
+        ]
+    )
+
+    hl_set = {keyword.casefold() for keyword in normalized_hl}
+    normalized_ll = [
+        keyword for keyword in normalized_ll if keyword.casefold() not in hl_set
+    ]
+    return normalized_hl, normalized_ll
+
+
 def _coerce_embedding_array(embedding: Any) -> np.ndarray | None:
     if embedding is None:
         return None
@@ -1698,16 +1790,19 @@ async def extract_keywords_only(
     """
 
     # 1. Handle cache if needed - add cache type for keywords
-    args_hash = compute_args_hash(param.mode, text)
+    args_hash = compute_args_hash(
+        param.mode, text, _KEYWORD_EXTRACTION_CACHE_VERSION
+    )
     cached_response, quantized, min_val, max_val = await handle_cache(
         hashing_kv, args_hash, text, param.mode, cache_type="keywords"
     )
     if cached_response is not None:
         try:
             keywords_data = json.loads(cached_response)
-            return keywords_data["high_level_keywords"], keywords_data[
-                "low_level_keywords"
-            ]
+            return _postprocess_extracted_keywords(
+                keywords_data["high_level_keywords"],
+                keywords_data["low_level_keywords"],
+            )
         except (json.JSONDecodeError, KeyError):
             logger.warning(
                 "Invalid cache format for keywords, proceeding with extraction"
@@ -1765,8 +1860,19 @@ async def extract_keywords_only(
         logger.error(f"JSON parsing error: {e}")
         return [], []
 
-    hl_keywords = keywords_data.get("high_level_keywords", [])
-    ll_keywords = keywords_data.get("low_level_keywords", [])
+    raw_hl_keywords = keywords_data.get("high_level_keywords", [])
+    raw_ll_keywords = keywords_data.get("low_level_keywords", [])
+    hl_keywords, ll_keywords = _postprocess_extracted_keywords(
+        raw_hl_keywords, raw_ll_keywords
+    )
+    if raw_hl_keywords != hl_keywords or raw_ll_keywords != ll_keywords:
+        logger.debug(
+            "Keyword postprocess adjusted extracted keywords. High-level: %s -> %s; Low-level: %s -> %s",
+            raw_hl_keywords,
+            hl_keywords,
+            raw_ll_keywords,
+            ll_keywords,
+        )
 
     # 7. Cache only the processed keywords with cache type
     if hl_keywords or ll_keywords:
@@ -1821,10 +1927,13 @@ async def _get_vector_context_new(
         chunk_file_path = {}
         chunk_metadata = {}
         for rr in results:
-            chunk_weight[rr.get("__id__")] = rr.get("__metrics__")
-            chunk_text[rr.get("__id__")] = rr.get('content')
-            chunk_file_path[rr.get("__id__")] = rr.get("file_path")
-            chunk_metadata[rr.get("__id__")] = _extract_chunk_citation_fields(rr)
+            chunk_id = rr.get("__id__") or rr.get("id")
+            if not chunk_id:
+                continue
+            chunk_weight[chunk_id] = rr.get("__metrics__") or rr.get("distance") or 0.0
+            chunk_text[chunk_id] = rr.get("content", "")
+            chunk_file_path[chunk_id] = rr.get("file_path", "unknown_source")
+            chunk_metadata[chunk_id] = _extract_chunk_citation_fields(rr)
         return chunk_weight, chunk_text, chunk_file_path, chunk_metadata
     except Exception as e:
         logger.error(f"Error in _get_vector_context: {e}")

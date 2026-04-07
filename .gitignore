@@ -46,3 +46,5 @@ example_v1/
 example/
 example_test/
 script/
+.env_bak
+.env_onehop
