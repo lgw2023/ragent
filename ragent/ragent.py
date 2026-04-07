@@ -2214,6 +2214,7 @@ class Ragent:
                 self.chunk_entity_relation_graph,
                 self.relationships_vdb,
                 self.entities_vdb,
+                self.text_chunks,
                 param,
                 global_config,
                 self.llm_response_cache,
