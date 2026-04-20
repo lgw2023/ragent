@@ -975,8 +975,9 @@ async def openai_complete_if_cache(
 
     try:
         response = await acompletion(**request_kwargs)
+        llm_elapsed = time.perf_counter() - llm_req_start
         _trace_model(
-            f"llm.request.done model={request_model} provider={request_provider} elapsed={time.perf_counter() - llm_req_start:.2f}s"
+            f"llm.request.done model={request_model} provider={request_provider} elapsed={llm_elapsed:.2f}s"
         )
     except APIConnectionError as e:
         _trace_model(
@@ -1097,19 +1098,26 @@ async def openai_complete_if_cache(
                         content = safe_unicode_decode(content.encode("utf-8"))
                     yield content
 
-                if token_tracker and final_chunk_usage:
-                    token_counts = _usage_to_token_counts(final_chunk_usage)
-                    token_tracker.add_usage(token_counts)
-                    logger.debug("Streaming token usage (from API): %s", token_counts)
+                stream_elapsed = time.perf_counter() - llm_req_start
                 if final_chunk_usage:
-                    record_model_usage(
-                        "chat",
-                        os.environ.get("LLM_MODEL") or model,
-                        final_chunk_usage,
-                        source="ragent.llm.openai.openai_complete_if_cache.stream",
-                    )
-                elif token_tracker:
+                    if token_tracker:
+                        token_counts = _usage_to_token_counts(final_chunk_usage)
+                        token_tracker.add_usage(token_counts)
+                        logger.debug("Streaming token usage (from API): %s", token_counts)
+                else:
                     logger.debug("No usage information available in streaming response")
+                record_model_usage(
+                    "chat",
+                    os.environ.get("LLM_MODEL") or model,
+                    final_chunk_usage,
+                    source="ragent.llm.openai.openai_complete_if_cache.stream",
+                    extra={
+                        "elapsed_seconds": round(stream_elapsed, 3),
+                        "message_count": len(messages),
+                        "prompt_length_chars": len(prompt) if prompt else 0,
+                        "stream": True,
+                    },
+                )
             except Exception as e:
                 logger.error("Error in stream response: %s", str(e))
                 if hasattr(response, "aclose") and callable(getattr(response, "aclose")):
@@ -1137,13 +1145,18 @@ async def openai_complete_if_cache(
     usage = getattr(response, "usage", None)
     if token_tracker and usage:
         token_tracker.add_usage(_usage_to_token_counts(usage))
-    if usage:
-        record_model_usage(
-            "chat",
-            os.environ.get("LLM_MODEL") or model,
-            usage,
-            source="ragent.llm.openai.openai_complete_if_cache",
-        )
+    record_model_usage(
+        "chat",
+        os.environ.get("LLM_MODEL") or model,
+        usage,
+        source="ragent.llm.openai.openai_complete_if_cache",
+        extra={
+            "elapsed_seconds": round(llm_elapsed, 3),
+            "message_count": len(messages),
+            "prompt_length_chars": len(prompt) if prompt else 0,
+            "stream": False,
+        },
+    )
 
     logger.debug("Response content len: %s", len(content))
     verbose_debug(f"Response: {response}")
@@ -1390,15 +1403,19 @@ async def openai_embed(
                 )
                 raise
             response_payload = response.json()
+        emb_elapsed = time.perf_counter() - emb_req_start
         record_model_usage(
             "embedding",
             embedding_model,
             response_payload.get("usage"),
             source="ragent.llm.openai.openai_embed",
-            extra={"batch_size": len(texts)},
+            extra={
+                "batch_size": len(texts),
+                "elapsed_seconds": round(emb_elapsed, 3),
+            },
         )
         _trace_model(
-            f"embed.request.done model={embedding_model} provider={resolved_provider or 'openai-compatible'} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s"
+            f"embed.request.done model={embedding_model} provider={resolved_provider or 'openai-compatible'} batch_size={len(texts)} elapsed={emb_elapsed:.2f}s"
         )
 
         data = response_payload.get("data") or []
@@ -1473,15 +1490,19 @@ async def openai_embed(
     )
     try:
         response = await aembedding(**request_kwargs)
+        emb_elapsed = time.perf_counter() - emb_req_start
         record_model_usage(
             "embedding",
             request_model,
             getattr(response, "usage", None),
             source="ragent.llm.openai.openai_embed",
-            extra={"batch_size": len(texts)},
+            extra={
+                "batch_size": len(texts),
+                "elapsed_seconds": round(emb_elapsed, 3),
+            },
         )
         _trace_model(
-            f"embed.request.done model={request_model} provider={request_provider} batch_size={len(texts)} elapsed={time.perf_counter() - emb_req_start:.2f}s"
+            f"embed.request.done model={request_model} provider={request_provider} batch_size={len(texts)} elapsed={emb_elapsed:.2f}s"
         )
     except Exception as e:
         _trace_model(

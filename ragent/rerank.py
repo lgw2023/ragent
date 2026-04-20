@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 import aiohttp
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -171,6 +172,7 @@ async def rerank_api(
         **kwargs,
     )
 
+    rerank_req_start = time.perf_counter()
     async with aiohttp.ClientSession() as session:
         async with session.post(request_url, headers=headers, json=data) as response:
             if response.status != 200:
@@ -180,12 +182,17 @@ async def rerank_api(
                 )
 
             result = await response.json()
+            rerank_elapsed = time.perf_counter() - rerank_req_start
             record_model_usage(
                 "rerank",
                 model,
                 result,
                 source="ragent.rerank.rerank_api",
-                extra={"document_count": len(documents), "top_k": top_k},
+                extra={
+                    "document_count": len(documents),
+                    "top_k": top_k,
+                    "elapsed_seconds": round(rerank_elapsed, 3),
+                },
             )
             results = _extract_rerank_results(result, top_k=top_k)
             if results:

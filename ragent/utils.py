@@ -11,14 +11,15 @@ import logging
 import logging.handlers
 import os
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 # Before `litellm` is imported (see ragent.llm.openai): default to quiet SDK logs.
 # Override with e.g. LITELLM_LOG=DEBUG in the environment when diagnosing calls.
 os.environ.setdefault("LITELLM_LOG", "WARNING")
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
-from functools import wraps
+from functools import partial, wraps
 from hashlib import md5
 from typing import Any, Protocol, Callable, TYPE_CHECKING, List
 import numpy as np
@@ -154,6 +155,9 @@ def set_verbose_debug(enabled: bool):
 statistic_data = {"llm_call": 0, "llm_cache": 0, "embed_call": 0}
 _CURRENT_MODEL_USAGE_COLLECTOR: contextvars.ContextVar["ModelUsageCollector | None"] = (
     contextvars.ContextVar("current_model_usage_collector", default=None)
+)
+_CURRENT_MODEL_USAGE_STAGE: contextvars.ContextVar[dict[str, str] | None] = (
+    contextvars.ContextVar("current_model_usage_stage", default=None)
 )
 
 _SENSITIVE_LOG_KEYS = {
@@ -398,20 +402,173 @@ def convert_response_to_json(response: str) -> dict[str, Any]:
         raise e from None
 
 
+_HASH_UNSERIALIZABLE = object()
+
+
+def resolve_callable_cache_id(value: Any) -> Any | None:
+    """Build a stable identifier for cache-relevant callables.
+
+    Returns a JSON-serializable structure when the callable can be identified
+    without relying on memory addresses; otherwise returns None.
+    """
+    if value is None or not callable(value):
+        return None
+
+    if isinstance(value, partial):
+        func_id = resolve_callable_cache_id(value.func)
+        if func_id is None:
+            return None
+        normalized_args = _normalize_value_for_hash(list(value.args), strict=True)
+        normalized_kwargs = _normalize_value_for_hash(value.keywords or {}, strict=True)
+        if (
+            normalized_args is _HASH_UNSERIALIZABLE
+            or normalized_kwargs is _HASH_UNSERIALIZABLE
+        ):
+            return None
+        return {
+            "callable_type": "partial",
+            "func": func_id,
+            "args": normalized_args,
+            "keywords": normalized_kwargs,
+        }
+
+    module = getattr(value, "__module__", None)
+    qualname = getattr(value, "__qualname__", None)
+    if module and qualname:
+        identity: dict[str, Any] = {
+            "callable_type": "function",
+            "module": module,
+            "qualname": qualname,
+        }
+    else:
+        cls = getattr(value, "__class__", None)
+        cls_module = getattr(cls, "__module__", None) if cls else None
+        cls_qualname = getattr(cls, "__qualname__", None) if cls else None
+        if not cls_module or not cls_qualname:
+            return None
+        identity = {
+            "callable_type": "callable_instance",
+            "module": cls_module,
+            "qualname": cls_qualname,
+        }
+
+    for attr_name in ("model_name", "name"):
+        attr_value = getattr(value, attr_name, None)
+        if isinstance(attr_value, (str, int, float, bool)) or attr_value is None:
+            if attr_value not in (None, ""):
+                identity[attr_name] = attr_value
+
+    return identity
+
+
+def _normalize_value_for_hash(value: Any, *, strict: bool) -> Any:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+
+    if isinstance(value, float):
+        if value != value:
+            return "NaN"
+        if value == float("inf"):
+            return "Infinity"
+        if value == float("-inf"):
+            return "-Infinity"
+        return value
+
+    if isinstance(value, Path):
+        return str(value)
+
+    if isinstance(value, bytes):
+        return {"__type__": "bytes", "hex": value.hex()}
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    if isinstance(value, np.generic):
+        return _normalize_value_for_hash(value.item(), strict=strict)
+
+    if isinstance(value, np.ndarray):
+        return _normalize_value_for_hash(value.tolist(), strict=strict)
+
+    if is_dataclass(value) and not isinstance(value, type):
+        return _normalize_value_for_hash(asdict(value), strict=strict)
+
+    if isinstance(value, dict):
+        normalized_items: dict[str, Any] = {}
+        for key in sorted(value.keys(), key=lambda item: str(item)):
+            normalized_value = _normalize_value_for_hash(value[key], strict=strict)
+            if normalized_value is _HASH_UNSERIALIZABLE:
+                return _HASH_UNSERIALIZABLE
+            normalized_items[str(key)] = normalized_value
+        return normalized_items
+
+    if isinstance(value, (list, tuple)):
+        normalized_items = []
+        for item in value:
+            normalized_item = _normalize_value_for_hash(item, strict=strict)
+            if normalized_item is _HASH_UNSERIALIZABLE:
+                return _HASH_UNSERIALIZABLE
+            normalized_items.append(normalized_item)
+        return normalized_items
+
+    if isinstance(value, set):
+        normalized_items = []
+        for item in value:
+            normalized_item = _normalize_value_for_hash(item, strict=strict)
+            if normalized_item is _HASH_UNSERIALIZABLE:
+                return _HASH_UNSERIALIZABLE
+            normalized_items.append(normalized_item)
+        return sorted(
+            normalized_items,
+            key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+        )
+
+    if callable(value):
+        callable_id = resolve_callable_cache_id(value)
+        if callable_id is not None:
+            return callable_id
+        if strict:
+            return _HASH_UNSERIALIZABLE
+
+    try:
+        json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return value
+    except TypeError:
+        if strict:
+            return _HASH_UNSERIALIZABLE
+        return {
+            "__type__": f"{type(value).__module__}.{type(value).__qualname__}",
+            "repr": repr(value),
+        }
+
+
+def compute_structured_hash(data: Any, *, strict: bool = False) -> str | None:
+    """Compute a stable MD5 hash from JSON-serializable structured data."""
+    import hashlib
+
+    normalized = _normalize_value_for_hash(data, strict=strict)
+    if normalized is _HASH_UNSERIALIZABLE:
+        return None
+    payload = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+
 def compute_args_hash(*args: Any) -> str:
-    """Compute a hash for the given arguments.
+    """Compute a stable hash for the given arguments.
+
     Args:
         *args: Arguments to hash
     Returns:
         str: Hash string
     """
-    import hashlib
-
-    # Convert all arguments to strings and join them
-    args_str = "".join([str(arg) for arg in args])
-
-    # Compute MD5 hash
-    return hashlib.md5(args_str.encode()).hexdigest()
+    hash_value = compute_structured_hash(list(args))
+    if hash_value is None:
+        raise ValueError("Arguments cannot be serialized into a stable cache hash")
+    return hash_value
 
 
 def generate_cache_key(mode: str, cache_type: str, hash_value: str) -> str:
@@ -503,6 +660,7 @@ def priority_limit_async_func_call(
                                 future,
                                 args,
                                 kwargs,
+                                call_context,
                             ) = await asyncio.wait_for(queue.get(), timeout=1.0)
                         except asyncio.TimeoutError:
                             # Timeout is just to check shutdown signal, continue to next iteration
@@ -515,7 +673,9 @@ def priority_limit_async_func_call(
 
                         try:
                             # Execute function
-                            result = await func(*args, **kwargs)
+                            coro = call_context.run(func, *args, **kwargs)
+                            task = asyncio.create_task(coro, context=call_context)
+                            result = await task
                             # If future is not done, set the result
                             if not future.done():
                                 future.set_result(result)
@@ -691,13 +851,23 @@ def priority_limit_async_func_call(
                 counter += 1
 
             # Try to put the task into the queue, supporting timeout
+            call_context = contextvars.copy_context()
             try:
                 if _queue_timeout is not None:
                     # Use timeout to wait for queue space
                     try:
                         await asyncio.wait_for(
                             # current_count is used to ensure FIFO order
-                            queue.put((_priority, current_count, future, args, kwargs)),
+                            queue.put(
+                                (
+                                    _priority,
+                                    current_count,
+                                    future,
+                                    args,
+                                    kwargs,
+                                    call_context,
+                                )
+                            ),
                             timeout=_queue_timeout,
                         )
                     except asyncio.TimeoutError:
@@ -707,7 +877,16 @@ def priority_limit_async_func_call(
                 else:
                     # No timeout, may wait indefinitely
                     # current_count is used to ensure FIFO order
-                    await queue.put((_priority, current_count, future, args, kwargs))
+                    await queue.put(
+                        (
+                            _priority,
+                            current_count,
+                            future,
+                            args,
+                            kwargs,
+                            call_context,
+                        )
+                    )
             except Exception as e:
                 # Clean up the future
                 if not future.done():
@@ -1692,6 +1871,15 @@ def get_current_model_usage_collector() -> ModelUsageCollector | None:
     return _CURRENT_MODEL_USAGE_COLLECTOR.get()
 
 
+@contextmanager
+def model_usage_stage(stage: str, label: str):
+    token = _CURRENT_MODEL_USAGE_STAGE.set({"stage": stage, "label": label})
+    try:
+        yield
+    finally:
+        _CURRENT_MODEL_USAGE_STAGE.reset(token)
+
+
 def record_model_usage(
     model_type: str,
     model_name: str | None,
@@ -1703,12 +1891,17 @@ def record_model_usage(
     collector = get_current_model_usage_collector()
     if collector is None:
         return
+    enriched_extra = dict(extra or {})
+    current_stage = _CURRENT_MODEL_USAGE_STAGE.get()
+    if current_stage:
+        enriched_extra.setdefault("stage", current_stage["stage"])
+        enriched_extra.setdefault("stage_label", current_stage["label"])
     collector.record(
         model_type,
         model_name,
         normalize_token_usage(raw_usage),
         source=source,
-        extra=extra,
+        extra=enriched_extra,
     )
 
 

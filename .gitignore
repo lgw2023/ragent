@@ -13,6 +13,13 @@ venv/
 requirements.txt.bak
 .playwright-cli/
 
+# Offline runtime artifacts
+.runtime/
+vendor/mineru-models/
+vendor/modelscope/
+vendor/wheelhouse/
+ragent-offline*.tar*
+
 # Python 编译文件
 __pycache__/
 *.py[cod]
@@ -42,6 +49,9 @@ htmlcov/
 
 # sample
 benchmark/
+!benchmark/
+benchmark/*
+!benchmark/verify_query_cache_hits.py
 example_v1/
 example/
 example_test/

@@ -12,6 +12,26 @@ import pandas as pd
 # .env values take precedence over inherited OS environment variables
 _ENV_PATH = Path(__file__).resolve().with_name(".env")
 load_dotenv(dotenv_path=_ENV_PATH, override=True) #$HOME替换为本地ragent存储的绝对路径
+
+
+def _resolve_project_relative_mineru_config() -> None:
+    """Allow MINERU_TOOLS_CONFIG_JSON to point at a repo-relative file.
+
+    MinerU reads MINERU_TOOLS_CONFIG_JSON during import and resolves relative
+    paths under the user's home directory. For offline bundles we keep the
+    config in this project, so convert an existing relative path to absolute
+    before importing MinerU modules.
+    """
+    raw_config_path = (os.getenv("MINERU_TOOLS_CONFIG_JSON") or "").strip()
+    if not raw_config_path or os.path.isabs(raw_config_path):
+        return
+
+    project_config_path = (Path(__file__).resolve().parent / raw_config_path).resolve()
+    if project_config_path.exists():
+        os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(project_config_path)
+
+
+_resolve_project_relative_mineru_config()
 import subprocess
 from ragent import Ragent, QueryParam, WideTableImportConfig
 from ragent.wide_table import load_wide_table_dataframe
@@ -23,6 +43,7 @@ from ragent.utils import (
     logger,
     ModelUsageCollector,
     get_current_model_usage_collector,
+    model_usage_stage,
     record_model_usage,
     write_model_usage_report,
     split_string_by_multi_markers,
@@ -2409,13 +2430,26 @@ def _collect_rerank_results(
     return ranked
 
 
+def _normalize_referenced_file_paths(file_paths: list[str] | None) -> list[str]:
+    if isinstance(file_paths, (str, bytes)):
+        file_paths = [file_paths]
+    return sorted(
+        {
+            str(item).strip()
+            for item in file_paths or []
+            if str(item or "").strip() and str(item).strip() != "unknown_source"
+        }
+    )
+
+
 def _build_one_hop_trace(
     query: str,
     mode: str,
     answer: str,
-    image_list: list[str],
+    referenced_file_paths: list[str],
     debug_payload: dict[str, Any],
 ) -> dict[str, Any]:
+    normalized_references = _normalize_referenced_file_paths(referenced_file_paths)
     trace = {
         "query": query,
         "mode": mode,
@@ -2435,7 +2469,8 @@ def _build_one_hop_trace(
         "final_prompt_text": debug_payload.get("final_prompt_text", ""),
         "stage_timings": list(debug_payload.get("stage_timings", [])),
         "answer": answer,
-        "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+        "referenced_file_paths": normalized_references,
+        "image_list": normalized_references,
     }
 
     if mode == "hybrid":
@@ -2491,7 +2526,9 @@ def _build_one_hop_trace(
     else:
         trace["graph_entity_hits"] = _collect_entity_hits(debug_payload.get("graph_entities", []))
         trace["graph_relation_hits"] = _collect_relation_hits(debug_payload.get("graph_relations", []))
-        trace["final_context_document_chunks"] = _extract_document_chunks_from_context(
+        trace["final_context_document_chunks"] = debug_payload.get(
+            "final_context_document_chunks"
+        ) or _extract_document_chunks_from_context(
             debug_payload.get("final_context_text", "") or ""
         )
 
@@ -2523,7 +2560,7 @@ async def _run_one_hop_with_rag(
 
     if mode == "hybrid":
         if include_trace:
-            answer, image_list, debug_payload = await hybrid_query(
+            answer, referenced_file_paths, debug_payload = await hybrid_query(
                 normalized_query,
                 rag.chunks_vdb,
                 rag.chunk_entity_relation_graph,
@@ -2545,14 +2582,22 @@ async def _run_one_hop_with_rag(
                 rag.text_chunks,
             )
             await rag._query_done()
+            normalized_references = _normalize_referenced_file_paths(
+                referenced_file_paths
+            )
             return {
                 "answer": answer,
-                "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+                "referenced_file_paths": normalized_references,
+                "image_list": normalized_references,
                 "trace": _build_one_hop_trace(
-                    normalized_query, mode, answer, image_list, debug_payload
+                    normalized_query,
+                    mode,
+                    answer,
+                    referenced_file_paths,
+                    debug_payload,
                 ),
             }
-        answer, image_list = await hybrid_query(
+        answer, referenced_file_paths = await hybrid_query(
             normalized_query,
             rag.chunks_vdb,
             rag.chunk_entity_relation_graph,
@@ -2565,7 +2610,7 @@ async def _run_one_hop_with_rag(
         )
     else:
         if include_trace:
-            answer, image_list, debug_payload = await graph_query(
+            answer, referenced_file_paths, debug_payload = await graph_query(
                 normalized_query,
                 rag.chunk_entity_relation_graph,
                 rag.entities_vdb,
@@ -2587,14 +2632,22 @@ async def _run_one_hop_with_rag(
                 rag.text_chunks,
             )
             await rag._query_done()
+            normalized_references = _normalize_referenced_file_paths(
+                referenced_file_paths
+            )
             return {
                 "answer": answer,
-                "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+                "referenced_file_paths": normalized_references,
+                "image_list": normalized_references,
                 "trace": _build_one_hop_trace(
-                    normalized_query, mode, answer, image_list, debug_payload
+                    normalized_query,
+                    mode,
+                    answer,
+                    referenced_file_paths,
+                    debug_payload,
                 ),
             }
-        answer, image_list = await graph_query(
+        answer, referenced_file_paths = await graph_query(
             normalized_query,
             rag.chunk_entity_relation_graph,
             rag.entities_vdb,
@@ -2608,9 +2661,11 @@ async def _run_one_hop_with_rag(
 
     await rag._query_done()
 
+    normalized_references = _normalize_referenced_file_paths(referenced_file_paths)
     return {
         "answer": answer,
-        "image_list": sorted([item for item in set(image_list) if item != "unknown_source"]),
+        "referenced_file_paths": normalized_references,
+        "image_list": normalized_references,
         "trace": None,
     }
 
@@ -2623,9 +2678,9 @@ async def trace_one_hop_problem(
     history_turns: int | None = None,
 ):
     stage_timings: list[dict[str, Any]] = []
-    rag = await initialize_rag(work_dir, stage_timings=stage_timings)
-    try:
-        with _maybe_create_usage_collector("onehop_trace") as collector:
+    with _maybe_create_usage_collector("onehop_trace") as collector:
+        rag = await initialize_rag(work_dir, stage_timings=stage_timings)
+        try:
             result = await _run_one_hop_with_rag(
                 rag,
                 query,
@@ -2635,8 +2690,10 @@ async def trace_one_hop_problem(
                 include_trace=True,
                 prefill_stage_timings=stage_timings,
             )
-    finally:
-        await _close_rag(rag)
+        finally:
+            await _close_rag(rag)
+        if collector is not None and result.get("trace") is not None:
+            result["trace"]["model_usage"] = collector.snapshot()
     _write_usage_report_if_needed(
         collector,
         _resolve_kg_usage_report_dir(work_dir),
@@ -2673,7 +2730,7 @@ async def _run_multi_hop_with_rag(
     steps = []
     count = 0
     final_answer = ""
-    images_list = []
+    referenced_file_paths = []
 
     for index, sub_question in enumerate(res_dismantle_json["sub_questions"]):
         if count == 2:
@@ -2686,7 +2743,11 @@ async def _run_multi_hop_with_rag(
             )
             memory_new = {"历史信息总结": summary_result["answer"]}
             count = 0
-            images_list.extend(summary_result["image_list"])
+            referenced_file_paths.extend(
+                summary_result.get("referenced_file_paths")
+                or summary_result.get("image_list")
+                or []
+            )
             if include_trace:
                 steps.append(
                     {
@@ -2719,7 +2780,11 @@ async def _run_multi_hop_with_rag(
         memory_new[sub_question] = step_result["answer"]
         count += 1
         final_answer = step_result["answer"]
-        images_list.extend(step_result["image_list"])
+        referenced_file_paths.extend(
+            step_result.get("referenced_file_paths")
+            or step_result.get("image_list")
+            or []
+        )
         if include_trace:
             steps.append(
                 {
@@ -2733,11 +2798,13 @@ async def _run_multi_hop_with_rag(
                 }
             )
 
+    normalized_references = _normalize_referenced_file_paths(referenced_file_paths)
     result = {
         "query": query,
         "decomposition": res_dismantle_json,
         "answer": final_answer,
-        "image_list": sorted([item for item in set(images_list) if item != "unknown_source"]),
+        "referenced_file_paths": normalized_references,
+        "image_list": normalized_references,
     }
     if include_trace:
         result["steps"] = steps
@@ -2885,14 +2952,17 @@ def _image_text_ping_sync(prompt: str) -> str:
             "payload": payload,
         },
     )
+    image_req_start = time.perf_counter()
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout_sec)
     resp.raise_for_status()
     data = resp.json()
+    image_elapsed = time.perf_counter() - image_req_start
     record_model_usage(
         "image",
         image_model,
         data,
         source="integrations._image_text_ping_sync",
+        extra={"elapsed_seconds": round(image_elapsed, 3)},
     )
     return data["choices"][0]["message"]["content"]
 
@@ -3030,7 +3100,8 @@ async def initialize_rag(
 ):
     total_started_at = time.perf_counter()
     startup_started_at = time.perf_counter()
-    await ensure_startup_model_check_once()
+    with model_usage_stage("startup_model_check", "启动前模型检查"):
+        await ensure_startup_model_check_once()
     if stage_timings is not None:
         stage_timings.append(
             {
@@ -3420,7 +3491,7 @@ async def inference_multi_hop_problem(work_dir, query, return_all: bool = False)
         metadata={"query": query, "trace": False},
     )
     if return_all:
-        return "question:"+ query +  "answer_multi_hop:" + result["answer"] + "\nimage_list:" + str(set(result["image_list"]))
+        return "question:"+ query +  "answer_multi_hop:" + result["answer"] + "\nreferenced_file_paths:" + str(set(result["referenced_file_paths"])) + "\nimage_list:" + str(set(result["image_list"]))
     else:
         return result["answer"]
 
@@ -3460,9 +3531,9 @@ async def inference_one_hop_problem(
         },
     )
     one_hop_query_response = result["answer"]
-    image_list = result["image_list"]
+    referenced_file_paths = result["referenced_file_paths"]
     if return_all:
-        return "question:"+ query +  "one_hop_query_response" + one_hop_query_response + "\nimage_list:" + str(image_list)
+        return "question:"+ query +  "one_hop_query_response" + one_hop_query_response + "\nreferenced_file_paths:" + str(referenced_file_paths) + "\nimage_list:" + str(result["image_list"])
     else:
         return one_hop_query_response
 
