@@ -16,6 +16,7 @@ from .utils import (
     logger,
     clean_str,
     compute_mdhash_id,
+    compute_structured_hash,
     Tokenizer,
     is_float_regex,
     normalize_extracted_info,
@@ -23,14 +24,15 @@ from .utils import (
     split_string_by_multi_markers,
     truncate_list_by_token_size,
     process_combine_contexts,
-    compute_args_hash,
     handle_cache,
     save_to_cache,
     CacheData,
     get_conversation_turns,
+    resolve_callable_cache_id,
     use_llm_func_with_cache,
     update_chunk_cache_list,
     remove_think_tags,
+    model_usage_stage,
 )
 from .base import (
     BaseGraphStorage,
@@ -101,6 +103,410 @@ def _resolve_answer_prompt_mode(
         )
         return "single_prompt"
     return resolved
+
+
+_QUERY_CACHE_SCHEMA_VERSION = 1
+_QUERY_CACHE_TYPE_KEYWORDS = "keywords"
+_QUERY_CACHE_TYPE_RETRIEVAL = "retrieval"
+_QUERY_CACHE_TYPE_RENDER = "render"
+_QUERY_CACHE_TYPE_ANSWER = "answer"
+_QUERY_RESULT_KIND_RETRIEVAL = "retrieval"
+_QUERY_RESULT_KIND_CONTEXT = "context"
+_QUERY_RESULT_KIND_PROMPT = "prompt"
+_QUERY_RESULT_KIND_ANSWER = "answer"
+
+
+def _validate_query_request_flags(query_param: QueryParam):
+    if query_param.only_need_context and query_param.only_need_prompt:
+        raise ValueError(
+            "only_need_context and only_need_prompt cannot both be True"
+        )
+
+
+def _normalize_conversation_history(
+    conversation_history: list[dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    normalized_history = []
+    for item in conversation_history or []:
+        normalized_history.append(
+            {
+                "role": str(item.get("role", "")),
+                "content": str(item.get("content", "")),
+            }
+        )
+    return normalized_history
+
+
+def _normalize_referenced_file_paths(file_paths: Any) -> list[str]:
+    if not file_paths:
+        return []
+    if isinstance(file_paths, (str, bytes)):
+        file_paths = [file_paths]
+    normalized_paths: set[str] = set()
+    for item in file_paths:
+        file_path = str(item or "").strip()
+        if file_path and file_path != "unknown_source":
+            normalized_paths.add(file_path)
+    return sorted(normalized_paths)
+
+
+def _collect_referenced_file_paths(*collections: list[dict[str, Any]]) -> list[str]:
+    file_paths: list[str] = []
+    for collection in collections:
+        for item in collection or []:
+            if not isinstance(item, dict):
+                continue
+            file_path = str(item.get("file_path") or "").strip()
+            if file_path and file_path != "unknown_source":
+                file_paths.append(file_path)
+    return _normalize_referenced_file_paths(file_paths)
+
+
+def _query_cache_enabled(hashing_kv: BaseKVStorage | None) -> bool:
+    return bool(
+        hashing_kv is not None and hashing_kv.global_config.get("enable_llm_cache")
+    )
+
+
+def _resolve_query_model_identifier(
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+) -> Any | None:
+    if query_param.model_func is not None:
+        callable_id = resolve_callable_cache_id(query_param.model_func)
+        if callable_id is None:
+            return None
+        return {"source": "query_override", "callable": callable_id}
+
+    llm_model_name = global_config.get("llm_model_name")
+    if llm_model_name:
+        return {"source": "global", "model_name": llm_model_name}
+
+    callable_id = resolve_callable_cache_id(global_config.get("llm_model_func"))
+    if callable_id is None:
+        return None
+    return {"source": "global", "callable": callable_id}
+
+
+def _resolve_rerank_identifier(global_config: dict[str, Any]) -> Any:
+    rerank_identifier: dict[str, Any] = {}
+    rerank_model_name = os.getenv("RERANK_MODEL")
+    if rerank_model_name:
+        rerank_identifier["model_name"] = rerank_model_name
+    rerank_callable = resolve_callable_cache_id(global_config.get("rerank_model_func"))
+    if rerank_callable is not None:
+        rerank_identifier["callable"] = rerank_callable
+    return rerank_identifier or None
+
+
+def _resolve_tokenizer_identifier(global_config: dict[str, Any]) -> dict[str, Any]:
+    tokenizer = global_config.get("tokenizer")
+    if tokenizer is None:
+        return {}
+    tokenizer_identifier = {
+        "type": f"{type(tokenizer).__module__}.{type(tokenizer).__qualname__}"
+    }
+    tokenizer_model_name = (
+        global_config.get("tiktoken_model_name")
+        or getattr(tokenizer, "model_name", None)
+    )
+    if tokenizer_model_name:
+        tokenizer_identifier["model_name"] = tokenizer_model_name
+    return tokenizer_identifier
+
+
+def _build_query_request_fingerprint_payload(
+    *,
+    scope: str,
+    query: str,
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+    answer_prompt_mode: str,
+    system_prompt: str | None = None,
+    render_kind: str | None = None,
+) -> dict[str, Any] | None:
+    query_model_identifier = _resolve_query_model_identifier(query_param, global_config)
+    if scope in (_QUERY_CACHE_TYPE_KEYWORDS, _QUERY_CACHE_TYPE_RETRIEVAL, _QUERY_CACHE_TYPE_ANSWER) and query_model_identifier is None:
+        logger.debug("Skip query cache: unable to resolve a stable model identifier.")
+        return None
+
+    normalized_history = _normalize_conversation_history(
+        query_param.conversation_history
+    )
+    addon_params = global_config.get("addon_params") or {}
+    if not isinstance(addon_params, dict):
+        addon_params = {}
+
+    payload: dict[str, Any] = {
+        "schema_version": _QUERY_CACHE_SCHEMA_VERSION,
+        "scope": scope,
+        "mode": query_param.mode,
+        "query": query,
+    }
+
+    if scope == _QUERY_CACHE_TYPE_KEYWORDS:
+        payload.update(
+            {
+                "conversation_history": normalized_history,
+                "history_turns": query_param.history_turns,
+                "language": addon_params.get("language"),
+                "example_number": addon_params.get("example_number"),
+                "model": query_model_identifier,
+            }
+        )
+        return payload
+
+    if scope == _QUERY_CACHE_TYPE_RETRIEVAL:
+        payload.update(
+            {
+                "ids": list(query_param.ids or []),
+                "top_k": query_param.top_k,
+                "chunk_top_k": query_param.chunk_top_k,
+                "max_entity_tokens": query_param.max_entity_tokens,
+                "max_relation_tokens": query_param.max_relation_tokens,
+                "max_total_tokens": query_param.max_total_tokens,
+                "enable_rerank": query_param.enable_rerank,
+                "conversation_history": normalized_history,
+                "history_turns": query_param.history_turns,
+                "keyword_language": addon_params.get("language"),
+                "keyword_example_number": addon_params.get("example_number"),
+                "tokenizer": _resolve_tokenizer_identifier(global_config),
+                "query_model": query_model_identifier,
+                "rerank_model": _resolve_rerank_identifier(global_config),
+                "addon_params": addon_params,
+            }
+        )
+        return payload
+
+    if scope == _QUERY_CACHE_TYPE_RENDER:
+        if render_kind not in (_QUERY_RESULT_KIND_CONTEXT, _QUERY_RESULT_KIND_PROMPT):
+            raise ValueError(f"Unsupported render kind: {render_kind}")
+        retrieval_fingerprint_payload = _build_query_request_fingerprint_payload(
+            scope=_QUERY_CACHE_TYPE_RETRIEVAL,
+            query=query,
+            query_param=query_param,
+            global_config=global_config,
+            answer_prompt_mode=answer_prompt_mode,
+        )
+        if retrieval_fingerprint_payload is None:
+            return None
+        payload.update(
+            {
+                "render_kind": render_kind,
+                "answer_prompt_mode": answer_prompt_mode,
+                "retrieval_fingerprint": retrieval_fingerprint_payload,
+            }
+        )
+        if render_kind == _QUERY_RESULT_KIND_PROMPT:
+            payload.update(
+                {
+                    "response_type": query_param.response_type,
+                    "user_prompt": query_param.user_prompt,
+                    "conversation_history": normalized_history,
+                    "history_turns": query_param.history_turns,
+                    "system_prompt": system_prompt,
+                }
+            )
+        return payload
+
+    if scope == _QUERY_CACHE_TYPE_ANSWER:
+        if query_param.stream:
+            return None
+        render_prompt_payload = _build_query_request_fingerprint_payload(
+            scope=_QUERY_CACHE_TYPE_RENDER,
+            query=query,
+            query_param=query_param,
+            global_config=global_config,
+            answer_prompt_mode=answer_prompt_mode,
+            system_prompt=system_prompt,
+            render_kind=_QUERY_RESULT_KIND_PROMPT,
+        )
+        if render_prompt_payload is None:
+            return None
+        payload.update(
+            {
+                "result_kind": _QUERY_RESULT_KIND_ANSWER,
+                "render_prompt_fingerprint": render_prompt_payload,
+                "answer_model": query_model_identifier,
+            }
+        )
+        return payload
+
+    raise ValueError(f"Unsupported query cache scope: {scope}")
+
+
+def _build_query_request_fingerprint(
+    *,
+    scope: str,
+    query: str,
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+    answer_prompt_mode: str,
+    system_prompt: str | None = None,
+    render_kind: str | None = None,
+) -> str | None:
+    payload = _build_query_request_fingerprint_payload(
+        scope=scope,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
+        answer_prompt_mode=answer_prompt_mode,
+        system_prompt=system_prompt,
+        render_kind=render_kind,
+    )
+    if payload is None:
+        return None
+    return compute_structured_hash(payload, strict=True)
+
+
+def _build_query_cache_payload(
+    *,
+    result_kind: str,
+    answer: str = "",
+    context_text: str = "",
+    prompt_text: str = "",
+    referenced_file_paths: list[str] | None = None,
+    final_context_document_chunks: list[dict[str, Any]] | None = None,
+    debug_payload_cacheable: dict[str, Any] | None = None,
+    context_available: bool = True,
+) -> dict[str, Any]:
+    return {
+        "schema_version": _QUERY_CACHE_SCHEMA_VERSION,
+        "result_kind": result_kind,
+        "answer": answer,
+        "context_text": context_text,
+        "prompt_text": prompt_text,
+        "referenced_file_paths": _normalize_referenced_file_paths(
+            referenced_file_paths or []
+        ),
+        "final_context_document_chunks": list(final_context_document_chunks or []),
+        "debug_payload_cacheable": dict(debug_payload_cacheable or {}),
+        "context_available": context_available,
+    }
+
+
+def _coerce_query_cache_payload(
+    cached_content: Any,
+    *,
+    expected_result_kind: str | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(cached_content, dict):
+        return None
+    payload = dict(cached_content)
+    result_kind = str(payload.get("result_kind") or "").strip()
+    if expected_result_kind is not None and result_kind != expected_result_kind:
+        return None
+    final_context_document_chunks = payload.get("final_context_document_chunks") or []
+    if not isinstance(final_context_document_chunks, list):
+        final_context_document_chunks = []
+    debug_payload_cacheable = payload.get("debug_payload_cacheable") or {}
+    if not isinstance(debug_payload_cacheable, dict):
+        debug_payload_cacheable = {}
+    return {
+        "schema_version": payload.get("schema_version", _QUERY_CACHE_SCHEMA_VERSION),
+        "result_kind": result_kind,
+        "answer": str(payload.get("answer") or ""),
+        "context_text": str(payload.get("context_text") or ""),
+        "prompt_text": str(payload.get("prompt_text") or ""),
+        "referenced_file_paths": _normalize_referenced_file_paths(
+            payload.get("referenced_file_paths") or []
+        ),
+        "final_context_document_chunks": list(final_context_document_chunks),
+        "debug_payload_cacheable": dict(debug_payload_cacheable),
+        "context_available": bool(payload.get("context_available", True)),
+    }
+
+
+def _strip_stage_timings(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value for key, value in payload.items() if key != "stage_timings"
+    }
+
+
+def _hydrate_debug_payload(
+    *,
+    cacheable_debug_payload: dict[str, Any],
+    context_text: str,
+    prompt_text: str,
+    final_context_document_chunks: list[dict[str, Any]],
+    stage_timings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    debug_payload = dict(cacheable_debug_payload or {})
+    debug_payload["final_context_document_chunks"] = list(
+        final_context_document_chunks or []
+    )
+    debug_payload["final_context_text"] = context_text
+    debug_payload["final_prompt_text"] = prompt_text
+    debug_payload["stage_timings"] = stage_timings
+    return debug_payload
+
+
+async def _load_query_cache_payload(
+    hashing_kv: BaseKVStorage | None,
+    *,
+    args_hash: str | None,
+    mode: str,
+    cache_type: str,
+    expected_result_kind: str,
+    stage_timings: list[dict[str, Any]] | None = None,
+    lookup_stage: str | None = None,
+    lookup_label: str | None = None,
+    hit_stage: str | None = None,
+    hit_label: str | None = None,
+) -> dict[str, Any] | None:
+    if not _query_cache_enabled(hashing_kv) or not args_hash:
+        return None
+
+    stage_started_at = time.perf_counter()
+    cached_content, _, _, _ = await handle_cache(
+        hashing_kv,
+        args_hash,
+        "",
+        mode,
+        cache_type=cache_type,
+    )
+    if (
+        stage_timings is not None
+        and lookup_stage is not None
+        and lookup_label is not None
+    ):
+        _record_stage_timing(stage_timings, lookup_stage, lookup_label, stage_started_at)
+
+    payload = _coerce_query_cache_payload(
+        cached_content,
+        expected_result_kind=expected_result_kind,
+    )
+    if (
+        payload is not None
+        and stage_timings is not None
+        and hit_stage is not None
+        and hit_label is not None
+    ):
+        _append_stage_timing(stage_timings, hit_stage, hit_label, 0.0)
+    return payload
+
+
+async def _save_query_cache_payload(
+    hashing_kv: BaseKVStorage | None,
+    *,
+    args_hash: str | None,
+    mode: str,
+    cache_type: str,
+    prompt: str,
+    payload: dict[str, Any],
+):
+    if not _query_cache_enabled(hashing_kv) or not args_hash:
+        return
+    await save_to_cache(
+        hashing_kv,
+        CacheData(
+            args_hash=args_hash,
+            content=payload,
+            prompt=prompt,
+            mode=mode,
+            cache_type=cache_type,
+        ),
+    )
 
 
 def _sanitize_llm_context_payload(
@@ -183,8 +589,6 @@ def _sanitize_llm_context_payload(
         ]
     return payload
 
-
-_KEYWORD_EXTRACTION_CACHE_VERSION = "v2"
 _MEASUREMENT_UNITS_PATTERN = (
     r"(?:kg|千克|g|克|斤|千卡|kcal|卡|大卡|cm|厘米|mm|毫米|m|米|ml|毫升|l|升|"
     r"mg|毫克|ug|微克|μg|mmhg|毫米汞柱|分钟|min|小时|h|天|周|月|个月|年|岁|次|%|％)"
@@ -2397,6 +2801,512 @@ async def extract_entities(
     return chunk_results
 
 
+async def _build_graph_context_debug_data_from_hits(
+    query: str,
+    *,
+    ll_entities_context: list[dict[str, Any]],
+    hl_entities_context: list[dict[str, Any]],
+    ll_relations_context: list[dict[str, Any]],
+    hl_relations_context: list[dict[str, Any]],
+    ll_node_datas: list[dict[str, Any]],
+    hl_node_datas: list[dict[str, Any]],
+    ll_edge_datas: list[dict[str, Any]],
+    hl_edge_datas: list[dict[str, Any]],
+    knowledge_graph_inst: BaseGraphStorage,
+    text_chunks_db: BaseKVStorage,
+    query_param: QueryParam,
+    timing_collector: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    logger.info(f"Process {os.getpid()} building graph retrieval context...")
+    stage_timings = timing_collector if timing_collector is not None else []
+    context_total_started_at = time.perf_counter()
+
+    all_chunks: list[dict[str, Any]] = []
+    entities_context = process_combine_contexts(
+        ll_entities_context,
+        hl_entities_context,
+    )
+    relations_context = process_combine_contexts(
+        hl_relations_context,
+        ll_relations_context,
+    )
+    original_node_datas = list(ll_node_datas or []) + list(hl_node_datas or [])
+    original_edge_datas = list(ll_edge_datas or []) + list(hl_edge_datas or [])
+
+    logger.info(
+        "Initial graph context: %s entities, %s relations, %s chunks",
+        len(entities_context),
+        len(relations_context),
+        len(all_chunks),
+    )
+
+    tokenizer = text_chunks_db.global_config.get("tokenizer")
+    stage_started_at = time.perf_counter()
+    if tokenizer:
+        max_entity_tokens = getattr(
+            query_param,
+            "max_entity_tokens",
+            text_chunks_db.global_config.get(
+                "max_entity_tokens", DEFAULT_MAX_ENTITY_TOKENS
+            ),
+        )
+        max_relation_tokens = getattr(
+            query_param,
+            "max_relation_tokens",
+            text_chunks_db.global_config.get(
+                "max_relation_tokens", DEFAULT_MAX_RELATION_TOKENS
+            ),
+        )
+        max_total_tokens = getattr(
+            query_param,
+            "max_total_tokens",
+            text_chunks_db.global_config.get(
+                "max_total_tokens", DEFAULT_MAX_TOTAL_TOKENS
+            ),
+        )
+
+        if entities_context:
+            original_entity_count = len(entities_context)
+            for entity in entities_context:
+                if "file_path" in entity and entity["file_path"]:
+                    entity["file_path"] = entity["file_path"].replace(
+                        GRAPH_FIELD_SEP, ";"
+                    )
+            entities_context = truncate_list_by_token_size(
+                entities_context,
+                key=lambda item: json.dumps(item, ensure_ascii=False),
+                max_token_size=max_entity_tokens,
+                tokenizer=tokenizer,
+            )
+            if len(entities_context) < original_entity_count:
+                logger.debug(
+                    "Truncated entities: %s -> %s (entity max tokens: %s)",
+                    original_entity_count,
+                    len(entities_context),
+                    max_entity_tokens,
+                )
+
+        if relations_context:
+            original_relation_count = len(relations_context)
+            for relation in relations_context:
+                if "file_path" in relation and relation["file_path"]:
+                    relation["file_path"] = relation["file_path"].replace(
+                        GRAPH_FIELD_SEP, ";"
+                    )
+            relations_context = truncate_list_by_token_size(
+                relations_context,
+                key=lambda item: json.dumps(item, ensure_ascii=False),
+                max_token_size=max_relation_tokens,
+                tokenizer=tokenizer,
+            )
+            if len(relations_context) < original_relation_count:
+                logger.debug(
+                    "Truncated relations: %s -> %s (relation max tokens: %s)",
+                    original_relation_count,
+                    len(relations_context),
+                    max_relation_tokens,
+                )
+    if timing_collector is not None:
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_structured_pruning",
+            "图谱上下文整理 / 实体关系裁剪",
+            stage_started_at,
+        )
+
+    logger.info("Getting text chunks based on truncated entities and relations...")
+    final_node_datas: list[dict[str, Any]] = []
+    if entities_context and original_node_datas:
+        final_entity_names = {item["entity"] for item in entities_context}
+        seen_nodes = set()
+        for node in original_node_datas:
+            name = node.get("entity_name")
+            if name in final_entity_names and name not in seen_nodes:
+                final_node_datas.append(node)
+                seen_nodes.add(name)
+
+    final_edge_datas: list[dict[str, Any]] = []
+    if relations_context and original_edge_datas:
+        final_relation_pairs = {
+            (item["entity1"], item["entity2"]) for item in relations_context
+        }
+        seen_edges = set()
+        for edge in original_edge_datas:
+            src, tgt = edge.get("src_id"), edge.get("tgt_id")
+            if src is None or tgt is None:
+                src, tgt = edge.get("src_tgt", (None, None))
+            pair = (src, tgt)
+            if pair in final_relation_pairs and pair not in seen_edges:
+                final_edge_datas.append(edge)
+                seen_edges.add(pair)
+
+    text_chunk_tasks = []
+    if final_node_datas:
+        text_chunk_tasks.append(
+            _find_most_related_text_unit_from_entities(
+                final_node_datas,
+                query_param,
+                text_chunks_db,
+                knowledge_graph_inst,
+            )
+        )
+    if final_edge_datas:
+        text_chunk_tasks.append(
+            _find_related_text_unit_from_relationships(
+                final_edge_datas,
+                query_param,
+                text_chunks_db,
+            )
+        )
+
+    stage_started_at = time.perf_counter()
+    if text_chunk_tasks:
+        text_chunk_results = await asyncio.gather(*text_chunk_tasks)
+        for chunks in text_chunk_results:
+            if chunks:
+                all_chunks.extend(chunks)
+    if timing_collector is not None:
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_chunk_lookup",
+            "图谱上下文补召回 / 文档块",
+            stage_started_at,
+        )
+
+    text_units_context: list[dict[str, Any]] = []
+    stage_started_at = time.perf_counter()
+    if tokenizer and all_chunks:
+        entities_str = json.dumps(entities_context, ensure_ascii=False)
+        relations_str = json.dumps(relations_context, ensure_ascii=False)
+        kg_context_template = """-----Entities(KG)-----
+
+```json
+{entities_str}
+```
+
+-----Relationships(KG)-----
+
+```json
+{relations_str}
+```
+
+-----Document Chunks(DC)-----
+
+```json
+[]
+```
+
+"""
+        kg_context = kg_context_template.format(
+            entities_str=entities_str,
+            relations_str=relations_str,
+        )
+        kg_context_tokens = len(tokenizer.encode(kg_context))
+
+        history_context = ""
+        if query_param.conversation_history:
+            history_context = get_conversation_turns(
+                query_param.conversation_history,
+                query_param.history_turns,
+            )
+
+        user_prompt = query_param.user_prompt if query_param.user_prompt else ""
+        response_type = query_param.response_type or "Multiple Paragraphs"
+        sys_prompt_template = text_chunks_db.global_config.get(
+            "system_prompt_template", PROMPTS["rag_response"]
+        )
+        sample_sys_prompt = sys_prompt_template.format(
+            history=history_context,
+            context_data="",
+            response_type=response_type,
+            user_prompt=user_prompt,
+        )
+        query_tokens = len(tokenizer.encode(query))
+        sys_prompt_template_tokens = len(tokenizer.encode(sample_sys_prompt))
+        sys_prompt_overhead = sys_prompt_template_tokens + query_tokens
+        buffer_tokens = 100
+        used_tokens = kg_context_tokens + sys_prompt_overhead + buffer_tokens
+        available_chunk_tokens = max_total_tokens - used_tokens
+
+        logger.debug(
+            "Token allocation - Total: %s, SysPrompt: %s, KG: %s, Buffer: %s, Available for chunks: %s",
+            max_total_tokens,
+            sys_prompt_overhead,
+            kg_context_tokens,
+            buffer_tokens,
+            available_chunk_tokens,
+        )
+
+        temp_chunks = [chunk.copy() for chunk in all_chunks]
+        truncated_chunks = await process_chunks_unified(
+            query=query,
+            chunks=temp_chunks,
+            query_param=query_param,
+            global_config=text_chunks_db.global_config,
+            source_type="mixed",
+            chunk_token_limit=available_chunk_tokens,
+        )
+        for index, chunk in enumerate(truncated_chunks):
+            text_units_context.append(_build_chunk_context_entry(index + 1, chunk))
+
+        logger.debug(
+            "Re-truncated chunks for dynamic token limit: %s -> %s (chunk available tokens: %s)",
+            len(temp_chunks),
+            len(text_units_context),
+            available_chunk_tokens,
+        )
+    if timing_collector is not None:
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_chunk_postprocess",
+            "图谱上下文整理 / Chunk 重排与截断",
+            stage_started_at,
+        )
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_total",
+            "图谱上下文构建总耗时",
+            context_total_started_at,
+        )
+
+    referenced_file_paths = _collect_referenced_file_paths(
+        entities_context,
+        relations_context,
+        text_units_context,
+    )
+
+    logger.info(
+        "Final graph retrieval context: %s entities, %s relations, %s chunks",
+        len(entities_context),
+        len(relations_context),
+        len(text_units_context),
+    )
+
+    return {
+        "entities_context": entities_context,
+        "relations_context": relations_context,
+        "text_units_context": text_units_context,
+        "referenced_file_paths": referenced_file_paths,
+        "context_available": bool(entities_context or relations_context),
+        "stage_timings": stage_timings,
+    }
+
+
+async def _build_graph_retrieval_debug_data(
+    query: str,
+    knowledge_graph_inst: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
+    text_chunks_db: BaseKVStorage,
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+    hashing_kv: BaseKVStorage | None = None,
+) -> dict[str, Any]:
+    stage_timings: list[dict[str, Any]] = []
+    stage_started_at = time.perf_counter()
+    hl_keywords, ll_keywords = await get_keywords_from_query(
+        query,
+        query_param,
+        global_config,
+        hashing_kv,
+    )
+    _record_stage_timing(
+        stage_timings,
+        "keyword_extraction",
+        "关键词提取",
+        stage_started_at,
+    )
+
+    ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
+    hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+
+    stage_started_at = time.perf_counter()
+    ll_entities_context, ll_relations_context, ll_node_datas, ll_use_relations = (
+        await _get_node_data(
+            ll_keywords_str,
+            knowledge_graph_inst,
+            entities_vdb,
+            query_param,
+        )
+    )
+    _record_stage_timing(
+        stage_timings,
+        "graph_entity_hits",
+        "图谱命中 / 实体",
+        stage_started_at,
+    )
+
+    stage_started_at = time.perf_counter()
+    hl_entities_context, hl_relations_context, hl_edge_datas, hl_use_entities = (
+        await _get_edge_data(
+            hl_keywords_str,
+            knowledge_graph_inst,
+            relationships_vdb,
+            query_param,
+        )
+    )
+    _record_stage_timing(
+        stage_timings,
+        "graph_relation_hits",
+        "图谱命中 / 关系",
+        stage_started_at,
+    )
+
+    graph_entities = process_combine_contexts(
+        ll_entities_context,
+        hl_entities_context,
+    )
+    graph_relations = process_combine_contexts(
+        hl_relations_context,
+        ll_relations_context,
+    )
+
+    context_debug = await _build_graph_context_debug_data_from_hits(
+        query,
+        ll_entities_context=ll_entities_context,
+        hl_entities_context=hl_entities_context,
+        ll_relations_context=ll_relations_context,
+        hl_relations_context=hl_relations_context,
+        ll_node_datas=ll_node_datas,
+        hl_node_datas=hl_use_entities,
+        ll_edge_datas=ll_use_relations,
+        hl_edge_datas=hl_edge_datas,
+        knowledge_graph_inst=knowledge_graph_inst,
+        text_chunks_db=text_chunks_db,
+        query_param=query_param,
+        timing_collector=stage_timings,
+    )
+
+    return {
+        "high_level_keywords": hl_keywords,
+        "low_level_keywords": ll_keywords,
+        "graph_entities": graph_entities,
+        "graph_relations": graph_relations,
+        **context_debug,
+        "stage_timings": stage_timings,
+    }
+
+
+def _build_graph_context_cache_payload(
+    retrieval_debug: dict[str, Any],
+    *,
+    answer_prompt_mode: str,
+) -> dict[str, Any]:
+    context_available = bool(retrieval_debug.get("context_available"))
+    referenced_file_paths = retrieval_debug.get("referenced_file_paths") or []
+    debug_payload_cacheable = _strip_stage_timings(retrieval_debug)
+    if not context_available:
+        return _build_query_cache_payload(
+            result_kind=_QUERY_RESULT_KIND_CONTEXT,
+            context_text=PROMPTS["fail_response"],
+            referenced_file_paths=referenced_file_paths,
+            final_context_document_chunks=[],
+            debug_payload_cacheable=debug_payload_cacheable,
+            context_available=False,
+        )
+
+    llm_entities_context = _sanitize_llm_context_payload(
+        retrieval_debug.get("entities_context", []),
+        answer_prompt_mode=answer_prompt_mode,
+    )
+    llm_relations_context = _sanitize_llm_context_payload(
+        retrieval_debug.get("relations_context", []),
+        answer_prompt_mode=answer_prompt_mode,
+    )
+    llm_text_units_context = _sanitize_llm_context_payload(
+        retrieval_debug.get("text_units_context", []),
+        answer_prompt_mode=answer_prompt_mode,
+    )
+    entities_str = json.dumps(llm_entities_context, ensure_ascii=False)
+    relations_str = json.dumps(llm_relations_context, ensure_ascii=False)
+    text_units_str = json.dumps(llm_text_units_context, ensure_ascii=False)
+    context_text = f"""-----Entities(KG)-----
+
+```json
+{entities_str}
+```
+
+-----Relationships(KG)-----
+
+```json
+{relations_str}
+```
+
+-----Document Chunks(DC)-----
+
+```json
+{text_units_str}
+```
+
+"""
+    return _build_query_cache_payload(
+        result_kind=_QUERY_RESULT_KIND_CONTEXT,
+        context_text=context_text,
+        referenced_file_paths=referenced_file_paths,
+        final_context_document_chunks=llm_text_units_context,
+        debug_payload_cacheable=debug_payload_cacheable,
+        context_available=True,
+    )
+
+
+def _build_graph_prompt_cache_payload(
+    context_payload: dict[str, Any],
+    *,
+    query_param: QueryParam,
+    system_prompt: str | None,
+    answer_prompt_mode: str,
+) -> dict[str, Any]:
+    if not context_payload.get("context_available", True):
+        return _build_query_cache_payload(
+            result_kind=_QUERY_RESULT_KIND_PROMPT,
+            context_text=context_payload.get("context_text", PROMPTS["fail_response"]),
+            referenced_file_paths=context_payload.get("referenced_file_paths") or [],
+            final_context_document_chunks=context_payload.get(
+                "final_context_document_chunks"
+            )
+            or [],
+            debug_payload_cacheable=context_payload.get("debug_payload_cacheable")
+            or {},
+            context_available=False,
+        )
+
+    history_context = ""
+    if query_param.conversation_history:
+        history_context = get_conversation_turns(
+            query_param.conversation_history, query_param.history_turns
+        )
+
+    user_prompt = (
+        query_param.user_prompt
+        if query_param.user_prompt
+        else PROMPTS["DEFAULT_USER_PROMPT"]
+    )
+    default_prompt_key = (
+        "rag_response_single_prompt"
+        if answer_prompt_mode == "single_prompt"
+        else "rag_response"
+    )
+    sys_prompt_template = system_prompt if system_prompt else PROMPTS[default_prompt_key]
+    prompt_text = sys_prompt_template.format(
+        context_data=context_payload["context_text"],
+        response_type=query_param.response_type,
+        history=history_context,
+        user_prompt=user_prompt,
+    )
+    return _build_query_cache_payload(
+        result_kind=_QUERY_RESULT_KIND_PROMPT,
+        context_text=context_payload["context_text"],
+        prompt_text=prompt_text,
+        referenced_file_paths=context_payload.get("referenced_file_paths") or [],
+        final_context_document_chunks=context_payload.get(
+            "final_context_document_chunks"
+        )
+        or [],
+        debug_payload_cacheable=context_payload.get("debug_payload_cacheable") or {},
+        context_available=True,
+    )
+
+
 async def graph_query(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
@@ -2410,6 +3320,7 @@ async def graph_query(
     chunks_vdb: BaseVectorStorage = None,
     return_debug: bool = False,
 ):
+    _validate_query_request_flags(query_param)
     stage_timings: list[dict[str, Any]] = []
     query_total_started_at = time.perf_counter()
     if query_param.model_func:
@@ -2419,164 +3330,265 @@ async def graph_query(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
-
-    # Handle cache
-    args_hash = compute_args_hash(query_param.mode, query, answer_prompt_mode)
-    stage_started_at = time.perf_counter()
-    cached_response, quantized, min_val, max_val = await handle_cache(
-        hashing_kv, args_hash, query, query_param.mode, cache_type="query"
-    )
-    _record_stage_timing(
-        stage_timings,
-        "query_cache_lookup",
-        "查询缓存检查",
-        stage_started_at,
-    )
-    stage_started_at = time.perf_counter()
-    hl_keywords, ll_keywords = await get_keywords_from_query(
-        query, query_param, global_config, hashing_kv
-    )
-    _record_stage_timing(
-        stage_timings,
-        "keyword_extraction",
-        "关键词提取",
-        stage_started_at,
+    answer_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_ANSWER,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
+        answer_prompt_mode=answer_prompt_mode,
+        system_prompt=system_prompt,
     )
 
-    logger.debug(f"High-level keywords: {hl_keywords}")
-    logger.debug(f"Low-level  keywords: {ll_keywords}")
+    if (
+        not return_debug
+        and not query_param.only_need_context
+        and not query_param.only_need_prompt
+    ):
+        answer_cache_payload = await _load_query_cache_payload(
+            hashing_kv,
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            expected_result_kind=_QUERY_RESULT_KIND_ANSWER,
+            stage_timings=stage_timings,
+            lookup_stage="query_cache_lookup",
+            lookup_label="最终答案缓存检查",
+            hit_stage="answer_cache_hit",
+            hit_label="最终答案缓存命中",
+        )
+        if answer_cache_payload is not None:
+            return (
+                answer_cache_payload["answer"],
+                answer_cache_payload["referenced_file_paths"],
+            )
 
-    ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
-    hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
-
-    stage_started_at = time.perf_counter()
-    ll_entities_context, ll_relations_context, _, _ = await _get_node_data(
-        ll_keywords_str,
-        knowledge_graph_inst,
-        entities_vdb,
-        query_param,
-    )
-    _record_stage_timing(
-        stage_timings,
-        "graph_entity_hits",
-        "图谱命中 / 实体",
-        stage_started_at,
-    )
-    stage_started_at = time.perf_counter()
-    hl_entities_context, hl_relations_context, _, _ = await _get_edge_data(
-        hl_keywords_str,
-        knowledge_graph_inst,
-        relationships_vdb,
-        query_param,
-    )
-    _record_stage_timing(
-        stage_timings,
-        "graph_relation_hits",
-        "图谱命中 / 关系",
-        stage_started_at,
-    )
-    graph_entities = process_combine_contexts(
-        ll_entities_context, hl_entities_context
-    )
-    graph_relations = process_combine_contexts(
-        hl_relations_context, ll_relations_context
-    )
-
-    # Build context
-    context = await _build_query_context(
-        query,
-        ll_keywords_str,
-        hl_keywords_str,
-        knowledge_graph_inst,
-        entities_vdb,
-        relationships_vdb,
-        text_chunks_db,
-        query_param,
-        chunks_vdb,
-        timing_collector=stage_timings,
+    retrieval_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_RETRIEVAL,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
         answer_prompt_mode=answer_prompt_mode,
     )
+    retrieval_cache_payload = await _load_query_cache_payload(
+        hashing_kv,
+        args_hash=retrieval_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
+        expected_result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+        stage_timings=stage_timings,
+        lookup_stage="retrieval_cache_lookup",
+        lookup_label="检索缓存检查",
+        hit_stage="retrieval_cache_hit",
+        hit_label="检索缓存命中",
+    )
+    if retrieval_cache_payload is not None:
+        retrieval_debug = dict(retrieval_cache_payload["debug_payload_cacheable"])
+    else:
+        retrieval_debug = await _build_graph_retrieval_debug_data(
+            query,
+            knowledge_graph_inst,
+            entities_vdb,
+            relationships_vdb,
+            text_chunks_db,
+            query_param,
+            global_config,
+            hashing_kv,
+        )
+        stage_timings.extend(retrieval_debug.get("stage_timings", []))
+        await _save_query_cache_payload(
+            hashing_kv,
+            args_hash=retrieval_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
+            prompt=query,
+            payload=_build_query_cache_payload(
+                result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+                referenced_file_paths=retrieval_debug.get("referenced_file_paths")
+                or [],
+                debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
+                context_available=bool(retrieval_debug.get("context_available", True)),
+            ),
+        )
 
-    debug_payload = {
-        "high_level_keywords": hl_keywords,
-        "low_level_keywords": ll_keywords,
-        "graph_entities": graph_entities,
-        "graph_relations": graph_relations,
-        "final_context_text": context if context is not None else "",
-        "final_prompt_text": "",
-        "stage_timings": stage_timings,
-    }
+    context_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_RENDER,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
+        answer_prompt_mode=answer_prompt_mode,
+        render_kind=_QUERY_RESULT_KIND_CONTEXT,
+    )
+    context_payload = await _load_query_cache_payload(
+        hashing_kv,
+        args_hash=context_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RENDER,
+        expected_result_kind=_QUERY_RESULT_KIND_CONTEXT,
+        stage_timings=stage_timings,
+        lookup_stage="render_cache_lookup",
+        lookup_label="上下文渲染缓存检查",
+        hit_stage="render_cache_hit",
+        hit_label="上下文渲染缓存命中",
+    )
+    if context_payload is None:
+        stage_started_at = time.perf_counter()
+        context_payload = _build_graph_context_cache_payload(
+            retrieval_debug,
+            answer_prompt_mode=answer_prompt_mode,
+        )
+        _record_stage_timing(
+            stage_timings,
+            "graph_context_serialize",
+            "图谱上下文整理 / 序列化",
+            stage_started_at,
+        )
+        await _save_query_cache_payload(
+            hashing_kv,
+            args_hash=context_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_RENDER,
+            prompt=query,
+            payload=context_payload,
+        )
+
+    referenced_file_paths = context_payload["referenced_file_paths"]
 
     if query_param.only_need_context:
-        context_output = context if context is not None else PROMPTS["fail_response"]
+        context_output = context_payload["context_text"]
         if return_debug:
-            debug_payload["final_context_text"] = context_output
-            return context_output, [], debug_payload
+            debug_payload = _hydrate_debug_payload(
+                cacheable_debug_payload=context_payload["debug_payload_cacheable"],
+                context_text=context_output,
+                prompt_text="",
+                final_context_document_chunks=context_payload[
+                    "final_context_document_chunks"
+                ],
+                stage_timings=stage_timings,
+            )
+            _record_stage_timing(
+                stage_timings,
+                "onehop_total",
+                "OneHop 查询总耗时",
+                query_total_started_at,
+            )
+            debug_payload["stage_timings"] = stage_timings
+            return context_output, referenced_file_paths, debug_payload
         return context_output
-    if context is None:
-        fail_response = PROMPTS["fail_response"]
-        if return_debug:
-            debug_payload["final_context_text"] = fail_response
-            return fail_response, [], debug_payload
-        return fail_response, []
 
-    # Process conversation history
-    history_context = ""
-    if query_param.conversation_history:
-        history_context = get_conversation_turns(
-            query_param.conversation_history, query_param.history_turns
+    if not context_payload.get("context_available", True):
+        fail_response = context_payload["context_text"]
+        _record_stage_timing(
+            stage_timings,
+            "onehop_total",
+            "OneHop 查询总耗时",
+            query_total_started_at,
         )
-
-    # Build system prompt
-    user_prompt = (
-        query_param.user_prompt
-        if query_param.user_prompt
-        else PROMPTS["DEFAULT_USER_PROMPT"]
-    )
-    default_prompt_key = (
-        "rag_response_single_prompt"
-        if answer_prompt_mode == "single_prompt"
-        else "rag_response"
-    )
-    sys_prompt_temp = system_prompt if system_prompt else PROMPTS[default_prompt_key]
-    sys_prompt = sys_prompt_temp.format(
-        context_data=context,
-        response_type=query_param.response_type,
-        history=history_context,
-        user_prompt=user_prompt,
-    )
-    debug_payload["final_prompt_text"] = sys_prompt
-    _append_stage_timing(
-        stage_timings,
-        "prompt_assembly",
-        "回答提示词拼装",
-        0.0,
-    )
-
-    if query_param.only_need_prompt:
         if return_debug:
-            return sys_prompt, [], debug_payload
-        return sys_prompt
+            debug_payload = _hydrate_debug_payload(
+                cacheable_debug_payload=context_payload["debug_payload_cacheable"],
+                context_text=fail_response,
+                prompt_text="",
+                final_context_document_chunks=context_payload[
+                    "final_context_document_chunks"
+                ],
+                stage_timings=stage_timings,
+            )
+            return fail_response, referenced_file_paths, debug_payload
+        return fail_response, referenced_file_paths
 
-    tokenizer: Tokenizer = global_config["tokenizer"]
-    len_of_prompts = len(tokenizer.encode(query + sys_prompt))
-    logger.debug(
-        f"[kg_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})"
+    prompt_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_RENDER,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
+        answer_prompt_mode=answer_prompt_mode,
+        system_prompt=system_prompt,
+        render_kind=_QUERY_RESULT_KIND_PROMPT,
     )
-
-    if cached_response is not None:
-        response = cached_response
+    prompt_payload = await _load_query_cache_payload(
+        hashing_kv,
+        args_hash=prompt_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RENDER,
+        expected_result_kind=_QUERY_RESULT_KIND_PROMPT,
+        stage_timings=stage_timings,
+        lookup_stage="prompt_cache_lookup",
+        lookup_label="Prompt 渲染缓存检查",
+        hit_stage="prompt_cache_hit",
+        hit_label="Prompt 渲染缓存命中",
+    )
+    if prompt_payload is None:
+        prompt_payload = _build_graph_prompt_cache_payload(
+            context_payload,
+            query_param=query_param,
+            system_prompt=system_prompt,
+            answer_prompt_mode=answer_prompt_mode,
+        )
         _append_stage_timing(
             stage_timings,
-            "answer_cache_hit",
-            "最终答案缓存命中",
+            "prompt_assembly",
+            "回答提示词拼装",
             0.0,
         )
+        await _save_query_cache_payload(
+            hashing_kv,
+            args_hash=prompt_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_RENDER,
+            prompt=query,
+            payload=prompt_payload,
+        )
+
+    if query_param.only_need_prompt:
+        prompt_text = prompt_payload["prompt_text"]
+        if return_debug:
+            _record_stage_timing(
+                stage_timings,
+                "onehop_total",
+                "OneHop 查询总耗时",
+                query_total_started_at,
+            )
+            debug_payload = _hydrate_debug_payload(
+                cacheable_debug_payload=prompt_payload["debug_payload_cacheable"],
+                context_text=context_payload["context_text"],
+                prompt_text=prompt_text,
+                final_context_document_chunks=context_payload[
+                    "final_context_document_chunks"
+                ],
+                stage_timings=stage_timings,
+            )
+            return prompt_text, referenced_file_paths, debug_payload
+        return prompt_text
+
+    tokenizer: Tokenizer = global_config["tokenizer"]
+    prompt_text = prompt_payload["prompt_text"]
+    len_of_prompts = len(tokenizer.encode(query + prompt_text))
+    logger.debug(
+        f"[kg_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(prompt_text))})"
+    )
+
+    answer_cache_payload = None
+    if return_debug:
+        answer_cache_payload = await _load_query_cache_payload(
+            hashing_kv,
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            expected_result_kind=_QUERY_RESULT_KIND_ANSWER,
+            stage_timings=stage_timings,
+            lookup_stage="answer_cache_lookup",
+            lookup_label="最终答案缓存检查",
+            hit_stage="answer_cache_hit",
+            hit_label="最终答案缓存命中",
+        )
+
+    if answer_cache_payload is not None:
+        response = answer_cache_payload["answer"]
     else:
         stage_started_at = time.perf_counter()
         response = await use_model_func(
             query,
-            system_prompt=sys_prompt,
+            system_prompt=prompt_text,
             stream=query_param.stream,
         )
         _record_stage_timing(
@@ -2587,9 +3599,9 @@ async def graph_query(
             else "回答生成 / 第一轮 LLM",
             stage_started_at,
         )
-        if isinstance(response, str) and len(response) > len(sys_prompt):
+        if isinstance(response, str) and len(response) > len(prompt_text):
             response = (
-                response.replace(sys_prompt, "")
+                response.replace(prompt_text, "")
                 .replace("user", "")
                 .replace("model", "")
                 .replace(query, "")
@@ -2610,22 +3622,26 @@ async def graph_query(
                 "回答润色 / 第二轮 LLM",
                 stage_started_at,
             )
-    image_file_path_list = []
-    if cached_response is None and hashing_kv.global_config.get("enable_llm_cache"):
-        # Save to cache
-        await save_to_cache(
+        await _save_query_cache_payload(
             hashing_kv,
-            CacheData(
-                args_hash=args_hash,
-                content=response,
-                prompt=query,
-                quantized=quantized,
-                min_val=min_val,
-                max_val=max_val,
-                mode=query_param.mode,
-                cache_type="query",
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            prompt=query,
+            payload=_build_query_cache_payload(
+                result_kind=_QUERY_RESULT_KIND_ANSWER,
+                answer=response if isinstance(response, str) else "",
+                context_text=context_payload["context_text"],
+                prompt_text=prompt_text,
+                referenced_file_paths=referenced_file_paths,
+                final_context_document_chunks=context_payload[
+                    "final_context_document_chunks"
+                ],
+                debug_payload_cacheable=prompt_payload["debug_payload_cacheable"],
+                context_available=True,
             ),
         )
+
     _record_stage_timing(
         stage_timings,
         "onehop_total",
@@ -2634,9 +3650,18 @@ async def graph_query(
     )
 
     if return_debug:
-        return response, image_file_path_list, debug_payload
+        debug_payload = _hydrate_debug_payload(
+            cacheable_debug_payload=prompt_payload["debug_payload_cacheable"],
+            context_text=context_payload["context_text"],
+            prompt_text=prompt_text,
+            final_context_document_chunks=context_payload[
+                "final_context_document_chunks"
+            ],
+            stage_timings=stage_timings,
+        )
+        return response, referenced_file_paths, debug_payload
 
-    return response, image_file_path_list
+    return response, referenced_file_paths
 
 
 async def get_keywords_from_query(
@@ -2684,20 +3709,33 @@ async def extract_keywords_only(
     """
 
     # 1. Handle cache if needed - add cache type for keywords
-    args_hash = compute_args_hash(
-        param.mode, text, _KEYWORD_EXTRACTION_CACHE_VERSION
+    args_hash = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_KEYWORDS,
+        query=text,
+        query_param=param,
+        global_config=global_config,
+        answer_prompt_mode=_resolve_answer_prompt_mode(param, global_config),
     )
-    cached_response, quantized, min_val, max_val = await handle_cache(
-        hashing_kv, args_hash, text, param.mode, cache_type="keywords"
-    )
+    cached_response = None
+    if args_hash:
+        cached_response, _, _, _ = await handle_cache(
+            hashing_kv,
+            args_hash,
+            text,
+            param.mode,
+            cache_type=_QUERY_CACHE_TYPE_KEYWORDS,
+        )
     if cached_response is not None:
         try:
-            keywords_data = json.loads(cached_response)
+            if isinstance(cached_response, dict):
+                keywords_data = cached_response
+            else:
+                keywords_data = json.loads(cached_response)
             return _postprocess_extracted_keywords(
                 keywords_data["high_level_keywords"],
                 keywords_data["low_level_keywords"],
             )
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, TypeError):
             logger.warning(
                 "Invalid cache format for keywords, proceeding with extraction"
             )
@@ -2774,18 +3812,15 @@ async def extract_keywords_only(
             "high_level_keywords": hl_keywords,
             "low_level_keywords": ll_keywords,
         }
-        if hashing_kv.global_config.get("enable_llm_cache"):
+        if _query_cache_enabled(hashing_kv) and args_hash:
             await save_to_cache(
                 hashing_kv,
                 CacheData(
                     args_hash=args_hash,
-                    content=json.dumps(cache_data),
+                    content=cache_data,
                     prompt=text,
-                    quantized=quantized,
-                    min_val=min_val,
-                    max_val=max_val,
                     mode=param.mode,
-                    cache_type="keywords",
+                    cache_type=_QUERY_CACHE_TYPE_KEYWORDS,
                 ),
             )
 
@@ -3978,9 +5013,10 @@ async def _build_hybrid_retrieval_debug_data(
     stage_timings: list[dict[str, Any]] = []
     retrieval_total_started_at = time.perf_counter()
     stage_started_at = time.perf_counter()
-    vector_weights, vector_texts, vector_file_paths, vector_metadata_map = await _get_vector_context_new(
-        query, chunks_vdb, query_param
-    )
+    with model_usage_stage("vector_retrieval", "混合召回 / Chunk 向量检索"):
+        vector_weights, vector_texts, vector_file_paths, vector_metadata_map = await _get_vector_context_new(
+            query, chunks_vdb, query_param
+        )
     _record_stage_timing(
         stage_timings,
         "vector_retrieval",
@@ -3989,9 +5025,10 @@ async def _build_hybrid_retrieval_debug_data(
     )
 
     stage_started_at = time.perf_counter()
-    hl_keywords, ll_keywords = await get_keywords_from_query(
-        query, query_param, global_config, hashing_kv
-    )
+    with model_usage_stage("keyword_extraction", "关键词提取"):
+        hl_keywords, ll_keywords = await get_keywords_from_query(
+            query, query_param, global_config, hashing_kv
+        )
     _record_stage_timing(
         stage_timings,
         "keyword_extraction",
@@ -4006,17 +5043,18 @@ async def _build_hybrid_retrieval_debug_data(
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
 
     stage_started_at = time.perf_counter()
-    (
-        ll_entities_context,
-        ll_relations_context,
-        ll_node_datas,
-        ll_use_relations,
-    ) = await _get_node_data(
-        ll_keywords_str,
-        knowledge_graph_inst,
-        entities_vdb,
-        query_param,
-    )
+    with model_usage_stage("graph_entity_hits", "图谱命中 / 实体"):
+        (
+            ll_entities_context,
+            ll_relations_context,
+            ll_node_datas,
+            ll_use_relations,
+        ) = await _get_node_data(
+            ll_keywords_str,
+            knowledge_graph_inst,
+            entities_vdb,
+            query_param,
+        )
     _record_stage_timing(
         stage_timings,
         "graph_entity_hits",
@@ -4024,17 +5062,18 @@ async def _build_hybrid_retrieval_debug_data(
         stage_started_at,
     )
     stage_started_at = time.perf_counter()
-    (
-        hl_entities_context,
-        hl_relations_context,
-        hl_edge_datas,
-        hl_use_entities,
-    ) = await _get_edge_data(
-        hl_keywords_str,
-        knowledge_graph_inst,
-        relationships_vdb,
-        query_param,
-    )
+    with model_usage_stage("graph_relation_hits", "图谱命中 / 关系"):
+        (
+            hl_entities_context,
+            hl_relations_context,
+            hl_edge_datas,
+            hl_use_entities,
+        ) = await _get_edge_data(
+            hl_keywords_str,
+            knowledge_graph_inst,
+            relationships_vdb,
+            query_param,
+        )
     _record_stage_timing(
         stage_timings,
         "graph_relation_hits",
@@ -4142,7 +5181,7 @@ async def _build_hybrid_retrieval_debug_data(
     results_sources = []
     results_source_labels = []
     results_chunk_metadata = []
-    image_file_path_list = []
+    referenced_file_paths = []
     merged_candidates = []
 
     for index, (chunk_id, score) in enumerate(topk_text, 1):
@@ -4161,7 +5200,7 @@ async def _build_hybrid_retrieval_debug_data(
         results_sources.append(sources)
         results_source_labels.append(source_label)
         results_chunk_metadata.append(chunk_metadata)
-        image_file_path_list.append(file_path)
+        referenced_file_paths.append(file_path)
         merged_candidate = {
             "rank": index,
             "source": source_label,
@@ -4182,14 +5221,15 @@ async def _build_hybrid_retrieval_debug_data(
 
     rerank_results = []
     stage_started_at = time.perf_counter()
-    if results_text and query_param.enable_rerank:
-        rerank_results = await rerank_from_env(
-            query=query,
-            documents=results_text,
-            top_k=len(results_text),
-        )
-    elif results_text:
-        rerank_results = [{"index": index} for index in range(len(results_text))]
+    with model_usage_stage("rerank", "Rerank 重排"):
+        if results_text and query_param.enable_rerank:
+            rerank_results = await rerank_from_env(
+                query=query,
+                documents=results_text,
+                top_k=len(results_text),
+            )
+        elif results_text:
+            rerank_results = [{"index": index} for index in range(len(results_text))]
     _record_stage_timing(
         stage_timings,
         "rerank",
@@ -4215,8 +5255,7 @@ async def _build_hybrid_retrieval_debug_data(
         stage_started_at,
     )
 
-    image_file_path_list = set(image_file_path_list)
-    image_file_path_list.discard("unknown_source")
+    referenced_file_paths = _normalize_referenced_file_paths(referenced_file_paths)
     _record_stage_timing(
         stage_timings,
         "hybrid_retrieval_total",
@@ -4249,9 +5288,85 @@ async def _build_hybrid_retrieval_debug_data(
         "results_source_labels": results_source_labels,
         "results_chunk_metadata": results_chunk_metadata,
         "text_units_context": text_units_context,
-        "image_file_path_list": image_file_path_list,
+        "referenced_file_paths": referenced_file_paths,
         "stage_timings": stage_timings,
     }
+
+
+def _build_hybrid_context_cache_payload(
+    retrieval_debug: dict[str, Any],
+    *,
+    answer_prompt_mode: str,
+) -> dict[str, Any]:
+    llm_text_units_context = _sanitize_llm_context_payload(
+        retrieval_debug.get("text_units_context", []),
+        answer_prompt_mode=answer_prompt_mode,
+    )
+    text_units_str = json.dumps(llm_text_units_context, ensure_ascii=False)
+    context_text = f"""
+---Document Chunks---
+
+```json
+{text_units_str}
+```
+
+"""
+    return _build_query_cache_payload(
+        result_kind=_QUERY_RESULT_KIND_CONTEXT,
+        context_text=context_text,
+        referenced_file_paths=retrieval_debug.get("referenced_file_paths") or [],
+        final_context_document_chunks=llm_text_units_context,
+        debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
+        context_available=True,
+    )
+
+
+def _build_hybrid_prompt_cache_payload(
+    context_payload: dict[str, Any],
+    *,
+    query_param: QueryParam,
+    system_prompt: str | None,
+    answer_prompt_mode: str,
+) -> dict[str, Any]:
+    history_context = ""
+    if query_param.conversation_history:
+        history_context = get_conversation_turns(
+            query_param.conversation_history, query_param.history_turns
+        )
+
+    user_prompt = (
+        query_param.user_prompt
+        if query_param.user_prompt
+        else PROMPTS["DEFAULT_USER_PROMPT"]
+    )
+    default_prompt_key = (
+        "naive_rag_response_single_prompt"
+        if answer_prompt_mode == "single_prompt"
+        else "naive_rag_response"
+    )
+    prompt_template = system_prompt if system_prompt else PROMPTS[default_prompt_key]
+    content_data = json.dumps(
+        context_payload.get("final_context_document_chunks") or [],
+        ensure_ascii=False,
+    )
+    prompt_text = prompt_template.format(
+        content_data=content_data,
+        response_type=query_param.response_type,
+        history=history_context,
+        user_prompt=user_prompt,
+    )
+    return _build_query_cache_payload(
+        result_kind=_QUERY_RESULT_KIND_PROMPT,
+        context_text=context_payload.get("context_text", ""),
+        prompt_text=prompt_text,
+        referenced_file_paths=context_payload.get("referenced_file_paths") or [],
+        final_context_document_chunks=context_payload.get(
+            "final_context_document_chunks"
+        )
+        or [],
+        debug_payload_cacheable=context_payload.get("debug_payload_cacheable") or {},
+        context_available=True,
+    )
 
 async def hybrid_query(
     query: str,
@@ -4266,6 +5381,7 @@ async def hybrid_query(
     system_prompt: str | None = None,
     return_debug: bool = False,
 ):
+    _validate_query_request_flags(query_param)
     stage_timings: list[dict[str, Any]] = []
     query_total_started_at = time.perf_counter()
     if query_param.model_func:
@@ -4275,161 +5391,296 @@ async def hybrid_query(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
-    args_hash = compute_args_hash(query_param.mode, query, answer_prompt_mode)
-    stage_started_at = time.perf_counter()
-    cached_response, quantized, min_val, max_val = await handle_cache(
-        hashing_kv, args_hash, query, query_param.mode, cache_type="query"
-    )
-    _record_stage_timing(
-        stage_timings,
-        "query_cache_lookup",
-        "查询缓存检查",
-        stage_started_at,
-    )
-
-    retrieval_debug = await _build_hybrid_retrieval_debug_data(
+    tokenizer: Tokenizer = global_config["tokenizer"]
+    answer_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_ANSWER,
         query=query,
-        chunks_vdb=chunks_vdb,
-        knowledge_graph_inst=knowledge_graph_inst,
-        relationships_vdb=relationships_vdb,
-        entities_vdb=entities_vdb,
-        text_chunks_db=text_chunks_db,
         query_param=query_param,
         global_config=global_config,
-        hashing_kv=hashing_kv,
+        answer_prompt_mode=answer_prompt_mode,
+        system_prompt=system_prompt,
     )
-    stage_timings.extend(retrieval_debug.get("stage_timings", []))
 
-    image_file_path_list = retrieval_debug["image_file_path_list"]
-    text_units_context = retrieval_debug["text_units_context"]
-    llm_text_units_context = _sanitize_llm_context_payload(
-        text_units_context,
+    if (
+        not return_debug
+        and not query_param.only_need_context
+        and not query_param.only_need_prompt
+    ):
+        answer_cache_payload = await _load_query_cache_payload(
+            hashing_kv,
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            expected_result_kind=_QUERY_RESULT_KIND_ANSWER,
+            stage_timings=stage_timings,
+            lookup_stage="query_cache_lookup",
+            lookup_label="最终答案缓存检查",
+            hit_stage="answer_cache_hit",
+            hit_label="最终答案缓存命中",
+        )
+        if answer_cache_payload is not None:
+            return (
+                answer_cache_payload["answer"],
+                answer_cache_payload["referenced_file_paths"],
+            )
+
+    retrieval_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_RETRIEVAL,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
         answer_prompt_mode=answer_prompt_mode,
     )
-
-    text_units_str = json.dumps(llm_text_units_context, ensure_ascii=False)
-    context_text = f"""
----Document Chunks---
-
-```json
-{text_units_str}
-```
-
-"""
-    tokenizer: Tokenizer = global_config["tokenizer"]
-    if query_param.only_need_context:
-        if return_debug:
-            debug_payload = {
-                **retrieval_debug,
-                "final_context_document_chunks": llm_text_units_context,
-                "final_context_text": context_text,
-                "final_prompt_text": "",
-                "stage_timings": stage_timings,
-            }
-            return context_text, image_file_path_list, debug_payload
-        return context_text
-    # Process conversation history
-    history_context = ""
-    if query_param.conversation_history:
-        history_context = get_conversation_turns(
-            query_param.conversation_history, query_param.history_turns
+    retrieval_cache_payload = await _load_query_cache_payload(
+        hashing_kv,
+        args_hash=retrieval_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
+        expected_result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+        stage_timings=stage_timings,
+        lookup_stage="retrieval_cache_lookup",
+        lookup_label="检索缓存检查",
+        hit_stage="retrieval_cache_hit",
+        hit_label="检索缓存命中",
+    )
+    if retrieval_cache_payload is not None:
+        retrieval_debug = dict(retrieval_cache_payload["debug_payload_cacheable"])
+    else:
+        retrieval_debug = await _build_hybrid_retrieval_debug_data(
+            query=query,
+            chunks_vdb=chunks_vdb,
+            knowledge_graph_inst=knowledge_graph_inst,
+            relationships_vdb=relationships_vdb,
+            entities_vdb=entities_vdb,
+            text_chunks_db=text_chunks_db,
+            query_param=query_param,
+            global_config=global_config,
+            hashing_kv=hashing_kv,
         )
-
-    # Build system prompt
-    user_prompt = (
-        query_param.user_prompt
-        if query_param.user_prompt
-        else PROMPTS["DEFAULT_USER_PROMPT"]
-    )
-    default_prompt_key = (
-        "naive_rag_response_single_prompt"
-        if answer_prompt_mode == "single_prompt"
-        else "naive_rag_response"
-    )
-    sys_prompt_temp = system_prompt if system_prompt else PROMPTS[default_prompt_key]
-    sys_prompt = sys_prompt_temp.format(
-        content_data=text_units_str,
-        response_type=query_param.response_type,
-        history=history_context,
-        user_prompt=user_prompt,
-    )
-    _append_stage_timing(
-        stage_timings,
-        "prompt_assembly",
-        "回答提示词拼装",
-        0.0,
-    )
-    if query_param.only_need_prompt:
-        if return_debug:
-            debug_payload = {
-                **retrieval_debug,
-                "final_context_document_chunks": llm_text_units_context,
-                "final_context_text": context_text,
-                "final_prompt_text": sys_prompt,
-                "stage_timings": stage_timings,
-            }
-            return sys_prompt, image_file_path_list, debug_payload
-        return sys_prompt
-
-    len_of_prompts = len(tokenizer.encode(query + sys_prompt))
-    logger.debug(
-        f"[naive_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})"
-    )
-
-    stage_started_at = time.perf_counter()
-    response = await use_model_func(
-        query,
-        system_prompt=sys_prompt,
-        stream=query_param.stream,
-    )
-    _record_stage_timing(
-        stage_timings,
-        "answer_generation",
-        "回答生成 / 单轮 LLM"
-        if answer_prompt_mode == "single_prompt"
-        else "回答生成 / 第一轮 LLM",
-        stage_started_at,
-    )
-
-    if isinstance(response, str) and len(response) > len(sys_prompt):
-        response = (
-            response[len(sys_prompt) :]
-            .replace(sys_prompt, "")
-            .replace("user", "")
-            .replace("model", "")
-            .replace(query, "")
-            .replace("<system>", "")
-            .replace("</system>", "")
-            .strip()
-        )
-    if answer_prompt_mode == "two_stage":
-        stage_started_at = time.perf_counter()
-        response = await use_model_func(
-            response,
-            system_prompt=PROMPTS["naive_rag_response_new"],
-            stream=query_param.stream,
-        )
-        _record_stage_timing(
-            stage_timings,
-            "answer_polish",
-            "回答润色 / 第二轮 LLM",
-            stage_started_at,
-        )
-    if hashing_kv.global_config.get("enable_llm_cache"):
-        # Save to cache
-        await save_to_cache(
+        stage_timings.extend(retrieval_debug.get("stage_timings", []))
+        await _save_query_cache_payload(
             hashing_kv,
-            CacheData(
-                args_hash=args_hash,
-                content=response,
-                prompt=query,
-                quantized=quantized,
-                min_val=min_val,
-                max_val=max_val,
-                mode=query_param.mode,
-                cache_type="query",
+            args_hash=retrieval_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
+            prompt=query,
+            payload=_build_query_cache_payload(
+                result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+                referenced_file_paths=retrieval_debug.get("referenced_file_paths")
+                or [],
+                debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
             ),
         )
+
+    context_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_RENDER,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
+        answer_prompt_mode=answer_prompt_mode,
+        render_kind=_QUERY_RESULT_KIND_CONTEXT,
+    )
+    context_payload = await _load_query_cache_payload(
+        hashing_kv,
+        args_hash=context_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RENDER,
+        expected_result_kind=_QUERY_RESULT_KIND_CONTEXT,
+        stage_timings=stage_timings,
+        lookup_stage="render_cache_lookup",
+        lookup_label="上下文渲染缓存检查",
+        hit_stage="render_cache_hit",
+        hit_label="上下文渲染缓存命中",
+    )
+    if context_payload is None:
+        context_payload = _build_hybrid_context_cache_payload(
+            retrieval_debug,
+            answer_prompt_mode=answer_prompt_mode,
+        )
+        await _save_query_cache_payload(
+            hashing_kv,
+            args_hash=context_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_RENDER,
+            prompt=query,
+            payload=context_payload,
+        )
+
+    referenced_file_paths = context_payload["referenced_file_paths"]
+    if query_param.only_need_context:
+        context_text = context_payload["context_text"]
+        if return_debug:
+            _record_stage_timing(
+                stage_timings,
+                "onehop_total",
+                "OneHop 查询总耗时",
+                query_total_started_at,
+            )
+            debug_payload = _hydrate_debug_payload(
+                cacheable_debug_payload=context_payload["debug_payload_cacheable"],
+                context_text=context_text,
+                prompt_text="",
+                final_context_document_chunks=context_payload[
+                    "final_context_document_chunks"
+                ],
+                stage_timings=stage_timings,
+            )
+            return context_text, referenced_file_paths, debug_payload
+        return context_text
+
+    prompt_cache_key = _build_query_request_fingerprint(
+        scope=_QUERY_CACHE_TYPE_RENDER,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
+        answer_prompt_mode=answer_prompt_mode,
+        system_prompt=system_prompt,
+        render_kind=_QUERY_RESULT_KIND_PROMPT,
+    )
+    prompt_payload = await _load_query_cache_payload(
+        hashing_kv,
+        args_hash=prompt_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RENDER,
+        expected_result_kind=_QUERY_RESULT_KIND_PROMPT,
+        stage_timings=stage_timings,
+        lookup_stage="prompt_cache_lookup",
+        lookup_label="Prompt 渲染缓存检查",
+        hit_stage="prompt_cache_hit",
+        hit_label="Prompt 渲染缓存命中",
+    )
+    if prompt_payload is None:
+        prompt_payload = _build_hybrid_prompt_cache_payload(
+            context_payload,
+            query_param=query_param,
+            system_prompt=system_prompt,
+            answer_prompt_mode=answer_prompt_mode,
+        )
+        _append_stage_timing(
+            stage_timings,
+            "prompt_assembly",
+            "回答提示词拼装",
+            0.0,
+        )
+        await _save_query_cache_payload(
+            hashing_kv,
+            args_hash=prompt_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_RENDER,
+            prompt=query,
+            payload=prompt_payload,
+        )
+
+    if query_param.only_need_prompt:
+        prompt_text = prompt_payload["prompt_text"]
+        if return_debug:
+            _record_stage_timing(
+                stage_timings,
+                "onehop_total",
+                "OneHop 查询总耗时",
+                query_total_started_at,
+            )
+            debug_payload = _hydrate_debug_payload(
+                cacheable_debug_payload=prompt_payload["debug_payload_cacheable"],
+                context_text=context_payload["context_text"],
+                prompt_text=prompt_text,
+                final_context_document_chunks=context_payload[
+                    "final_context_document_chunks"
+                ],
+                stage_timings=stage_timings,
+            )
+            return prompt_text, referenced_file_paths, debug_payload
+        return prompt_text
+
+    prompt_text = prompt_payload["prompt_text"]
+    len_of_prompts = len(tokenizer.encode(query + prompt_text))
+    logger.debug(
+        f"[naive_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(prompt_text))})"
+    )
+
+    answer_cache_payload = None
+    if return_debug:
+        answer_cache_payload = await _load_query_cache_payload(
+            hashing_kv,
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            expected_result_kind=_QUERY_RESULT_KIND_ANSWER,
+            stage_timings=stage_timings,
+            lookup_stage="answer_cache_lookup",
+            lookup_label="最终答案缓存检查",
+            hit_stage="answer_cache_hit",
+            hit_label="最终答案缓存命中",
+        )
+
+    if answer_cache_payload is not None:
+        response = answer_cache_payload["answer"]
+    else:
+        stage_started_at = time.perf_counter()
+        with model_usage_stage(
+            "answer_generation",
+            "回答生成 / 单轮 LLM"
+            if answer_prompt_mode == "single_prompt"
+            else "回答生成 / 第一轮 LLM",
+        ):
+            response = await use_model_func(
+                query,
+                system_prompt=prompt_text,
+                stream=query_param.stream,
+            )
+        _record_stage_timing(
+            stage_timings,
+            "answer_generation",
+            "回答生成 / 单轮 LLM"
+            if answer_prompt_mode == "single_prompt"
+            else "回答生成 / 第一轮 LLM",
+            stage_started_at,
+        )
+
+        if isinstance(response, str) and len(response) > len(prompt_text):
+            response = (
+                response[len(prompt_text) :]
+                .replace(prompt_text, "")
+                .replace("user", "")
+                .replace("model", "")
+                .replace(query, "")
+                .replace("<system>", "")
+                .replace("</system>", "")
+                .strip()
+            )
+        if answer_prompt_mode == "two_stage":
+            stage_started_at = time.perf_counter()
+            with model_usage_stage("answer_polish", "回答润色 / 第二轮 LLM"):
+                response = await use_model_func(
+                    response,
+                    system_prompt=PROMPTS["naive_rag_response_new"],
+                    stream=query_param.stream,
+                )
+            _record_stage_timing(
+                stage_timings,
+                "answer_polish",
+                "回答润色 / 第二轮 LLM",
+                stage_started_at,
+            )
+        await _save_query_cache_payload(
+            hashing_kv,
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            prompt=query,
+            payload=_build_query_cache_payload(
+                result_kind=_QUERY_RESULT_KIND_ANSWER,
+                answer=response if isinstance(response, str) else "",
+                context_text=context_payload["context_text"],
+                prompt_text=prompt_text,
+                referenced_file_paths=referenced_file_paths,
+                final_context_document_chunks=context_payload[
+                    "final_context_document_chunks"
+                ],
+                debug_payload_cacheable=prompt_payload["debug_payload_cacheable"],
+            ),
+        )
+
     _record_stage_timing(
         stage_timings,
         "onehop_total",
@@ -4438,16 +5689,18 @@ async def hybrid_query(
     )
 
     if return_debug:
-        debug_payload = {
-            **retrieval_debug,
-            "final_context_document_chunks": llm_text_units_context,
-            "final_context_text": context_text,
-            "final_prompt_text": sys_prompt,
-            "stage_timings": stage_timings,
-        }
-        return response, image_file_path_list, debug_payload
+        debug_payload = _hydrate_debug_payload(
+            cacheable_debug_payload=prompt_payload["debug_payload_cacheable"],
+            context_text=context_payload["context_text"],
+            prompt_text=prompt_text,
+            final_context_document_chunks=context_payload[
+                "final_context_document_chunks"
+            ],
+            stage_timings=stage_timings,
+        )
+        return response, referenced_file_paths, debug_payload
 
-    return response, image_file_path_list
+    return response, referenced_file_paths
 
 
 async def kg_query_with_keywords(
@@ -4468,6 +5721,7 @@ async def kg_query_with_keywords(
     It expects hl_keywords and ll_keywords to be set in query_param, or defaults to empty.
     Then it uses those to build context and produce a final LLM response.
     """
+    _validate_query_request_flags(query_param)
     if query_param.model_func:
         use_model_func = query_param.model_func
     else:
@@ -4476,12 +5730,38 @@ async def kg_query_with_keywords(
         use_model_func = partial(use_model_func, _priority=5)
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
 
-    args_hash = compute_args_hash(query_param.mode, query, answer_prompt_mode)
-    cached_response, quantized, min_val, max_val = await handle_cache(
-        hashing_kv, args_hash, query, query_param.mode, cache_type="query"
+    answer_fingerprint_payload = _build_query_request_fingerprint_payload(
+        scope=_QUERY_CACHE_TYPE_ANSWER,
+        query=query,
+        query_param=query_param,
+        global_config=global_config,
+        answer_prompt_mode=answer_prompt_mode,
     )
-    if cached_response is not None:
-        return cached_response
+    args_hash = (
+        compute_structured_hash(
+            {
+                "schema_version": _QUERY_CACHE_SCHEMA_VERSION,
+                "scope": "answer_with_keywords",
+                "base": answer_fingerprint_payload,
+                "hl_keywords": list(hl_keywords or []),
+                "ll_keywords": list(ll_keywords or []),
+            },
+            strict=True,
+        )
+        if answer_fingerprint_payload is not None
+        and not query_param.only_need_context
+        and not query_param.only_need_prompt
+        else None
+    )
+    cached_answer = await _load_query_cache_payload(
+        hashing_kv,
+        args_hash=args_hash,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_ANSWER,
+        expected_result_kind=_QUERY_RESULT_KIND_ANSWER,
+    )
+    if cached_answer is not None:
+        return cached_answer["answer"]
 
     # If neither has any keywords, you could handle that logic here.
     if not hl_keywords and not ll_keywords:
@@ -4572,18 +5852,18 @@ async def kg_query_with_keywords(
             stream=query_param.stream,
         )
 
-    if hashing_kv is not None and hashing_kv.global_config.get("enable_llm_cache"):
-        await save_to_cache(
+    if isinstance(response, str):
+        await _save_query_cache_payload(
             hashing_kv,
-            CacheData(
-                args_hash=args_hash,
-                content=response,
-                prompt=query,
-                quantized=quantized,
-                min_val=min_val,
-                max_val=max_val,
-                mode=query_param.mode,
-                cache_type="query",
+            args_hash=args_hash,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            prompt=query,
+            payload=_build_query_cache_payload(
+                result_kind=_QUERY_RESULT_KIND_ANSWER,
+                answer=response,
+                context_text=context,
+                prompt_text=sys_prompt,
             ),
         )
 
