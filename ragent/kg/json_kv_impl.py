@@ -1,10 +1,12 @@
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, final
 
 from ragent.base import (
     BaseKVStorage,
 )
+from ragent.namespace import NameSpace
 from ragent.utils import (
     load_json,
     logger,
@@ -19,6 +21,8 @@ from .shared_storage import (
     clear_all_update_flags,
     try_initialize_namespace,
 )
+
+_QUERY_CACHE_MANAGED_MODES = {"graph", "hybrid"}
 
 
 @final
@@ -42,6 +46,171 @@ class JsonKVStorage(BaseKVStorage):
         self._storage_lock = None
         self.storage_updated = None
 
+    def _should_manage_query_cache(self) -> bool:
+        backend = str(self.global_config.get("query_cache_backend") or "json").lower()
+        return (
+            self.namespace == NameSpace.KV_STORE_LLM_RESPONSE_CACHE
+            and backend == "json"
+        )
+
+    def _parse_flattened_cache_key(self, key: str) -> tuple[str, str, str] | None:
+        parts = str(key).split(":", 2)
+        if len(parts) != 3:
+            return None
+        return parts[0], parts[1], parts[2]
+
+    def _is_managed_query_cache_key(self, key: str) -> bool:
+        parsed = self._parse_flattened_cache_key(key)
+        return bool(parsed and parsed[0] in _QUERY_CACHE_MANAGED_MODES)
+
+    def _query_cache_ttl_seconds(self) -> int:
+        try:
+            return max(
+                0, int(self.global_config.get("query_cache_ttl_seconds") or 0)
+            )
+        except (TypeError, ValueError):
+            return 0
+
+    def _query_cache_max_entries(self) -> int:
+        try:
+            return max(
+                0, int(self.global_config.get("query_cache_max_entries") or 0)
+            )
+        except (TypeError, ValueError):
+            return 0
+
+    def _get_query_cache_created_at(self, value: dict[str, Any]) -> int:
+        payload = value.get("return")
+        if isinstance(payload, dict):
+            try:
+                return max(0, int(payload.get("created_at") or value.get("create_time") or 0))
+            except (TypeError, ValueError):
+                return max(0, int(value.get("create_time") or 0))
+        try:
+            return max(
+                0,
+                int(value.get("_query_cache_created_at") or value.get("create_time") or 0),
+            )
+        except (TypeError, ValueError):
+            return max(0, int(value.get("create_time") or 0))
+
+    def _get_query_cache_last_accessed_at(self, value: dict[str, Any]) -> int:
+        payload = value.get("return")
+        created_at = self._get_query_cache_created_at(value)
+        if isinstance(payload, dict):
+            try:
+                return max(
+                    0,
+                    int(
+                        payload.get("last_accessed_at")
+                        or value.get("update_time")
+                        or created_at
+                    ),
+                )
+            except (TypeError, ValueError):
+                return max(0, int(value.get("update_time") or created_at))
+        try:
+            return max(
+                0,
+                int(
+                    value.get("_query_cache_last_accessed_at")
+                    or value.get("update_time")
+                    or created_at
+                ),
+            )
+        except (TypeError, ValueError):
+            return max(0, int(value.get("update_time") or created_at))
+
+    def _is_query_cache_expired(self, key: str, value: dict[str, Any], now: int) -> bool:
+        if not self._should_manage_query_cache() or not self._is_managed_query_cache_key(
+            key
+        ):
+            return False
+
+        ttl_seconds = self._query_cache_ttl_seconds()
+        if ttl_seconds <= 0:
+            return False
+
+        created_at = self._get_query_cache_created_at(value)
+        return created_at > 0 and created_at + ttl_seconds <= now
+
+    def _touch_query_cache_entry(
+        self, key: str, value: dict[str, Any], now: int
+    ) -> dict[str, Any] | None:
+        if not self._should_manage_query_cache() or not self._is_managed_query_cache_key(
+            key
+        ):
+            return value
+
+        if self._is_query_cache_expired(key, value, now):
+            return None
+
+        updated_value = dict(value)
+        payload = updated_value.get("return")
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            payload["created_at"] = self._get_query_cache_created_at(updated_value) or now
+            payload["last_accessed_at"] = now
+            payload["access_count"] = max(0, int(payload.get("access_count") or 0)) + 1
+            updated_value["return"] = payload
+        else:
+            updated_value["_query_cache_created_at"] = (
+                self._get_query_cache_created_at(updated_value) or now
+            )
+            updated_value["_query_cache_last_accessed_at"] = now
+            updated_value["_query_cache_access_count"] = (
+                max(0, int(updated_value.get("_query_cache_access_count") or 0)) + 1
+            )
+
+        updated_value["update_time"] = now
+        return updated_value
+
+    async def _prune_query_cache_entries(self) -> bool:
+        if not self._should_manage_query_cache():
+            return False
+
+        now = int(time.time())
+        keys_to_delete = [
+            key
+            for key, value in list(self._data.items())
+            if isinstance(value, dict) and self._is_query_cache_expired(key, value, now)
+        ]
+        for key in keys_to_delete:
+            self._data.pop(key, None)
+
+        max_entries = self._query_cache_max_entries()
+        if max_entries > 0:
+            managed_entries = []
+            for key, value in list(self._data.items()):
+                if not isinstance(value, dict) or not self._is_managed_query_cache_key(key):
+                    continue
+                managed_entries.append(
+                    (
+                        self._get_query_cache_last_accessed_at(value),
+                        self._get_query_cache_created_at(value),
+                        key,
+                    )
+                )
+
+            overflow = len(managed_entries) - max_entries
+            if overflow > 0:
+                managed_entries.sort(key=lambda item: (item[0], item[1], item[2]))
+                for _, _, key in managed_entries[:overflow]:
+                    self._data.pop(key, None)
+                    if key not in keys_to_delete:
+                        keys_to_delete.append(key)
+
+        return bool(keys_to_delete)
+
+    def _prepare_return_record(
+        self, key: str, value: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = dict(value)
+        result.setdefault("create_time", 0)
+        result.setdefault("update_time", 0)
+        result["_id"] = key
+        return result
+
     async def initialize(self):
         """Initialize storage data"""
         self._storage_lock = get_storage_lock()
@@ -60,15 +229,42 @@ class JsonKVStorage(BaseKVStorage):
                         )
 
                     self._data.update(loaded_data)
+                    await self._prune_query_cache_entries()
                     data_count = len(loaded_data)
 
                     logger.info(
                         f"Process {os.getpid()} KV load {self.namespace} with {data_count} records"
                     )
 
+    async def refresh_from_storage(self) -> bool:
+        """Reload the latest persisted namespace data into memory.
+
+        This is primarily used by metadata readers that must observe writes from
+        other long-lived processes, even when this process does not share the
+        in-memory update flag registry.
+        """
+        if self._storage_lock is None or self._data is None:
+            return False
+
+        loaded_data = load_json(self._file_name) or {}
+
+        async with self._storage_lock:
+            if self.namespace.endswith("_cache"):
+                loaded_data = await self._migrate_legacy_cache_structure(loaded_data)
+
+            self._data.clear()
+            self._data.update(loaded_data)
+            await self._prune_query_cache_entries()
+
+            if self.storage_updated is not None:
+                self.storage_updated.value = False
+
+        return True
+
     async def index_done_callback(self) -> None:
         async with self._storage_lock:
             if self.storage_updated.value:
+                await self._prune_query_cache_entries()
                 data_dict = (
                     dict(self._data) if hasattr(self._data, "_getvalue") else self._data
                 )
@@ -106,13 +302,19 @@ class JsonKVStorage(BaseKVStorage):
         async with self._storage_lock:
             result = self._data.get(id)
             if result:
-                # Create a copy to avoid modifying the original data
-                result = dict(result)
-                # Ensure time fields are present, provide default values for old data
-                result.setdefault("create_time", 0)
-                result.setdefault("update_time", 0)
-                # Ensure _id field contains the clean ID
-                result["_id"] = id
+                if isinstance(result, dict):
+                    touched_result = self._touch_query_cache_entry(
+                        id, result, int(time.time())
+                    )
+                    if touched_result is None:
+                        self._data.pop(id, None)
+                        await set_all_update_flags(self.namespace)
+                        return None
+                    result = touched_result
+                    self._data[id] = result
+                    if self._is_managed_query_cache_key(id):
+                        await set_all_update_flags(self.namespace)
+                result = self._prepare_return_record(id, result)
             return result
 
     async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
@@ -121,14 +323,20 @@ class JsonKVStorage(BaseKVStorage):
             for id in ids:
                 data = self._data.get(id, None)
                 if data:
-                    # Create a copy to avoid modifying the original data
-                    result = {k: v for k, v in data.items()}
-                    # Ensure time fields are present, provide default values for old data
-                    result.setdefault("create_time", 0)
-                    result.setdefault("update_time", 0)
-                    # Ensure _id field contains the clean ID
-                    result["_id"] = id
-                    results.append(result)
+                    if isinstance(data, dict):
+                        touched_data = self._touch_query_cache_entry(
+                            id, data, int(time.time())
+                        )
+                        if touched_data is None:
+                            self._data.pop(id, None)
+                            await set_all_update_flags(self.namespace)
+                            results.append(None)
+                            continue
+                        data = touched_data
+                        self._data[id] = data
+                        if self._is_managed_query_cache_key(id):
+                            await set_all_update_flags(self.namespace)
+                    results.append(self._prepare_return_record(id, data))
                 else:
                     results.append(None)
             return results
@@ -145,8 +353,6 @@ class JsonKVStorage(BaseKVStorage):
         """
         if not data:
             return
-
-        import time
 
         current_time = int(time.time())  # Get current Unix timestamp
 
@@ -169,6 +375,7 @@ class JsonKVStorage(BaseKVStorage):
                 v["_id"] = k
 
             self._data.update(data)
+            await self._prune_query_cache_entries()
             await set_all_update_flags(self.namespace)
 
     async def delete(self, ids: list[str]) -> None:

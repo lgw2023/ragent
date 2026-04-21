@@ -3,6 +3,7 @@ from functools import partial
 
 import asyncio
 import ast
+from contextlib import asynccontextmanager
 import json
 import math
 import os
@@ -51,6 +52,27 @@ from .constants import (
 )
 from .kg.shared_storage import get_storage_keyed_lock
 import time
+
+
+_LOCAL_QUERY_CACHE_SINGLEFLIGHT_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+@asynccontextmanager
+async def _query_cache_singleflight_lock(key: str):
+    try:
+        async with get_storage_keyed_lock(
+            key,
+            namespace="QueryCacheSingleflight",
+        ):
+            yield
+            return
+    except RuntimeError:
+        lock = _LOCAL_QUERY_CACHE_SINGLEFLIGHT_LOCKS.setdefault(key, asyncio.Lock())
+        await lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
 
 
 def _append_stage_timing(
@@ -105,7 +127,7 @@ def _resolve_answer_prompt_mode(
     return resolved
 
 
-_QUERY_CACHE_SCHEMA_VERSION = 1
+_QUERY_CACHE_SCHEMA_VERSION = 2
 _QUERY_CACHE_TYPE_KEYWORDS = "keywords"
 _QUERY_CACHE_TYPE_RETRIEVAL = "retrieval"
 _QUERY_CACHE_TYPE_RENDER = "render"
@@ -162,6 +184,78 @@ def _collect_referenced_file_paths(*collections: list[dict[str, Any]]) -> list[s
     return _normalize_referenced_file_paths(file_paths)
 
 
+def _coerce_non_negative_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_dependency_chunk_ids(value: Any) -> list[str]:
+    normalized_ids: list[str] = []
+    seen: set[str] = set()
+    for chunk_id in _normalize_source_chunk_ids(value):
+        normalized = str(chunk_id).strip()
+        if (
+            not normalized
+            or not normalized.startswith("chunk-")
+            or normalized in seen
+        ):
+            continue
+        seen.add(normalized)
+        normalized_ids.append(normalized)
+    return normalized_ids
+
+
+def _collect_dependency_chunk_ids(
+    *,
+    final_context_document_chunks: list[dict[str, Any]] | None = None,
+    debug_payload_cacheable: dict[str, Any] | None = None,
+    dependency_chunk_ids: list[str] | None = None,
+) -> list[str]:
+    collected: list[str] = []
+    seen: set[str] = set()
+
+    def _add(values: Any) -> None:
+        for chunk_id in _normalize_dependency_chunk_ids(values):
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            collected.append(chunk_id)
+
+    _add(dependency_chunk_ids or [])
+
+    for chunk in final_context_document_chunks or []:
+        if not isinstance(chunk, dict):
+            continue
+        _add(chunk.get("chunk_id"))
+        if isinstance(chunk.get("id"), str):
+            _add(chunk.get("id"))
+        _add(chunk.get("source_chunk_ids"))
+
+    debug_payload = debug_payload_cacheable or {}
+    if isinstance(debug_payload, dict):
+        _add(debug_payload.get("results_chunk_ids"))
+        for collection_name in (
+            "merged_candidates",
+            "text_units_context",
+            "entities_context",
+            "relations_context",
+            "graph_entities",
+            "graph_relations",
+        ):
+            for item in debug_payload.get(collection_name) or []:
+                if not isinstance(item, dict):
+                    continue
+                _add(item.get("chunk_id"))
+                if isinstance(item.get("id"), str):
+                    _add(item.get("id"))
+                _add(item.get("source_chunk_ids"))
+                _add(item.get("source_id"))
+
+    return collected
+
+
 def _query_cache_enabled(hashing_kv: BaseKVStorage | None) -> bool:
     return bool(
         hashing_kv is not None and hashing_kv.global_config.get("enable_llm_cache")
@@ -197,6 +291,11 @@ def _resolve_rerank_identifier(global_config: dict[str, Any]) -> Any:
     if rerank_callable is not None:
         rerank_identifier["callable"] = rerank_callable
     return rerank_identifier or None
+
+
+def _has_unstable_rerank_callable(global_config: dict[str, Any]) -> bool:
+    rerank_model_func = global_config.get("rerank_model_func")
+    return callable(rerank_model_func) and resolve_callable_cache_id(rerank_model_func) is None
 
 
 def _resolve_tokenizer_identifier(global_config: dict[str, Any]) -> dict[str, Any]:
@@ -242,6 +341,11 @@ def _build_query_request_fingerprint_payload(
         "scope": scope,
         "mode": query_param.mode,
         "query": query,
+        "corpus_revision": _coerce_non_negative_int(
+            global_config.get("corpus_revision"),
+            0,
+        ),
+        "index_digest": global_config.get("index_digest"),
     }
 
     if scope == _QUERY_CACHE_TYPE_KEYWORDS:
@@ -257,14 +361,29 @@ def _build_query_request_fingerprint_payload(
         return payload
 
     if scope == _QUERY_CACHE_TYPE_RETRIEVAL:
+        if query_param.enable_rerank and _has_unstable_rerank_callable(global_config):
+            logger.debug("Skip query cache: unable to resolve a stable rerank identifier.")
+            return None
         payload.update(
             {
+                "response_type": query_param.response_type,
+                "user_prompt": query_param.user_prompt,
+                "hl_keywords": list(query_param.hl_keywords or []),
+                "ll_keywords": list(query_param.ll_keywords or []),
                 "ids": list(query_param.ids or []),
                 "top_k": query_param.top_k,
                 "chunk_top_k": query_param.chunk_top_k,
                 "max_entity_tokens": query_param.max_entity_tokens,
                 "max_relation_tokens": query_param.max_relation_tokens,
                 "max_total_tokens": query_param.max_total_tokens,
+                "related_chunk_number": global_config.get("related_chunk_number"),
+                "system_prompt_template": global_config.get("system_prompt_template"),
+                "cosine_better_than_threshold": global_config.get(
+                    "cosine_better_than_threshold"
+                ),
+                "vector_db_storage_cls_kwargs": global_config.get(
+                    "vector_db_storage_cls_kwargs"
+                ),
                 "enable_rerank": query_param.enable_rerank,
                 "conversation_history": normalized_history,
                 "history_turns": query_param.history_turns,
@@ -369,7 +488,27 @@ def _build_query_cache_payload(
     final_context_document_chunks: list[dict[str, Any]] | None = None,
     debug_payload_cacheable: dict[str, Any] | None = None,
     context_available: bool = True,
+    corpus_revision: int = 0,
+    dependency_chunk_ids: list[str] | None = None,
+    created_at: int | None = None,
+    last_accessed_at: int | None = None,
+    access_count: int | None = None,
 ) -> dict[str, Any]:
+    created_timestamp = (
+        _coerce_non_negative_int(created_at, 0)
+        if created_at is not None
+        else int(time.time())
+    )
+    last_accessed_timestamp = (
+        _coerce_non_negative_int(last_accessed_at, created_timestamp)
+        if last_accessed_at is not None
+        else created_timestamp
+    )
+    normalized_access_count = (
+        _coerce_non_negative_int(access_count, 1)
+        if access_count is not None
+        else 1
+    )
     return {
         "schema_version": _QUERY_CACHE_SCHEMA_VERSION,
         "result_kind": result_kind,
@@ -382,6 +521,15 @@ def _build_query_cache_payload(
         "final_context_document_chunks": list(final_context_document_chunks or []),
         "debug_payload_cacheable": dict(debug_payload_cacheable or {}),
         "context_available": context_available,
+        "corpus_revision": _coerce_non_negative_int(corpus_revision, 0),
+        "dependency_chunk_ids": _collect_dependency_chunk_ids(
+            final_context_document_chunks=final_context_document_chunks,
+            debug_payload_cacheable=debug_payload_cacheable,
+            dependency_chunk_ids=dependency_chunk_ids,
+        ),
+        "created_at": created_timestamp,
+        "last_accessed_at": last_accessed_timestamp,
+        "access_count": normalized_access_count,
     }
 
 
@@ -402,6 +550,11 @@ def _coerce_query_cache_payload(
     debug_payload_cacheable = payload.get("debug_payload_cacheable") or {}
     if not isinstance(debug_payload_cacheable, dict):
         debug_payload_cacheable = {}
+    created_at = _coerce_non_negative_int(payload.get("created_at"), 0)
+    last_accessed_at = _coerce_non_negative_int(
+        payload.get("last_accessed_at"),
+        created_at,
+    )
     return {
         "schema_version": payload.get("schema_version", _QUERY_CACHE_SCHEMA_VERSION),
         "result_kind": result_kind,
@@ -414,6 +567,16 @@ def _coerce_query_cache_payload(
         "final_context_document_chunks": list(final_context_document_chunks),
         "debug_payload_cacheable": dict(debug_payload_cacheable),
         "context_available": bool(payload.get("context_available", True)),
+        "corpus_revision": _coerce_non_negative_int(
+            payload.get("corpus_revision"),
+            0,
+        ),
+        "dependency_chunk_ids": _normalize_dependency_chunk_ids(
+            payload.get("dependency_chunk_ids") or []
+        ),
+        "created_at": created_at,
+        "last_accessed_at": last_accessed_at,
+        "access_count": _coerce_non_negative_int(payload.get("access_count"), 0),
     }
 
 
@@ -507,6 +670,71 @@ async def _save_query_cache_payload(
             cache_type=cache_type,
         ),
     )
+
+
+async def _get_or_compute_query_cache_payload(
+    hashing_kv: BaseKVStorage | None,
+    *,
+    args_hash: str | None,
+    mode: str,
+    cache_type: str,
+    expected_result_kind: str,
+    prompt: str,
+    compute_payload: Callable[[], Any],
+    stage_timings: list[dict[str, Any]] | None = None,
+    lookup_stage: str | None = None,
+    lookup_label: str | None = None,
+    hit_stage: str | None = None,
+    hit_label: str | None = None,
+    skip_initial_lookup: bool = False,
+) -> dict[str, Any]:
+    if not skip_initial_lookup:
+        payload = await _load_query_cache_payload(
+            hashing_kv,
+            args_hash=args_hash,
+            mode=mode,
+            cache_type=cache_type,
+            expected_result_kind=expected_result_kind,
+            stage_timings=stage_timings,
+            lookup_stage=lookup_stage,
+            lookup_label=lookup_label,
+            hit_stage=hit_stage,
+            hit_label=hit_label,
+        )
+        if payload is not None:
+            return payload
+
+    if not _query_cache_enabled(hashing_kv) or not args_hash:
+        return await compute_payload()
+
+    cache_lock_key = f"{mode}:{cache_type}:{args_hash}"
+    async with _query_cache_singleflight_lock(cache_lock_key):
+        payload = await _load_query_cache_payload(
+            hashing_kv,
+            args_hash=args_hash,
+            mode=mode,
+            cache_type=cache_type,
+            expected_result_kind=expected_result_kind,
+        )
+        if payload is not None:
+            if (
+                stage_timings is not None
+                and hit_stage is not None
+                and hit_label is not None
+            ):
+                _append_stage_timing(stage_timings, hit_stage, hit_label, 0.0)
+            return payload
+
+        payload = await compute_payload()
+        await _save_query_cache_payload(
+            hashing_kv,
+            args_hash=args_hash,
+            mode=mode,
+            cache_type=cache_type,
+            prompt=prompt,
+            payload=payload,
+        )
+        return payload
 
 
 def _sanitize_llm_context_payload(
@@ -3191,6 +3419,7 @@ def _build_graph_context_cache_payload(
     retrieval_debug: dict[str, Any],
     *,
     answer_prompt_mode: str,
+    corpus_revision: int,
 ) -> dict[str, Any]:
     context_available = bool(retrieval_debug.get("context_available"))
     referenced_file_paths = retrieval_debug.get("referenced_file_paths") or []
@@ -3203,6 +3432,7 @@ def _build_graph_context_cache_payload(
             final_context_document_chunks=[],
             debug_payload_cacheable=debug_payload_cacheable,
             context_available=False,
+            corpus_revision=corpus_revision,
         )
 
     llm_entities_context = _sanitize_llm_context_payload(
@@ -3246,6 +3476,7 @@ def _build_graph_context_cache_payload(
         final_context_document_chunks=llm_text_units_context,
         debug_payload_cacheable=debug_payload_cacheable,
         context_available=True,
+        corpus_revision=corpus_revision,
     )
 
 
@@ -3255,6 +3486,7 @@ def _build_graph_prompt_cache_payload(
     query_param: QueryParam,
     system_prompt: str | None,
     answer_prompt_mode: str,
+    corpus_revision: int,
 ) -> dict[str, Any]:
     if not context_payload.get("context_available", True):
         return _build_query_cache_payload(
@@ -3268,6 +3500,7 @@ def _build_graph_prompt_cache_payload(
             debug_payload_cacheable=context_payload.get("debug_payload_cacheable")
             or {},
             context_available=False,
+            corpus_revision=corpus_revision,
         )
 
     history_context = ""
@@ -3304,6 +3537,7 @@ def _build_graph_prompt_cache_payload(
         or [],
         debug_payload_cacheable=context_payload.get("debug_payload_cacheable") or {},
         context_available=True,
+        corpus_revision=corpus_revision,
     )
 
 
@@ -3330,6 +3564,10 @@ async def graph_query(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
+    corpus_revision = _coerce_non_negative_int(
+        global_config.get("corpus_revision"),
+        0,
+    )
     answer_cache_key = _build_query_request_fingerprint(
         scope=_QUERY_CACHE_TYPE_ANSWER,
         query=query,
@@ -3369,21 +3607,7 @@ async def graph_query(
         global_config=global_config,
         answer_prompt_mode=answer_prompt_mode,
     )
-    retrieval_cache_payload = await _load_query_cache_payload(
-        hashing_kv,
-        args_hash=retrieval_cache_key,
-        mode=query_param.mode,
-        cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
-        expected_result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
-        stage_timings=stage_timings,
-        lookup_stage="retrieval_cache_lookup",
-        lookup_label="检索缓存检查",
-        hit_stage="retrieval_cache_hit",
-        hit_label="检索缓存命中",
-    )
-    if retrieval_cache_payload is not None:
-        retrieval_debug = dict(retrieval_cache_payload["debug_payload_cacheable"])
-    else:
+    async def _compute_graph_retrieval_payload() -> dict[str, Any]:
         retrieval_debug = await _build_graph_retrieval_debug_data(
             query,
             knowledge_graph_inst,
@@ -3395,20 +3619,30 @@ async def graph_query(
             hashing_kv,
         )
         stage_timings.extend(retrieval_debug.get("stage_timings", []))
-        await _save_query_cache_payload(
-            hashing_kv,
-            args_hash=retrieval_cache_key,
-            mode=query_param.mode,
-            cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
-            prompt=query,
-            payload=_build_query_cache_payload(
-                result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
-                referenced_file_paths=retrieval_debug.get("referenced_file_paths")
-                or [],
-                debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
-                context_available=bool(retrieval_debug.get("context_available", True)),
-            ),
+        return _build_query_cache_payload(
+            result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+            referenced_file_paths=retrieval_debug.get("referenced_file_paths")
+            or [],
+            debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
+            context_available=bool(retrieval_debug.get("context_available", True)),
+            corpus_revision=corpus_revision,
         )
+
+    retrieval_cache_payload = await _get_or_compute_query_cache_payload(
+        hashing_kv,
+        args_hash=retrieval_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
+        expected_result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+        prompt=query,
+        compute_payload=_compute_graph_retrieval_payload,
+        stage_timings=stage_timings,
+        lookup_stage="retrieval_cache_lookup",
+        lookup_label="检索缓存检查",
+        hit_stage="retrieval_cache_hit",
+        hit_label="检索缓存命中",
+    )
+    retrieval_debug = dict(retrieval_cache_payload["debug_payload_cacheable"])
 
     context_cache_key = _build_query_request_fingerprint(
         scope=_QUERY_CACHE_TYPE_RENDER,
@@ -3435,6 +3669,7 @@ async def graph_query(
         context_payload = _build_graph_context_cache_payload(
             retrieval_debug,
             answer_prompt_mode=answer_prompt_mode,
+            corpus_revision=corpus_revision,
         )
         _record_stage_timing(
             stage_timings,
@@ -3523,6 +3758,7 @@ async def graph_query(
             query_param=query_param,
             system_prompt=system_prompt,
             answer_prompt_mode=answer_prompt_mode,
+            corpus_revision=corpus_revision,
         )
         _append_stage_timing(
             stage_timings,
@@ -3582,53 +3818,46 @@ async def graph_query(
             hit_label="最终答案缓存命中",
         )
 
-    if answer_cache_payload is not None:
-        response = answer_cache_payload["answer"]
-    else:
-        stage_started_at = time.perf_counter()
-        response = await use_model_func(
-            query,
-            system_prompt=prompt_text,
-            stream=query_param.stream,
-        )
-        _record_stage_timing(
-            stage_timings,
-            "answer_generation",
-            "回答生成 / 单轮 LLM"
-            if answer_prompt_mode == "single_prompt"
-            else "回答生成 / 第一轮 LLM",
-            stage_started_at,
-        )
-        if isinstance(response, str) and len(response) > len(prompt_text):
-            response = (
-                response.replace(prompt_text, "")
-                .replace("user", "")
-                .replace("model", "")
-                .replace(query, "")
-                .replace("<system>", "")
-                .replace("</system>", "")
-                .strip()
-            )
-        if answer_prompt_mode == "two_stage":
+    if answer_cache_payload is None:
+        async def _compute_graph_answer_payload() -> dict[str, Any]:
             stage_started_at = time.perf_counter()
             response = await use_model_func(
-                response,
-                system_prompt=PROMPTS["rag_response_new"],
+                query,
+                system_prompt=prompt_text,
                 stream=query_param.stream,
             )
             _record_stage_timing(
                 stage_timings,
-                "answer_polish",
-                "回答润色 / 第二轮 LLM",
+                "answer_generation",
+                "回答生成 / 单轮 LLM"
+                if answer_prompt_mode == "single_prompt"
+                else "回答生成 / 第一轮 LLM",
                 stage_started_at,
             )
-        await _save_query_cache_payload(
-            hashing_kv,
-            args_hash=answer_cache_key,
-            mode=query_param.mode,
-            cache_type=_QUERY_CACHE_TYPE_ANSWER,
-            prompt=query,
-            payload=_build_query_cache_payload(
+            if isinstance(response, str) and len(response) > len(prompt_text):
+                response = (
+                    response.replace(prompt_text, "")
+                    .replace("user", "")
+                    .replace("model", "")
+                    .replace(query, "")
+                    .replace("<system>", "")
+                    .replace("</system>", "")
+                    .strip()
+                )
+            if answer_prompt_mode == "two_stage":
+                stage_started_at = time.perf_counter()
+                response = await use_model_func(
+                    response,
+                    system_prompt=PROMPTS["rag_response_new"],
+                    stream=query_param.stream,
+                )
+                _record_stage_timing(
+                    stage_timings,
+                    "answer_polish",
+                    "回答润色 / 第二轮 LLM",
+                    stage_started_at,
+                )
+            return _build_query_cache_payload(
                 result_kind=_QUERY_RESULT_KIND_ANSWER,
                 answer=response if isinstance(response, str) else "",
                 context_text=context_payload["context_text"],
@@ -3639,8 +3868,25 @@ async def graph_query(
                 ],
                 debug_payload_cacheable=prompt_payload["debug_payload_cacheable"],
                 context_available=True,
-            ),
+                corpus_revision=corpus_revision,
+            )
+
+        answer_cache_payload = await _get_or_compute_query_cache_payload(
+            hashing_kv,
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            expected_result_kind=_QUERY_RESULT_KIND_ANSWER,
+            prompt=query,
+            compute_payload=_compute_graph_answer_payload,
+            stage_timings=stage_timings,
+            lookup_stage="answer_cache_lookup",
+            lookup_label="最终答案缓存检查",
+            hit_stage="answer_cache_hit",
+            hit_label="最终答案缓存命中",
+            skip_initial_lookup=answer_cache_payload is None,
         )
+    response = answer_cache_payload["answer"]
 
     _record_stage_timing(
         stage_timings,
@@ -5297,6 +5543,7 @@ def _build_hybrid_context_cache_payload(
     retrieval_debug: dict[str, Any],
     *,
     answer_prompt_mode: str,
+    corpus_revision: int,
 ) -> dict[str, Any]:
     llm_text_units_context = _sanitize_llm_context_payload(
         retrieval_debug.get("text_units_context", []),
@@ -5318,6 +5565,7 @@ def _build_hybrid_context_cache_payload(
         final_context_document_chunks=llm_text_units_context,
         debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
         context_available=True,
+        corpus_revision=corpus_revision,
     )
 
 
@@ -5327,6 +5575,7 @@ def _build_hybrid_prompt_cache_payload(
     query_param: QueryParam,
     system_prompt: str | None,
     answer_prompt_mode: str,
+    corpus_revision: int,
 ) -> dict[str, Any]:
     history_context = ""
     if query_param.conversation_history:
@@ -5366,6 +5615,7 @@ def _build_hybrid_prompt_cache_payload(
         or [],
         debug_payload_cacheable=context_payload.get("debug_payload_cacheable") or {},
         context_available=True,
+        corpus_revision=corpus_revision,
     )
 
 async def hybrid_query(
@@ -5391,6 +5641,10 @@ async def hybrid_query(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
+    corpus_revision = _coerce_non_negative_int(
+        global_config.get("corpus_revision"),
+        0,
+    )
     tokenizer: Tokenizer = global_config["tokenizer"]
     answer_cache_key = _build_query_request_fingerprint(
         scope=_QUERY_CACHE_TYPE_ANSWER,
@@ -5431,21 +5685,7 @@ async def hybrid_query(
         global_config=global_config,
         answer_prompt_mode=answer_prompt_mode,
     )
-    retrieval_cache_payload = await _load_query_cache_payload(
-        hashing_kv,
-        args_hash=retrieval_cache_key,
-        mode=query_param.mode,
-        cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
-        expected_result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
-        stage_timings=stage_timings,
-        lookup_stage="retrieval_cache_lookup",
-        lookup_label="检索缓存检查",
-        hit_stage="retrieval_cache_hit",
-        hit_label="检索缓存命中",
-    )
-    if retrieval_cache_payload is not None:
-        retrieval_debug = dict(retrieval_cache_payload["debug_payload_cacheable"])
-    else:
+    async def _compute_hybrid_retrieval_payload() -> dict[str, Any]:
         retrieval_debug = await _build_hybrid_retrieval_debug_data(
             query=query,
             chunks_vdb=chunks_vdb,
@@ -5458,19 +5698,29 @@ async def hybrid_query(
             hashing_kv=hashing_kv,
         )
         stage_timings.extend(retrieval_debug.get("stage_timings", []))
-        await _save_query_cache_payload(
-            hashing_kv,
-            args_hash=retrieval_cache_key,
-            mode=query_param.mode,
-            cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
-            prompt=query,
-            payload=_build_query_cache_payload(
-                result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
-                referenced_file_paths=retrieval_debug.get("referenced_file_paths")
-                or [],
-                debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
-            ),
+        return _build_query_cache_payload(
+            result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+            referenced_file_paths=retrieval_debug.get("referenced_file_paths")
+            or [],
+            debug_payload_cacheable=_strip_stage_timings(retrieval_debug),
+            corpus_revision=corpus_revision,
         )
+
+    retrieval_cache_payload = await _get_or_compute_query_cache_payload(
+        hashing_kv,
+        args_hash=retrieval_cache_key,
+        mode=query_param.mode,
+        cache_type=_QUERY_CACHE_TYPE_RETRIEVAL,
+        expected_result_kind=_QUERY_RESULT_KIND_RETRIEVAL,
+        prompt=query,
+        compute_payload=_compute_hybrid_retrieval_payload,
+        stage_timings=stage_timings,
+        lookup_stage="retrieval_cache_lookup",
+        lookup_label="检索缓存检查",
+        hit_stage="retrieval_cache_hit",
+        hit_label="检索缓存命中",
+    )
+    retrieval_debug = dict(retrieval_cache_payload["debug_payload_cacheable"])
 
     context_cache_key = _build_query_request_fingerprint(
         scope=_QUERY_CACHE_TYPE_RENDER,
@@ -5496,6 +5746,7 @@ async def hybrid_query(
         context_payload = _build_hybrid_context_cache_payload(
             retrieval_debug,
             answer_prompt_mode=answer_prompt_mode,
+            corpus_revision=corpus_revision,
         )
         await _save_query_cache_payload(
             hashing_kv,
@@ -5555,6 +5806,7 @@ async def hybrid_query(
             query_param=query_param,
             system_prompt=system_prompt,
             answer_prompt_mode=answer_prompt_mode,
+            corpus_revision=corpus_revision,
         )
         _append_stage_timing(
             stage_timings,
@@ -5613,62 +5865,55 @@ async def hybrid_query(
             hit_label="最终答案缓存命中",
         )
 
-    if answer_cache_payload is not None:
-        response = answer_cache_payload["answer"]
-    else:
-        stage_started_at = time.perf_counter()
-        with model_usage_stage(
-            "answer_generation",
-            "回答生成 / 单轮 LLM"
-            if answer_prompt_mode == "single_prompt"
-            else "回答生成 / 第一轮 LLM",
-        ):
-            response = await use_model_func(
-                query,
-                system_prompt=prompt_text,
-                stream=query_param.stream,
-            )
-        _record_stage_timing(
-            stage_timings,
-            "answer_generation",
-            "回答生成 / 单轮 LLM"
-            if answer_prompt_mode == "single_prompt"
-            else "回答生成 / 第一轮 LLM",
-            stage_started_at,
-        )
-
-        if isinstance(response, str) and len(response) > len(prompt_text):
-            response = (
-                response[len(prompt_text) :]
-                .replace(prompt_text, "")
-                .replace("user", "")
-                .replace("model", "")
-                .replace(query, "")
-                .replace("<system>", "")
-                .replace("</system>", "")
-                .strip()
-            )
-        if answer_prompt_mode == "two_stage":
+    if answer_cache_payload is None:
+        async def _compute_hybrid_answer_payload() -> dict[str, Any]:
             stage_started_at = time.perf_counter()
-            with model_usage_stage("answer_polish", "回答润色 / 第二轮 LLM"):
+            with model_usage_stage(
+                "answer_generation",
+                "回答生成 / 单轮 LLM"
+                if answer_prompt_mode == "single_prompt"
+                else "回答生成 / 第一轮 LLM",
+            ):
                 response = await use_model_func(
-                    response,
-                    system_prompt=PROMPTS["naive_rag_response_new"],
+                    query,
+                    system_prompt=prompt_text,
                     stream=query_param.stream,
                 )
             _record_stage_timing(
                 stage_timings,
-                "answer_polish",
-                "回答润色 / 第二轮 LLM",
+                "answer_generation",
+                "回答生成 / 单轮 LLM"
+                if answer_prompt_mode == "single_prompt"
+                else "回答生成 / 第一轮 LLM",
                 stage_started_at,
             )
-        await _save_query_cache_payload(
-            hashing_kv,
-            args_hash=answer_cache_key,
-            mode=query_param.mode,
-            cache_type=_QUERY_CACHE_TYPE_ANSWER,
-            prompt=query,
-            payload=_build_query_cache_payload(
+
+            if isinstance(response, str) and len(response) > len(prompt_text):
+                response = (
+                    response[len(prompt_text) :]
+                    .replace(prompt_text, "")
+                    .replace("user", "")
+                    .replace("model", "")
+                    .replace(query, "")
+                    .replace("<system>", "")
+                    .replace("</system>", "")
+                    .strip()
+                )
+            if answer_prompt_mode == "two_stage":
+                stage_started_at = time.perf_counter()
+                with model_usage_stage("answer_polish", "回答润色 / 第二轮 LLM"):
+                    response = await use_model_func(
+                        response,
+                        system_prompt=PROMPTS["naive_rag_response_new"],
+                        stream=query_param.stream,
+                    )
+                _record_stage_timing(
+                    stage_timings,
+                    "answer_polish",
+                    "回答润色 / 第二轮 LLM",
+                    stage_started_at,
+                )
+            return _build_query_cache_payload(
                 result_kind=_QUERY_RESULT_KIND_ANSWER,
                 answer=response if isinstance(response, str) else "",
                 context_text=context_payload["context_text"],
@@ -5678,8 +5923,25 @@ async def hybrid_query(
                     "final_context_document_chunks"
                 ],
                 debug_payload_cacheable=prompt_payload["debug_payload_cacheable"],
-            ),
+                corpus_revision=corpus_revision,
+            )
+
+        answer_cache_payload = await _get_or_compute_query_cache_payload(
+            hashing_kv,
+            args_hash=answer_cache_key,
+            mode=query_param.mode,
+            cache_type=_QUERY_CACHE_TYPE_ANSWER,
+            expected_result_kind=_QUERY_RESULT_KIND_ANSWER,
+            prompt=query,
+            compute_payload=_compute_hybrid_answer_payload,
+            stage_timings=stage_timings,
+            lookup_stage="answer_cache_lookup",
+            lookup_label="最终答案缓存检查",
+            hit_stage="answer_cache_hit",
+            hit_label="最终答案缓存命中",
+            skip_initial_lookup=answer_cache_payload is None,
         )
+    response = answer_cache_payload["answer"]
 
     _record_stage_timing(
         stage_timings,
@@ -5864,6 +6126,7 @@ async def kg_query_with_keywords(
                 answer=response,
                 context_text=context,
                 prompt_text=sys_prompt,
+                corpus_revision=corpus_revision,
             ),
         )
 

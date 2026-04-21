@@ -2555,7 +2555,7 @@ async def _run_one_hop_with_rag(
         ]
     if history_turns is not None:
         query_param.history_turns = history_turns
-    global_config = asdict(rag)
+    global_config = await rag._build_runtime_global_config()
     normalized_query = query.strip()
 
     if mode == "hybrid":

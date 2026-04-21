@@ -91,6 +91,7 @@ STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
 STORAGES = {
     "NetworkXStorage": ".kg.networkx_impl",
     "JsonKVStorage": ".kg.json_kv_impl",
+    "SQLiteQueryCacheStorage": ".kg.sqlite_query_cache_impl",
     "NanoVectorDBStorage": ".kg.nano_vector_db_impl",
     "JsonDocStatusStorage": ".kg.json_doc_status_impl",
     "Neo4JStorage": ".kg.neo4j_impl",

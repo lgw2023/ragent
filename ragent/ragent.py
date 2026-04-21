@@ -46,12 +46,14 @@ from ragent.kg import (
 from ragent.kg.shared_storage import (
     get_namespace_data,
     get_pipeline_status_lock,
+    get_storage_keyed_lock,
 )
 
 from .base import (
     BaseGraphStorage,
     BaseKVStorage,
     BaseVectorStorage,
+    DeletionResult,
     DocProcessingStatus,
     DocStatus,
     DocStatusStorage,
@@ -93,6 +95,7 @@ from .wide_table import (
 from collections import defaultdict
 
 RAG_INSERT_TRACE_ENABLED = os.getenv("RAG_INSERT_TRACE", "0") == "1"
+_INDEX_METADATA_KEY = "corpus"
 
 
 def _trace_insert(msg: str) -> None:
@@ -418,6 +421,27 @@ class Ragent:
     enable_llm_cache_for_entity_extract: bool = field(default=True)
     """If True, enables caching for entity extraction steps to reduce LLM costs."""
 
+    query_cache_backend: str = field(
+        default=get_env_value("QUERY_CACHE_BACKEND", "json", str)
+    )
+    """Backend for query cache storage. Supported values: 'json', 'sqlite'."""
+
+    query_cache_ttl_seconds: int = field(
+        default=get_env_value("QUERY_CACHE_TTL_SECONDS", 0, int)
+    )
+    """Absolute TTL for query cache entries in seconds. 0 disables TTL."""
+
+    query_cache_max_entries: int = field(
+        default=get_env_value("QUERY_CACHE_MAX_ENTRIES", 0, int)
+    )
+    """Maximum number of managed query cache entries. 0 disables LRU pruning."""
+
+    corpus_revision: int = field(default=0)
+    """Monotonic index revision included in query cache fingerprints."""
+
+    index_digest: str | None = field(default=None)
+    """Optional content digest for stronger query cache invalidation."""
+
     # Extensions
     # ---
 
@@ -484,6 +508,13 @@ class Ragent:
         if not os.path.exists(self.working_dir):
             logger.info(f"Creating working directory {self.working_dir}")
             os.makedirs(self.working_dir)
+
+        self.query_cache_backend = str(self.query_cache_backend or "json").strip().lower()
+        if self.query_cache_backend not in {"json", "sqlite"}:
+            raise ValueError(
+                "Unsupported query_cache_backend: "
+                f"{self.query_cache_backend!r}. Expected 'json' or 'sqlite'."
+            )
 
         # Verify storage implementation compatibility and environment variables
         storage_configs = [
@@ -559,10 +590,23 @@ class Ragent:
         # Initialize document status storage
         self.doc_status_storage_cls = self._get_storage_class(self.doc_status_storage)
 
-        self.llm_response_cache: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        query_cache_storage_cls = self.key_string_value_json_storage_cls
+        if self.query_cache_backend == "sqlite":
+            query_cache_storage_cls = partial(  # type: ignore
+                self._get_storage_class("SQLiteQueryCacheStorage"),
+                global_config=global_config,
+            )
+
+        self.llm_response_cache: BaseKVStorage = query_cache_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_LLM_RESPONSE_CACHE,
             workspace=self.workspace,
             global_config=global_config,
+            embedding_func=self.embedding_func,
+        )
+
+        self.index_metadata: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+            namespace=NameSpace.KV_STORE_INDEX_METADATA,
+            workspace=self.workspace,
             embedding_func=self.embedding_func,
         )
 
@@ -683,12 +727,231 @@ class Ragent:
             loop.run_until_complete(async_func())
             loop.close()
 
+    @staticmethod
+    def _normalize_chunk_ids(values: Any) -> list[str]:
+        if values in (None, "", [], {}, ()):
+            return []
+
+        if isinstance(values, str):
+            candidates = values.split(GRAPH_FIELD_SEP)
+        elif isinstance(values, (list, tuple, set)):
+            candidates = []
+            for item in values:
+                candidates.extend(Ragent._normalize_chunk_ids(item))
+        else:
+            candidates = [str(values)]
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            chunk_id = str(candidate).strip()
+            if (
+                not chunk_id
+                or not chunk_id.startswith("chunk-")
+                or chunk_id in seen
+            ):
+                continue
+            seen.add(chunk_id)
+            normalized.append(chunk_id)
+        return normalized
+
+    @classmethod
+    def _collect_graph_result_chunk_ids(cls, payload: Any) -> list[str]:
+        collected: list[str] = []
+        seen: set[str] = set()
+
+        def _visit(value: Any) -> None:
+            if isinstance(value, dict):
+                for chunk_id in cls._normalize_chunk_ids(value.get("source_chunk_ids")):
+                    if chunk_id not in seen:
+                        seen.add(chunk_id)
+                        collected.append(chunk_id)
+                for chunk_id in cls._normalize_chunk_ids(value.get("source_id")):
+                    if chunk_id not in seen:
+                        seen.add(chunk_id)
+                        collected.append(chunk_id)
+                for nested in value.values():
+                    _visit(nested)
+            elif isinstance(value, (list, tuple, set)):
+                for item in value:
+                    _visit(item)
+
+        _visit(payload)
+        return collected
+
+    @staticmethod
+    def _graph_mutation_applied(result: Any) -> bool:
+        if isinstance(result, dict):
+            marker = result.get("mutation_applied")
+            if marker is not None:
+                return bool(marker)
+            status = result.get("status")
+            if isinstance(status, str):
+                return status == "success"
+
+        status = getattr(result, "status", None)
+        if isinstance(status, str):
+            return status == "success"
+        return True
+
+    async def _collect_entity_deletion_chunk_ids(self, entity_name: str) -> list[str]:
+        if self.chunk_entity_relation_graph is None:
+            return []
+
+        collected: list[str] = []
+        seen: set[str] = set()
+
+        def _add_chunk_ids(payload: Any) -> None:
+            for chunk_id in self._collect_graph_result_chunk_ids(payload):
+                if chunk_id not in seen:
+                    seen.add(chunk_id)
+                    collected.append(chunk_id)
+
+        try:
+            _add_chunk_ids(await self.chunk_entity_relation_graph.get_node(entity_name))
+
+            edges = await self.chunk_entity_relation_graph.get_node_edges(entity_name)
+            for edge in edges or []:
+                if not isinstance(edge, (list, tuple)) or len(edge) != 2:
+                    continue
+                src_id, tgt_id = edge
+                edge_data = await self.chunk_entity_relation_graph.get_edge(
+                    src_id, tgt_id
+                )
+                _add_chunk_ids(edge_data)
+        except Exception as e:
+            logger.debug(
+                "Failed to collect deletion chunk ids for entity '%s': %s",
+                entity_name,
+                e,
+            )
+
+        return collected
+
+    async def _collect_relation_deletion_chunk_ids(
+        self, source_entity: str, target_entity: str
+    ) -> list[str]:
+        if self.chunk_entity_relation_graph is None:
+            return []
+
+        try:
+            edge_data = await self.chunk_entity_relation_graph.get_edge(
+                source_entity, target_entity
+            )
+        except Exception as e:
+            logger.debug(
+                "Failed to collect deletion chunk ids for relation '%s -> %s': %s",
+                source_entity,
+                target_entity,
+                e,
+            )
+            return []
+
+        return self._collect_graph_result_chunk_ids(edge_data)
+
+    async def _get_index_metadata(self) -> dict[str, Any]:
+        index_metadata = getattr(self, "index_metadata", None)
+        refresh_from_storage = getattr(index_metadata, "refresh_from_storage", None)
+        if callable(refresh_from_storage):
+            await refresh_from_storage()
+
+        record = None
+        if index_metadata is not None:
+            record = await index_metadata.get_by_id(_INDEX_METADATA_KEY)
+        if not isinstance(record, dict):
+            record = {}
+
+        try:
+            corpus_revision = max(0, int(record.get("corpus_revision") or 0))
+        except (TypeError, ValueError):
+            corpus_revision = 0
+
+        index_digest = record.get("index_digest")
+        if index_digest is not None:
+            index_digest = str(index_digest)
+
+        return {
+            "corpus_revision": corpus_revision,
+            "index_digest": index_digest,
+            "updated_at": int(record.get("updated_at") or 0),
+            "last_reason": str(record.get("last_reason") or ""),
+            "affected_chunk_ids": self._normalize_chunk_ids(
+                record.get("affected_chunk_ids") or []
+            ),
+        }
+
+    async def _refresh_index_metadata_config(self) -> None:
+        metadata = await self._get_index_metadata()
+        self.corpus_revision = metadata["corpus_revision"]
+        self.index_digest = metadata["index_digest"]
+
+    async def _build_runtime_global_config(self) -> dict[str, Any]:
+        await self._refresh_index_metadata_config()
+        return asdict(self)
+
+    async def _bump_corpus_revision(
+        self,
+        reason: str,
+        affected_chunk_ids: list[str] | None = None,
+    ) -> None:
+        if getattr(self, "index_metadata", None) is None:
+            return
+
+        normalized_chunk_ids = self._normalize_chunk_ids(affected_chunk_ids or [])
+        updated_at = int(time.time())
+        async with get_storage_keyed_lock(
+            _INDEX_METADATA_KEY, namespace="IndexMetadata"
+        ):
+            current_metadata = await self._get_index_metadata()
+            next_revision = current_metadata["corpus_revision"] + 1
+            await self.index_metadata.upsert(
+                {
+                    _INDEX_METADATA_KEY: {
+                        "corpus_revision": next_revision,
+                        "index_digest": None,
+                        "updated_at": updated_at,
+                        "last_reason": str(reason or ""),
+                        "affected_chunk_ids": normalized_chunk_ids,
+                    }
+                }
+            )
+            await self.index_metadata.index_done_callback()
+        await self._refresh_index_metadata_config()
+
+    async def _try_bump_corpus_revision(
+        self,
+        reason: str,
+        affected_chunk_ids: list[str] | None = None,
+    ) -> None:
+        try:
+            await self._bump_corpus_revision(reason, affected_chunk_ids)
+        except Exception as e:
+            logger.error(
+                "Failed to bump corpus revision after %s: %s",
+                reason,
+                e,
+            )
+            if self.llm_response_cache is None:
+                return
+            try:
+                dropped = await self.llm_response_cache.drop_cache_by_modes(
+                    ["graph", "hybrid"]
+                )
+                if dropped:
+                    await self.llm_response_cache.index_done_callback()
+            except Exception as cache_error:
+                logger.error(
+                    "Failed to invalidate query cache after revision bump failure: %s",
+                    cache_error,
+                )
+
     async def initialize_storages(self):
         """Asynchronously initialize the storages"""
         if self._storages_status == StoragesStatus.CREATED:
             tasks = []
 
             for storage in (
+                self.index_metadata,
                 self.full_docs,
                 self.text_chunks,
                 self.entities_vdb,
@@ -702,6 +965,7 @@ class Ragent:
                     tasks.append(storage.initialize())
 
             await asyncio.gather(*tasks)
+            await self._refresh_index_metadata_config()
 
             self._storages_status = StoragesStatus.INITIALIZED
             logger.debug("Initialized Storages")
@@ -712,6 +976,7 @@ class Ragent:
             tasks = []
 
             for storage in (
+                self.index_metadata,
                 self.full_docs,
                 self.text_chunks,
                 self.entities_vdb,
@@ -1313,6 +1578,10 @@ class Ragent:
                 }
             )
             await self._insert_done(pipeline_status, pipeline_status_lock)
+            await self._try_bump_corpus_revision(
+                "structured_import",
+                affected_chunk_ids=list(chunks.keys()),
+            )
         except Exception as e:
             await self.doc_status.upsert(
                 {
@@ -1832,6 +2101,14 @@ class Ragent:
                             await self._insert_done(
                                 pipeline_status, pipeline_status_lock
                             )
+                            await self._try_bump_corpus_revision(
+                                "insert",
+                                affected_chunk_ids=[
+                                    chunk_id
+                                    for record in staged_records
+                                    for chunk_id in record["chunks"].keys()
+                                ],
+                            )
                             _trace_insert(
                                 f"process.persist.done file={source_group_key} "
                                 f"elapsed={time.perf_counter() - persist_start_ts:.2f}s"
@@ -2166,9 +2443,12 @@ class Ragent:
         except Exception as e:
             logger.error(f"Error in ainsert_custom_kg: {e}")
             raise
-        finally:
-            if update_storage:
-                await self._insert_done()
+        if update_storage:
+            await self._insert_done()
+            await self._try_bump_corpus_revision(
+                "custom_kg",
+                affected_chunk_ids=list(all_chunks_data.keys()),
+            )
 
     async def aquery(
         self,
@@ -2190,7 +2470,7 @@ class Ragent:
             str: The result of the query execution.
         """
         # If a custom model is provided in param, temporarily update global config
-        global_config = asdict(self)
+        global_config = await self._build_runtime_global_config()
         # Save original query for vector search
         param.original_query = query
         if param.mode == "graph":
@@ -2269,7 +2549,7 @@ class Ragent:
             relationships_vdb=self.relationships_vdb,
             chunks_vdb=self.chunks_vdb,
             text_chunks_db=self.text_chunks,
-            global_config=asdict(self),
+            global_config=await self._build_runtime_global_config(),
             hashing_kv=self.llm_response_cache,
         )
 
@@ -2314,6 +2594,59 @@ class Ragent:
             include_vector_data,
         )
 
+    async def adelete_by_entity(self, entity_name: str) -> DeletionResult:
+        """Asynchronously delete an entity and its related relationships."""
+        from .utils_graph import adelete_by_entity
+
+        affected_chunk_ids = await self._collect_entity_deletion_chunk_ids(entity_name)
+        result = await adelete_by_entity(
+            self.chunk_entity_relation_graph,
+            self.entities_vdb,
+            self.relationships_vdb,
+            entity_name,
+        )
+        if self._graph_mutation_applied(result):
+            await self._try_bump_corpus_revision(
+                "delete_entity",
+                affected_chunk_ids=affected_chunk_ids,
+            )
+        return result
+
+    def delete_by_entity(self, entity_name: str) -> DeletionResult:
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(self.adelete_by_entity(entity_name))
+
+    async def adelete_by_relation(
+        self, source_entity: str, target_entity: str
+    ) -> DeletionResult:
+        """Asynchronously delete a relation between two entities."""
+        from .utils_graph import adelete_by_relation
+
+        affected_chunk_ids = await self._collect_relation_deletion_chunk_ids(
+            source_entity,
+            target_entity,
+        )
+        result = await adelete_by_relation(
+            self.chunk_entity_relation_graph,
+            self.relationships_vdb,
+            source_entity,
+            target_entity,
+        )
+        if self._graph_mutation_applied(result):
+            await self._try_bump_corpus_revision(
+                "delete_relation",
+                affected_chunk_ids=affected_chunk_ids,
+            )
+        return result
+
+    def delete_by_relation(
+        self, source_entity: str, target_entity: str
+    ) -> DeletionResult:
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(
+            self.adelete_by_relation(source_entity, target_entity)
+        )
+
     async def aedit_entity(
         self, entity_name: str, updated_data: dict[str, str], allow_rename: bool = True
     ) -> dict[str, Any]:
@@ -2331,7 +2664,7 @@ class Ragent:
         """
         from .utils_graph import aedit_entity
 
-        return await aedit_entity(
+        result = await aedit_entity(
             self.chunk_entity_relation_graph,
             self.entities_vdb,
             self.relationships_vdb,
@@ -2339,6 +2672,12 @@ class Ragent:
             updated_data,
             allow_rename,
         )
+        if self._graph_mutation_applied(result):
+            await self._try_bump_corpus_revision(
+                "edit_entity",
+                affected_chunk_ids=self._collect_graph_result_chunk_ids(result),
+            )
+        return result
 
     def edit_entity(
         self, entity_name: str, updated_data: dict[str, str], allow_rename: bool = True
@@ -2365,7 +2704,7 @@ class Ragent:
         """
         from .utils_graph import aedit_relation
 
-        return await aedit_relation(
+        result = await aedit_relation(
             self.chunk_entity_relation_graph,
             self.entities_vdb,
             self.relationships_vdb,
@@ -2373,6 +2712,12 @@ class Ragent:
             target_entity,
             updated_data,
         )
+        if self._graph_mutation_applied(result):
+            await self._try_bump_corpus_revision(
+                "edit_relation",
+                affected_chunk_ids=self._collect_graph_result_chunk_ids(result),
+            )
+        return result
 
     def edit_relation(
         self, source_entity: str, target_entity: str, updated_data: dict[str, Any]
@@ -2398,13 +2743,19 @@ class Ragent:
         """
         from .utils_graph import acreate_entity
 
-        return await acreate_entity(
+        result = await acreate_entity(
             self.chunk_entity_relation_graph,
             self.entities_vdb,
             self.relationships_vdb,
             entity_name,
             entity_data,
         )
+        if self._graph_mutation_applied(result):
+            await self._try_bump_corpus_revision(
+                "create_entity",
+                affected_chunk_ids=self._collect_graph_result_chunk_ids(result),
+            )
+        return result
 
     def create_entity(
         self, entity_name: str, entity_data: dict[str, Any]
@@ -2429,7 +2780,7 @@ class Ragent:
         """
         from .utils_graph import acreate_relation
 
-        return await acreate_relation(
+        result = await acreate_relation(
             self.chunk_entity_relation_graph,
             self.entities_vdb,
             self.relationships_vdb,
@@ -2437,6 +2788,12 @@ class Ragent:
             target_entity,
             relation_data,
         )
+        if self._graph_mutation_applied(result):
+            await self._try_bump_corpus_revision(
+                "create_relation",
+                affected_chunk_ids=self._collect_graph_result_chunk_ids(result),
+            )
+        return result
 
     def create_relation(
         self, source_entity: str, target_entity: str, relation_data: dict[str, Any]
@@ -2475,7 +2832,7 @@ class Ragent:
         """
         from .utils_graph import amerge_entities
 
-        return await amerge_entities(
+        result = await amerge_entities(
             self.chunk_entity_relation_graph,
             self.entities_vdb,
             self.relationships_vdb,
@@ -2484,6 +2841,12 @@ class Ragent:
             merge_strategy,
             target_entity_data,
         )
+        if self._graph_mutation_applied(result):
+            await self._try_bump_corpus_revision(
+                "merge_entities",
+                affected_chunk_ids=self._collect_graph_result_chunk_ids(result),
+            )
+        return result
 
     def merge_entities(
         self,

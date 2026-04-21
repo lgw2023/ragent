@@ -221,6 +221,19 @@ async def aedit_entity(
                     "entity_name"
                 ]  # Node data should not contain entity_name field
 
+            if not is_renaming and new_node_data == node_data:
+                logger.info(
+                    f"Entity '{entity_name}' update is a no-op; skipping persistence"
+                )
+                result = await get_entity_info(
+                    chunk_entity_relation_graph,
+                    entities_vdb,
+                    entity_name,
+                    include_vector_data=True,
+                )
+                result["mutation_applied"] = False
+                return result
+
             # If renaming entity
             if is_renaming:
                 logger.info(f"Renaming entity '{entity_name}' to '{new_entity_name}'")
@@ -410,6 +423,23 @@ async def aedit_relation(
             edge_data = await chunk_entity_relation_graph.get_edge(
                 source_entity, target_entity
             )
+            new_edge_data = {**edge_data, **updated_data}
+            if new_edge_data == edge_data:
+                logger.info(
+                    "Relation from '%s' to '%s' update is a no-op; skipping persistence",
+                    source_entity,
+                    target_entity,
+                )
+                result = await get_relation_info(
+                    chunk_entity_relation_graph,
+                    relationships_vdb,
+                    source_entity,
+                    target_entity,
+                    include_vector_data=True,
+                )
+                result["mutation_applied"] = False
+                return result
+
             # Important: First delete the old relation record from the vector database
             old_relation_id = compute_mdhash_id(
                 source_entity + target_entity, prefix="rel-"
@@ -420,7 +450,6 @@ async def aedit_relation(
             )
 
             # 2. Update relation information in the graph
-            new_edge_data = {**edge_data, **updated_data}
             await chunk_entity_relation_graph.upsert_edge(
                 source_entity, target_entity, new_edge_data
             )
