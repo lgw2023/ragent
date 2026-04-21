@@ -1,7 +1,7 @@
 STORAGE_IMPLEMENTATIONS = {
     "KV_STORAGE": {
         "implementations": [
-            "JsonKVStorage",
+            "SQLiteKVStorage",
             "RedisKVStorage",
             "PGKVStorage",
             "MongoKVStorage",
@@ -49,7 +49,7 @@ STORAGE_IMPLEMENTATIONS = {
 # Storage implementation environment variable without default value
 STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
     # KV Storage Implementations
-    "JsonKVStorage": [],
+    "SQLiteKVStorage": [],
     "MongoKVStorage": [],
     "RedisKVStorage": ["REDIS_URI"],
     # "TiDBKVStorage": ["TIDB_USER", "TIDB_PASSWORD", "TIDB_DATABASE"],
@@ -90,7 +90,7 @@ STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
 # Storage implementation module mapping
 STORAGES = {
     "NetworkXStorage": ".kg.networkx_impl",
-    "JsonKVStorage": ".kg.json_kv_impl",
+    "SQLiteKVStorage": ".kg.sqlite_kv_impl",
     "SQLiteQueryCacheStorage": ".kg.sqlite_query_cache_impl",
     "NanoVectorDBStorage": ".kg.nano_vector_db_impl",
     "JsonDocStatusStorage": ".kg.json_doc_status_impl",

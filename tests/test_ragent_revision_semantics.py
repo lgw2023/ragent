@@ -1,6 +1,5 @@
 import asyncio
 import importlib
-import json
 import sys
 import tempfile
 import unittest
@@ -8,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from ragent.base import DeletionResult, DocStatus, QueryParam
-from ragent.kg.json_kv_impl import JsonKVStorage
 from ragent.kg.shared_storage import initialize_share_data
 from ragent.namespace import NameSpace
 from ragent.utils import compute_mdhash_id
@@ -650,41 +648,3 @@ class RagentRevisionSemanticsTests(unittest.IsolatedAsyncioTestCase):
                         await getattr(rag, method_name)(*args)
 
                 rag._try_bump_corpus_revision.assert_not_awaited()
-
-
-class JsonKVStorageRefreshTests(unittest.IsolatedAsyncioTestCase):
-    async def test_refresh_from_storage_reloads_latest_persisted_metadata(self):
-        initialize_share_data()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = JsonKVStorage(
-                namespace=NameSpace.KV_STORE_INDEX_METADATA,
-                workspace="",
-                global_config={
-                    "working_dir": tmpdir,
-                    "query_cache_backend": "json",
-                    "query_cache_ttl_seconds": 0,
-                    "query_cache_max_entries": 0,
-                },
-                embedding_func=None,
-            )
-            await storage.initialize()
-            await storage.upsert({"corpus": {"corpus_revision": 1, "index_digest": None}})
-            await storage.index_done_callback()
-
-            with open(storage._file_name, "w", encoding="utf-8") as fh:
-                json.dump(
-                    {
-                        "corpus": {
-                            "corpus_revision": 2,
-                            "index_digest": "rev-2",
-                        }
-                    },
-                    fh,
-                )
-
-            await storage.refresh_from_storage()
-            record = await storage.get_by_id("corpus")
-
-            self.assertEqual(record["corpus_revision"], 2)
-            self.assertEqual(record["index_digest"], "rev-2")

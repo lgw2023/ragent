@@ -2,14 +2,16 @@
 """Verify benchmark warm runs used the layered query cache.
 
 The script is intentionally format-light: it can inspect a benchmark trace JSON
-file containing records with `trace.stage_timings`, and/or inspect a flattened
-`kv_store_llm_response_cache.json` file for `{mode}:{cache_type}:{hash}` keys.
+file containing records with `trace.stage_timings`, and/or inspect a legacy
+`kv_store_llm_response_cache.json` file or the sqlite-backed
+`kv_store_llm_response_cache.sqlite` file for `{mode}:{cache_type}:{hash}` keys.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from collections import Counter
 from pathlib import Path
@@ -27,6 +29,33 @@ CACHE_HIT_STAGES = {
 def _load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _load_cache_counts(path: Path) -> Counter[tuple[str, str]]:
+    if path.suffix == ".sqlite":
+        with sqlite3.connect(path) as conn:
+            rows = conn.execute(
+                """
+                SELECT mode, cache_type, COUNT(*) AS entry_count
+                FROM query_cache_entries
+                GROUP BY mode, cache_type
+                """
+            ).fetchall()
+        counts: Counter[tuple[str, str]] = Counter()
+        for mode, cache_type, entry_count in rows:
+            counts[(str(mode), str(cache_type))] = int(entry_count)
+        return counts
+
+    payload = _load_json(path)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Cache file is not a JSON object: {path}")
+
+    counts: Counter[tuple[str, str]] = Counter()
+    for key in payload:
+        parts = str(key).split(":", 2)
+        if len(parts) == 3:
+            counts[(parts[0], parts[1])] += 1
+    return counts
 
 
 def _iter_records(payload: Any):
@@ -106,16 +135,11 @@ def summarize_cache_file(
     *,
     required_entries: list[str],
 ) -> int:
-    payload = _load_json(path)
-    if not isinstance(payload, dict):
-        print(f"Cache file is not a JSON object: {path}", file=sys.stderr)
+    try:
+        counts = _load_cache_counts(path)
+    except (TypeError, sqlite3.Error, json.JSONDecodeError) as exc:
+        print(str(exc), file=sys.stderr)
         return 1
-
-    counts: Counter[tuple[str, str]] = Counter()
-    for key in payload:
-        parts = str(key).split(":", 2)
-        if len(parts) == 3:
-            counts[(parts[0], parts[1])] += 1
 
     print(f"Cache file: {path}")
     for (mode, cache_type), count in sorted(counts.items()):
@@ -146,7 +170,7 @@ def main() -> int:
     parser.add_argument(
         "--cache-file",
         type=Path,
-        help="Path to kv_store_llm_response_cache.json.",
+        help="Path to legacy kv_store_llm_response_cache.json or kv_store_llm_response_cache.sqlite.",
     )
     parser.add_argument(
         "--require-warm-hit",

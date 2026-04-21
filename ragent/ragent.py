@@ -212,7 +212,7 @@ class Ragent:
     # Storage
     # ---
 
-    kv_storage: str = field(default="JsonKVStorage")
+    kv_storage: str = field(default="SQLiteKVStorage")
     """Storage backend for key-value data."""
 
     vector_storage: str = field(default="NanoVectorDBStorage")
@@ -421,11 +421,6 @@ class Ragent:
     enable_llm_cache_for_entity_extract: bool = field(default=True)
     """If True, enables caching for entity extraction steps to reduce LLM costs."""
 
-    query_cache_backend: str = field(
-        default=get_env_value("QUERY_CACHE_BACKEND", "json", str)
-    )
-    """Backend for query cache storage. Supported values: 'json', 'sqlite'."""
-
     query_cache_ttl_seconds: int = field(
         default=get_env_value("QUERY_CACHE_TTL_SECONDS", 0, int)
     )
@@ -509,13 +504,6 @@ class Ragent:
             logger.info(f"Creating working directory {self.working_dir}")
             os.makedirs(self.working_dir)
 
-        self.query_cache_backend = str(self.query_cache_backend or "json").strip().lower()
-        if self.query_cache_backend not in {"json", "sqlite"}:
-            raise ValueError(
-                "Unsupported query_cache_backend: "
-                f"{self.query_cache_backend!r}. Expected 'json' or 'sqlite'."
-            )
-
         # Verify storage implementation compatibility and environment variables
         storage_configs = [
             ("KV_STORAGE", self.kv_storage),
@@ -568,7 +556,7 @@ class Ragent:
         )(self.embedding_func)
 
         # Initialize all storages
-        self.key_string_value_json_storage_cls: type[BaseKVStorage] = (
+        self.key_value_storage_cls: type[BaseKVStorage] = (
             self._get_storage_class(self.kv_storage)
         )  # type: ignore
         self.vector_db_storage_cls: type[BaseVectorStorage] = self._get_storage_class(
@@ -577,8 +565,8 @@ class Ragent:
         self.graph_storage_cls: type[BaseGraphStorage] = self._get_storage_class(
             self.graph_storage
         )  # type: ignore
-        self.key_string_value_json_storage_cls = partial(  # type: ignore
-            self.key_string_value_json_storage_cls, global_config=global_config
+        self.key_value_storage_cls = partial(  # type: ignore
+            self.key_value_storage_cls, global_config=global_config
         )
         self.vector_db_storage_cls = partial(  # type: ignore
             self.vector_db_storage_cls, global_config=global_config
@@ -590,12 +578,10 @@ class Ragent:
         # Initialize document status storage
         self.doc_status_storage_cls = self._get_storage_class(self.doc_status_storage)
 
-        query_cache_storage_cls = self.key_string_value_json_storage_cls
-        if self.query_cache_backend == "sqlite":
-            query_cache_storage_cls = partial(  # type: ignore
-                self._get_storage_class("SQLiteQueryCacheStorage"),
-                global_config=global_config,
-            )
+        query_cache_storage_cls = partial(  # type: ignore
+            self._get_storage_class("SQLiteQueryCacheStorage"),
+            global_config=global_config,
+        )
 
         self.llm_response_cache: BaseKVStorage = query_cache_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_LLM_RESPONSE_CACHE,
@@ -604,19 +590,19 @@ class Ragent:
             embedding_func=self.embedding_func,
         )
 
-        self.index_metadata: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.index_metadata: BaseKVStorage = self.key_value_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_INDEX_METADATA,
             workspace=self.workspace,
             embedding_func=self.embedding_func,
         )
 
-        self.full_docs: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.full_docs: BaseKVStorage = self.key_value_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_FULL_DOCS,
             workspace=self.workspace,
             embedding_func=self.embedding_func,
         )
 
-        self.text_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.text_chunks: BaseKVStorage = self.key_value_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_TEXT_CHUNKS,
             workspace=self.workspace,
             embedding_func=self.embedding_func,
