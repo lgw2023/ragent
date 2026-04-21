@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from typing import Any, final
 
 from ragent.base import BaseKVStorage
-from ragent.namespace import NameSpace
-from ragent.utils import load_json, logger
 
 
 _QUERY_CACHE_MANAGED_MODES = {"graph", "hybrid"}
@@ -27,9 +25,6 @@ class SQLiteQueryCacheStorage(BaseKVStorage):
             base_dir = working_dir
 
         self._file_name = os.path.join(base_dir, f"kv_store_{self.namespace}.sqlite")
-        self._legacy_json_file = os.path.join(
-            base_dir, f"kv_store_{self.namespace}.json"
-        )
         self._conn: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()
 
@@ -73,7 +68,6 @@ class SQLiteQueryCacheStorage(BaseKVStorage):
             )
             self._conn.commit()
 
-            await self._migrate_legacy_json_if_needed_locked()
             await self._prune_locked()
 
     async def finalize(self):
@@ -167,31 +161,6 @@ class SQLiteQueryCacheStorage(BaseKVStorage):
             "access_count": access_count,
             "is_query_cache": 1 if is_query_cache else 0,
         }
-
-    async def _migrate_legacy_json_if_needed_locked(self) -> None:
-        if self.namespace != NameSpace.KV_STORE_LLM_RESPONSE_CACHE:
-            return
-
-        conn = self._get_connection()
-        count_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM query_cache_entries"
-        ).fetchone()
-        existing_count = int(count_row["count"]) if count_row is not None else 0
-        if existing_count > 0 or not os.path.exists(self._legacy_json_file):
-            return
-
-        legacy_data = load_json(self._legacy_json_file) or {}
-        if not isinstance(legacy_data, dict) or not legacy_data:
-            return
-
-        migrated_count = await self._upsert_locked(legacy_data, prune=False)
-        conn.commit()
-        logger.info(
-            "Migrated %s cache entries from %s to %s",
-            migrated_count,
-            self._legacy_json_file,
-            self._file_name,
-        )
 
     async def _get_by_id_locked(
         self, id: str, *, touch: bool

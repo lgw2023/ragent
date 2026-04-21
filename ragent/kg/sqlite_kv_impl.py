@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, final
 
 from ragent.base import BaseKVStorage
-from ragent.utils import load_json, logger
+from ragent.utils import logger
 
 
 @final
@@ -23,9 +23,6 @@ class SQLiteKVStorage(BaseKVStorage):
             base_dir = working_dir
 
         self._file_name = os.path.join(base_dir, f"kv_store_{self.namespace}.sqlite")
-        self._legacy_json_file = os.path.join(
-            base_dir, f"kv_store_{self.namespace}.json"
-        )
         self._conn: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()
 
@@ -52,8 +49,6 @@ class SQLiteKVStorage(BaseKVStorage):
                 "CREATE INDEX IF NOT EXISTS idx_kv_entries_update_time ON kv_entries(update_time)"
             )
             self._conn.commit()
-
-            await self._migrate_legacy_json_if_needed_locked()
 
     async def finalize(self):
         async with self._lock:
@@ -117,28 +112,6 @@ class SQLiteKVStorage(BaseKVStorage):
         entry["create_time"] = create_time
         entry["update_time"] = update_time
         return entry, create_time, update_time
-
-    async def _migrate_legacy_json_if_needed_locked(self) -> None:
-        conn = self._get_connection()
-        count_row = conn.execute("SELECT COUNT(*) AS count FROM kv_entries").fetchone()
-        existing_count = int(count_row["count"]) if count_row is not None else 0
-        if existing_count > 0 or not os.path.exists(self._legacy_json_file):
-            return
-
-        legacy_data = load_json(self._legacy_json_file) or {}
-        if not isinstance(legacy_data, dict) or not legacy_data:
-            return
-
-        migrated_count = await self._upsert_locked(
-            legacy_data,
-            preserve_update_time=True,
-        )
-        logger.info(
-            "Migrated %s KV entries from %s to %s",
-            migrated_count,
-            self._legacy_json_file,
-            self._file_name,
-        )
 
     async def refresh_from_storage(self) -> bool:
         async with self._lock:

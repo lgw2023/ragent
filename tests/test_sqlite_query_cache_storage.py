@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 
@@ -133,38 +132,6 @@ class SQLiteQueryCacheStorageTests(unittest.IsolatedAsyncioTestCase):
             (await storage.get_by_id("default:extract:c"))["return"],
             "keep-me",
         )
-
-    async def test_initialize_migrates_legacy_json_cache(self):
-        storage, working_dir = await self._create_storage()
-        await storage.drop()
-
-        legacy_path = f"{working_dir}/kv_store_{NameSpace.KV_STORE_LLM_RESPONSE_CACHE}.json"
-        with open(legacy_path, "w", encoding="utf-8") as file:
-            json.dump(
-                {
-                    "hybrid:answer:legacy": {
-                        "return": _build_query_cache_payload(
-                            result_kind=_QUERY_RESULT_KIND_ANSWER,
-                            answer="legacy-answer",
-                            created_at=11,
-                            last_accessed_at=11,
-                            access_count=1,
-                        ),
-                        "cache_type": "answer",
-                        "original_prompt": "q",
-                    }
-                },
-                file,
-                ensure_ascii=False,
-            )
-
-        await storage.finalize()
-        await storage.initialize()
-
-        migrated = await storage.get_by_id("hybrid:answer:legacy")
-        self.assertIsNotNone(migrated)
-        self.assertEqual(migrated["return"]["answer"], "legacy-answer")
-
 
 if __name__ == "__main__":
     unittest.main()

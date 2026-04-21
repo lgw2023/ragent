@@ -14,6 +14,7 @@ from ragent.operate import (
     _coerce_query_cache_payload,
     graph_query,
     hybrid_query,
+    kg_query_with_keywords,
 )
 from ragent.utils import compute_args_hash
 
@@ -455,10 +456,20 @@ class QueryCacheSemanticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "hybrid answer")
         self.assertEqual(refs, ["/tmp/source.pdf"])
         stages = {item["stage"] for item in debug["stage_timings"]}
-        self.assertIn("retrieval_cache_hit", stages)
-        self.assertIn("render_cache_hit", stages)
-        self.assertIn("prompt_cache_hit", stages)
         self.assertIn("answer_cache_hit", stages)
+        self.assertIn("onehop_total", stages)
+        self.assertIn("chunk text", debug["final_context_text"])
+        self.assertIn("source.pdf", debug["final_context_text"])
+        self.assertIn("Document Chunks", debug["final_prompt_text"])
+        self.assertIn("chunk text", debug["final_prompt_text"])
+        self.assertEqual(
+            debug["final_context_document_chunks"][0]["source_ref"],
+            "source.pdf",
+        )
+        self.assertEqual(
+            debug["final_context_document_chunks"][0]["content"],
+            "chunk text",
+        )
         self.assertEqual(len(model.calls), 1)
 
     async def test_graph_answer_cache_short_circuits_warm_run(self):
@@ -654,6 +665,63 @@ class QueryCacheSemanticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, second)
         self.assertEqual(retrieval_calls, 1)
         self.assertEqual(len(model.calls), 1)
+
+    async def test_query_with_keywords_saves_revision_aware_answer_cache(self):
+        model = _Model("keyword answer")
+        config = _global_config(model)
+        config["corpus_revision"] = 9
+        cache = _FakeKV()
+
+        with patch(
+            "ragent.operate._build_query_context",
+            new_callable=AsyncMock,
+            return_value="keyword context",
+        ) as context_mock:
+            answer = await kg_query_with_keywords(
+                "q",
+                None,
+                None,
+                None,
+                None,
+                QueryParam(mode="hybrid"),
+                config,
+                cache,
+                ll_keywords=["饮食"],
+                hl_keywords=["指南"],
+                chunks_vdb=None,
+            )
+
+            self.assertEqual(answer, "keyword answer")
+            self.assertEqual(context_mock.await_count, 1)
+            self.assertEqual(len(model.calls), 1)
+
+            answer_entries = [
+                value["return"]
+                for key, value in cache.store.items()
+                if key.startswith("hybrid:answer:")
+            ]
+            self.assertEqual(len(answer_entries), 1)
+            self.assertEqual(answer_entries[0]["corpus_revision"], 9)
+
+            context_mock.reset_mock()
+            context_mock.side_effect = AssertionError("context should come from cache")
+            cached_answer = await kg_query_with_keywords(
+                "q",
+                None,
+                None,
+                None,
+                None,
+                QueryParam(mode="hybrid"),
+                config,
+                cache,
+                ll_keywords=["饮食"],
+                hl_keywords=["指南"],
+                chunks_vdb=None,
+            )
+
+            self.assertEqual(cached_answer, "keyword answer")
+            self.assertEqual(context_mock.await_count, 0)
+            self.assertEqual(len(model.calls), 1)
 
     async def test_conflicting_render_flags_raise(self):
         with self.assertRaises(ValueError):
