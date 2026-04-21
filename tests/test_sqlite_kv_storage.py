@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 
@@ -23,36 +22,6 @@ class SQLiteKVStorageTests(unittest.IsolatedAsyncioTestCase):
         await storage.initialize()
         self.addAsyncCleanup(storage.finalize)
         return storage
-
-    async def test_initialize_migrates_legacy_json_kv(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = await self._create_storage(working_dir=tmpdir)
-            await storage.drop()
-
-            legacy_path = f"{tmpdir}/kv_store_{NameSpace.KV_STORE_INDEX_METADATA}.json"
-            with open(legacy_path, "w", encoding="utf-8") as file:
-                json.dump(
-                    {
-                        "corpus": {
-                            "corpus_revision": 2,
-                            "index_digest": "rev-2",
-                            "create_time": 11,
-                            "update_time": 12,
-                        }
-                    },
-                    file,
-                    ensure_ascii=False,
-                )
-
-            await storage.finalize()
-            await storage.initialize()
-
-            record = await storage.get_by_id("corpus")
-            self.assertIsNotNone(record)
-            self.assertEqual(record["corpus_revision"], 2)
-            self.assertEqual(record["index_digest"], "rev-2")
-            self.assertEqual(record["create_time"], 11)
-            self.assertEqual(record["update_time"], 12)
 
     async def test_refresh_from_storage_observes_updates_from_other_connection(self):
         with tempfile.TemporaryDirectory() as tmpdir:

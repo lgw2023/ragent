@@ -431,6 +431,11 @@ class Ragent:
     )
     """Maximum number of managed query cache entries. 0 disables LRU pruning."""
 
+    query_cache_backend: str = field(
+        default=get_env_value("QUERY_CACHE_BACKEND", "sqlite", str)
+    )
+    """Query cache backend. Only "sqlite" is supported."""
+
     corpus_revision: int = field(default=0)
     """Monotonic index revision included in query cache fingerprints."""
 
@@ -542,6 +547,10 @@ class Ragent:
                 "Missing required config: llm_model_name. "
                 "Set `llm_model_name` explicitly."
             )
+
+        self.query_cache_backend = self._normalize_query_cache_backend(
+            self.query_cache_backend
+        )
 
         # Fix global_config now
         global_config = asdict(self)
@@ -712,6 +721,16 @@ class Ragent:
             loop = asyncio.new_event_loop()
             loop.run_until_complete(async_func())
             loop.close()
+
+    @staticmethod
+    def _normalize_query_cache_backend(raw_value: str | None) -> str:
+        normalized = str(raw_value or "sqlite").strip().lower()
+        if normalized in {"sqlite", "sqlitequerycachestorage"}:
+            return "sqlite"
+        raise ValueError(
+            "Unsupported query_cache_backend: "
+            f"{raw_value!r}. Only 'sqlite' is supported."
+        )
 
     @staticmethod
     def _normalize_chunk_ids(values: Any) -> list[str]:

@@ -3577,11 +3577,7 @@ async def graph_query(
         system_prompt=system_prompt,
     )
 
-    if (
-        not return_debug
-        and not query_param.only_need_context
-        and not query_param.only_need_prompt
-    ):
+    if not query_param.only_need_context and not query_param.only_need_prompt:
         answer_cache_payload = await _load_query_cache_payload(
             hashing_kv,
             args_hash=answer_cache_key,
@@ -3595,10 +3591,28 @@ async def graph_query(
             hit_label="最终答案缓存命中",
         )
         if answer_cache_payload is not None:
-            return (
-                answer_cache_payload["answer"],
-                answer_cache_payload["referenced_file_paths"],
+            referenced_file_paths = answer_cache_payload["referenced_file_paths"]
+            response = answer_cache_payload["answer"]
+            _record_stage_timing(
+                stage_timings,
+                "onehop_total",
+                "OneHop 查询总耗时",
+                query_total_started_at,
             )
+            if return_debug:
+                debug_payload = _hydrate_debug_payload(
+                    cacheable_debug_payload=answer_cache_payload[
+                        "debug_payload_cacheable"
+                    ],
+                    context_text=answer_cache_payload["context_text"],
+                    prompt_text=answer_cache_payload["prompt_text"],
+                    final_context_document_chunks=answer_cache_payload[
+                        "final_context_document_chunks"
+                    ],
+                    stage_timings=stage_timings,
+                )
+                return response, referenced_file_paths, debug_payload
+            return response, referenced_file_paths
 
     retrieval_cache_key = _build_query_request_fingerprint(
         scope=_QUERY_CACHE_TYPE_RETRIEVAL,
@@ -4690,17 +4704,9 @@ async def _find_most_related_text_unit_from_entities(
 ):
     logger.debug(f"Searching text chunks for {len(node_datas)} entities")
 
-    text_units = [
-        _normalize_source_chunk_ids(
-            dp.get("source_chunk_ids") or dp.get("source_id")
-        )[
-            : text_chunks_db.global_config.get(
-                "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
-            )
-        ]
-        for dp in node_datas
-        if (dp.get("source_chunk_ids") or dp.get("source_id")) is not None
-    ]
+    related_chunk_number = text_chunks_db.global_config.get(
+        "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
+    )
 
     node_names = [dp["entity_name"] for dp in node_datas]
     batch_edges_dict = await knowledge_graph_inst.get_nodes_edges_batch(node_names)
@@ -4737,9 +4743,12 @@ async def _find_most_related_text_unit_from_entities(
     all_text_units_lookup: dict[str, dict[str, Any]] = {}
     tasks: list[str] = []
 
-    for index, (this_text_units, this_edges, node_data) in enumerate(
-        zip(text_units, edges, node_datas)
-    ):
+    for index, (node_data, this_edges) in enumerate(zip(node_datas, edges)):
+        this_text_units = _normalize_source_chunk_ids(
+            node_data.get("source_chunk_ids") or node_data.get("source_id")
+        )[:related_chunk_number]
+        if not this_text_units:
+            continue
         seed_query_score = _coerce_score(node_data.get("query_score"))
         for c_id in this_text_units:
             if c_id not in all_text_units_lookup:
@@ -5080,20 +5089,17 @@ async def _find_related_text_unit_from_relationships(
 ):
     logger.debug(f"Searching text chunks for {len(edge_datas)} relationships")
 
-    text_units = [
-        _normalize_source_chunk_ids(
-            dp.get("source_chunk_ids") or dp.get("source_id")
-        )[
-            : text_chunks_db.global_config.get(
-                "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
-            )
-        ]
-        for dp in edge_datas
-        if (dp.get("source_chunk_ids") or dp.get("source_id")) is not None
-    ]
+    related_chunk_number = text_chunks_db.global_config.get(
+        "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
+    )
     all_text_units_lookup: dict[str, dict[str, Any]] = {}
     tasks: list[str] = []
-    for index, (unit_list, edge_data) in enumerate(zip(text_units, edge_datas)):
+    for index, edge_data in enumerate(edge_datas):
+        unit_list = _normalize_source_chunk_ids(
+            edge_data.get("source_chunk_ids") or edge_data.get("source_id")
+        )[:related_chunk_number]
+        if not unit_list:
+            continue
         seed_query_score = _coerce_score(edge_data.get("query_score"))
         for c_id in unit_list:
             if c_id not in all_text_units_lookup:
@@ -5126,8 +5132,7 @@ async def _find_related_text_unit_from_relationships(
             *[text_chunks_db.get_by_id(c_id) for c_id in tasks]
         )
         for c_id, chunk_data in zip(tasks, fetched_chunks):
-            if chunk_data is not None and "content" in chunk_data:
-                all_text_units_lookup[c_id]["data"] = chunk_data
+            all_text_units_lookup[c_id]["data"] = chunk_data
 
     if not all_text_units_lookup:
         logger.warning("No valid text chunks found")
@@ -5146,7 +5151,7 @@ async def _find_related_text_unit_from_relationships(
 
     # Ensure all text chunks have content
     valid_text_units = [
-        t for t in all_text_units if t["data"] is not None and "content" in t["data"]
+        t for t in all_text_units if t.get("data") is not None and "content" in t["data"]
     ]
 
     if not valid_text_units:
@@ -5655,11 +5660,7 @@ async def hybrid_query(
         system_prompt=system_prompt,
     )
 
-    if (
-        not return_debug
-        and not query_param.only_need_context
-        and not query_param.only_need_prompt
-    ):
+    if not query_param.only_need_context and not query_param.only_need_prompt:
         answer_cache_payload = await _load_query_cache_payload(
             hashing_kv,
             args_hash=answer_cache_key,
@@ -5673,10 +5674,28 @@ async def hybrid_query(
             hit_label="最终答案缓存命中",
         )
         if answer_cache_payload is not None:
-            return (
-                answer_cache_payload["answer"],
-                answer_cache_payload["referenced_file_paths"],
+            referenced_file_paths = answer_cache_payload["referenced_file_paths"]
+            response = answer_cache_payload["answer"]
+            _record_stage_timing(
+                stage_timings,
+                "onehop_total",
+                "OneHop 查询总耗时",
+                query_total_started_at,
             )
+            if return_debug:
+                debug_payload = _hydrate_debug_payload(
+                    cacheable_debug_payload=answer_cache_payload[
+                        "debug_payload_cacheable"
+                    ],
+                    context_text=answer_cache_payload["context_text"],
+                    prompt_text=answer_cache_payload["prompt_text"],
+                    final_context_document_chunks=answer_cache_payload[
+                        "final_context_document_chunks"
+                    ],
+                    stage_timings=stage_timings,
+                )
+                return response, referenced_file_paths, debug_payload
+            return response, referenced_file_paths
 
     retrieval_cache_key = _build_query_request_fingerprint(
         scope=_QUERY_CACHE_TYPE_RETRIEVAL,
@@ -5991,6 +6010,10 @@ async def kg_query_with_keywords(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
+    corpus_revision = _coerce_non_negative_int(
+        global_config.get("corpus_revision"),
+        0,
+    )
 
     answer_fingerprint_payload = _build_query_request_fingerprint_payload(
         scope=_QUERY_CACHE_TYPE_ANSWER,

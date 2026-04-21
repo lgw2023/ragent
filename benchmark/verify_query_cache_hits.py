@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Verify benchmark warm runs used the layered query cache.
+"""Verify benchmark warm runs used the layered sqlite query cache.
 
 The script is intentionally format-light: it can inspect a benchmark trace JSON
-file containing records with `trace.stage_timings`, and/or inspect a legacy
-`kv_store_llm_response_cache.json` file or the sqlite-backed
-`kv_store_llm_response_cache.sqlite` file for `{mode}:{cache_type}:{hash}` keys.
+file containing records with `trace.stage_timings`, and/or inspect the
+sqlite-backed `kv_store_llm_response_cache.sqlite` file for
+`{mode}:{cache_type}:{hash}` keys.
 """
 
 from __future__ import annotations
@@ -32,29 +32,19 @@ def _load_json(path: Path) -> Any:
 
 
 def _load_cache_counts(path: Path) -> Counter[tuple[str, str]]:
-    if path.suffix == ".sqlite":
-        with sqlite3.connect(path) as conn:
-            rows = conn.execute(
-                """
-                SELECT mode, cache_type, COUNT(*) AS entry_count
-                FROM query_cache_entries
-                GROUP BY mode, cache_type
-                """
-            ).fetchall()
-        counts: Counter[tuple[str, str]] = Counter()
-        for mode, cache_type, entry_count in rows:
-            counts[(str(mode), str(cache_type))] = int(entry_count)
-        return counts
-
-    payload = _load_json(path)
-    if not isinstance(payload, dict):
-        raise TypeError(f"Cache file is not a JSON object: {path}")
-
+    if path.suffix != ".sqlite":
+        raise TypeError(f"Cache file must be a sqlite database: {path}")
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            """
+            SELECT mode, cache_type, COUNT(*) AS entry_count
+            FROM query_cache_entries
+            GROUP BY mode, cache_type
+            """
+        ).fetchall()
     counts: Counter[tuple[str, str]] = Counter()
-    for key in payload:
-        parts = str(key).split(":", 2)
-        if len(parts) == 3:
-            counts[(parts[0], parts[1])] += 1
+    for mode, cache_type, entry_count in rows:
+        counts[(str(mode), str(cache_type))] = int(entry_count)
     return counts
 
 
@@ -170,7 +160,7 @@ def main() -> int:
     parser.add_argument(
         "--cache-file",
         type=Path,
-        help="Path to legacy kv_store_llm_response_cache.json or kv_store_llm_response_cache.sqlite.",
+        help="Path to kv_store_llm_response_cache.sqlite.",
     )
     parser.add_argument(
         "--require-warm-hit",
