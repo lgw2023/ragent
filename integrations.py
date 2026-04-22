@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import asyncio
 import logging
@@ -6,7 +8,6 @@ from dataclasses import asdict, dataclass
 import math
 from dotenv import load_dotenv
 from pathlib import Path
-import pandas as pd
 # use the .env that is inside the current folder
 # allows to use different .env file for each ragent instance
 # .env values take precedence over inherited OS environment variables
@@ -33,8 +34,7 @@ def _resolve_project_relative_mineru_config() -> None:
 
 _resolve_project_relative_mineru_config()
 import subprocess
-from ragent import Ragent, QueryParam, WideTableImportConfig
-from ragent.wide_table import load_wide_table_dataframe
+from ragent import QueryParam, Ragent
 from ragent.llm.openai import env_openai_complete, openai_embed
 from ragent.rerank import rerank_from_env
 from ragent.kg.shared_storage import initialize_pipeline_status, finalize_share_data
@@ -65,11 +65,11 @@ import shutil
 import sys
 import threading
 from collections import Counter
-import aiofiles
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from mineru.cli.common import convert_pdf_bytes_to_bytes, prepare_env, read_fn
-from mineru.utils.config_reader import get_local_models_dir
+if TYPE_CHECKING:
+    import pandas as pd
+    from ragent.wide_table import WideTableImportConfig
 
 
 def _prepare_env_flat(output_dir, parse_method):
@@ -79,21 +79,6 @@ def _prepare_env_flat(output_dir, parse_method):
     os.makedirs(local_image_dir, exist_ok=True)
     os.makedirs(local_md_dir, exist_ok=True)
     return local_image_dir, local_md_dir
-from mineru.data.data_reader_writer import FileBasedDataWriter
-from mineru.utils.draw_bbox import draw_layout_bbox, draw_span_bbox
-from mineru.utils.enum_class import MakeMode
-from mineru.backend.vlm.vlm_analyze import doc_analyze as vlm_doc_analyze
-try:
-    from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
-    pipeline_doc_analyze_streaming = None
-except ImportError:
-    pipeline_doc_analyze = None
-    from mineru.backend.pipeline.pipeline_analyze import (
-        doc_analyze_streaming as pipeline_doc_analyze_streaming,
-    )
-from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
-from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
-from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union_make
 
 _MODEL_HEALTHCHECK_DONE = False
 _MODEL_HEALTHCHECK_LOCK = asyncio.Lock()
@@ -153,6 +138,8 @@ _MINERU_VLM_BACKEND_ALIASES = {
 }
 _MINERU_OUTPUT_SUBDIRS = ("txt", "vlm")
 _MARKDOWN_IT_PARSER = None
+_AIOFILES_MODULE = None
+_MINERU_RUNTIME: "MineruRuntime | None" = None
 
 
 @dataclass(frozen=True)
@@ -165,6 +152,122 @@ class MineruParseSettings:
     server_url: str | None = None
     model_path: str | None = None
     local_model_key: str | None = None
+
+
+@dataclass(frozen=True)
+class MineruRuntime:
+    convert_pdf_bytes_to_bytes: Any
+    prepare_env: Any
+    read_fn: Any
+    get_local_models_dir: Any
+    FileBasedDataWriter: Any
+    draw_layout_bbox: Any
+    draw_span_bbox: Any
+    MakeMode: Any
+    vlm_doc_analyze: Any
+    pipeline_doc_analyze: Any
+    pipeline_doc_analyze_streaming: Any
+    pipeline_union_make: Any
+    pipeline_result_to_middle_json: Any
+    vlm_union_make: Any
+
+
+def _require_aiofiles():
+    global _AIOFILES_MODULE
+    if _AIOFILES_MODULE is None:
+        try:
+            import aiofiles as aiofiles_module
+        except ImportError as exc:
+            raise RuntimeError(
+                "Markdown build / KG indexing requires the optional build dependencies. "
+                "Install them with `uv sync --extra build` or "
+                '`pip install -e ".[build]"` in the build environment.'
+            ) from exc
+        _AIOFILES_MODULE = aiofiles_module
+    return _AIOFILES_MODULE
+
+
+def _require_pandas():
+    try:
+        import pandas as pandas_module
+    except ImportError as exc:
+        raise RuntimeError(
+            "Wide-table import requires the optional build dependencies. "
+            "Install them with `uv sync --extra build` or "
+            '`pip install -e ".[build]"` in the build environment.'
+        ) from exc
+    return pandas_module
+
+
+def _load_wide_table_support():
+    _require_pandas()
+    try:
+        from ragent.wide_table import WideTableImportConfig, load_wide_table_dataframe
+    except ImportError as exc:
+        raise RuntimeError(
+            "Wide-table import requires the optional build dependencies. "
+            "Install them with `uv sync --extra build` or "
+            '`pip install -e ".[build]"` in the build environment.'
+        ) from exc
+    return WideTableImportConfig, load_wide_table_dataframe
+
+
+def _load_mineru_runtime() -> MineruRuntime:
+    global _MINERU_RUNTIME
+    if _MINERU_RUNTIME is not None:
+        return _MINERU_RUNTIME
+
+    try:
+        from mineru.cli.common import convert_pdf_bytes_to_bytes, prepare_env, read_fn
+        from mineru.utils.config_reader import get_local_models_dir
+        from mineru.data.data_reader_writer import FileBasedDataWriter
+        from mineru.utils.draw_bbox import draw_layout_bbox, draw_span_bbox
+        from mineru.utils.enum_class import MakeMode
+        from mineru.backend.vlm.vlm_analyze import doc_analyze as vlm_doc_analyze
+        try:
+            from mineru.backend.pipeline.pipeline_analyze import (
+                doc_analyze as pipeline_doc_analyze,
+            )
+
+            pipeline_doc_analyze_streaming = None
+        except ImportError:
+            pipeline_doc_analyze = None
+            from mineru.backend.pipeline.pipeline_analyze import (
+                doc_analyze_streaming as pipeline_doc_analyze_streaming,
+            )
+        from mineru.backend.pipeline.pipeline_middle_json_mkcontent import (
+            union_make as pipeline_union_make,
+        )
+        from mineru.backend.pipeline.model_json_to_middle_json import (
+            result_to_middle_json as pipeline_result_to_middle_json,
+        )
+        from mineru.backend.vlm.vlm_middle_json_mkcontent import (
+            union_make as vlm_union_make,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "Document parsing requires the optional build dependencies, including "
+            "`mineru[pipeline,vlm]`. Install them with `uv sync --extra build` or "
+            '`pip install -e ".[build]"` in the build environment.'
+        ) from exc
+
+    _MINERU_RUNTIME = MineruRuntime(
+        convert_pdf_bytes_to_bytes=convert_pdf_bytes_to_bytes,
+        prepare_env=prepare_env,
+        read_fn=read_fn,
+        get_local_models_dir=get_local_models_dir,
+        FileBasedDataWriter=FileBasedDataWriter,
+        draw_layout_bbox=draw_layout_bbox,
+        draw_span_bbox=draw_span_bbox,
+        MakeMode=MakeMode,
+        vlm_doc_analyze=vlm_doc_analyze,
+        pipeline_doc_analyze=pipeline_doc_analyze,
+        pipeline_doc_analyze_streaming=pipeline_doc_analyze_streaming,
+        pipeline_union_make=pipeline_union_make,
+        pipeline_result_to_middle_json=pipeline_result_to_middle_json,
+        vlm_union_make=vlm_union_make,
+    )
+    return _MINERU_RUNTIME
 
 
 def _normalize_env_choice(
@@ -210,7 +313,7 @@ def _resolve_mineru_config_path() -> str:
 
 
 def _ensure_local_mineru_model_ready(model_key: str) -> str:
-    local_models_dir = get_local_models_dir()
+    local_models_dir = _load_mineru_runtime().get_local_models_dir()
     model_root = local_models_dir.get(model_key) if isinstance(local_models_dir, dict) else None
     if model_root:
         return model_root
@@ -401,6 +504,7 @@ def _parse_wide_table_sheet_name_env() -> str | int | None:
 
 
 def _detect_wide_table_entity_name_column(dataframe: pd.DataFrame) -> str:
+    pandas_module = _require_pandas()
     override = os.getenv("WIDE_TABLE_ENTITY_NAME_COLUMN")
     if override:
         if override not in dataframe.columns:
@@ -430,7 +534,9 @@ def _detect_wide_table_entity_name_column(dataframe: pd.DataFrame) -> str:
         if string_series.eq("").all():
             continue
 
-        numeric_ratio = pd.to_numeric(string_series, errors="coerce").notna().mean()
+        numeric_ratio = (
+            pandas_module.to_numeric(string_series, errors="coerce").notna().mean()
+        )
         if numeric_ratio > 0.95:
             continue
 
@@ -477,6 +583,7 @@ def _build_wide_table_import_config(
     dataframe: pd.DataFrame,
     table_file_path: str,
 ) -> WideTableImportConfig:
+    WideTableImportConfig, _ = _load_wide_table_support()
     sheet_name = _parse_wide_table_sheet_name_env()
     entity_name_column = _detect_wide_table_entity_name_column(dataframe)
     entity_type = _detect_wide_table_entity_type(table_file_path, entity_name_column)
@@ -3576,15 +3683,20 @@ def do_parse(
     f_dump_model_output=True,  # Whether to dump model output files
     f_dump_orig_pdf=True,  # Whether to dump original PDF files
     f_dump_content_list=True,  # Whether to dump content list files
-    f_make_md_mode=MakeMode.MM_MD,  # The mode for making markdown content, default is MM_MD
+    f_make_md_mode=None,  # The mode for making markdown content, default is MM_MD
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
 ):
+    mineru_runtime = _load_mineru_runtime()
+    if f_make_md_mode is None:
+        f_make_md_mode = mineru_runtime.MakeMode.MM_MD
     resolved_output_subdir = output_subdir or _resolve_mineru_output_subdir(backend)
 
     if backend == "pipeline":
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
-            new_pdf_bytes = convert_pdf_bytes_to_bytes(pdf_bytes, start_page_id, end_page_id)
+            new_pdf_bytes = mineru_runtime.convert_pdf_bytes_to_bytes(
+                pdf_bytes, start_page_id, end_page_id
+            )
             pdf_bytes_list[idx] = new_pdf_bytes
 
         pipeline_contexts = []
@@ -3592,14 +3704,16 @@ def do_parse(
             if flat_output and len(pdf_file_names) == 1:
                 local_image_dir, local_md_dir = _prepare_env_flat(output_dir, resolved_output_subdir)
             else:
-                local_image_dir, local_md_dir = prepare_env(output_dir, pdf_file_name, resolved_output_subdir)
+                local_image_dir, local_md_dir = mineru_runtime.prepare_env(
+                    output_dir, pdf_file_name, resolved_output_subdir
+                )
             pipeline_contexts.append(
                 {
                     "pdf_file_name": pdf_file_name,
                     "local_image_dir": local_image_dir,
                     "local_md_dir": local_md_dir,
-                    "image_writer": FileBasedDataWriter(local_image_dir),
-                    "md_writer": FileBasedDataWriter(local_md_dir),
+                    "image_writer": mineru_runtime.FileBasedDataWriter(local_image_dir),
+                    "md_writer": mineru_runtime.FileBasedDataWriter(local_md_dir),
                 }
             )
 
@@ -3618,10 +3732,20 @@ def do_parse(
             pdf_info = middle_json["pdf_info"]
 
             if f_draw_layout_bbox:
-                draw_layout_bbox(pdf_info, pdf_bytes, local_md_dir, f"{pdf_file_name}_layout.pdf")
+                mineru_runtime.draw_layout_bbox(
+                    pdf_info,
+                    pdf_bytes,
+                    local_md_dir,
+                    f"{pdf_file_name}_layout.pdf",
+                )
 
             if f_draw_span_bbox:
-                draw_span_bbox(pdf_info, pdf_bytes, local_md_dir, f"{pdf_file_name}_span.pdf")
+                mineru_runtime.draw_span_bbox(
+                    pdf_info,
+                    pdf_bytes,
+                    local_md_dir,
+                    f"{pdf_file_name}_span.pdf",
+                )
 
             if f_dump_orig_pdf:
                 md_writer.write(
@@ -3631,7 +3755,11 @@ def do_parse(
 
             if f_dump_md:
                 image_dir = str(os.path.basename(local_image_dir))
-                md_content_str = pipeline_union_make(pdf_info, f_make_md_mode, image_dir)
+                md_content_str = mineru_runtime.pipeline_union_make(
+                    pdf_info,
+                    f_make_md_mode,
+                    image_dir,
+                )
                 md_writer.write_string(
                     f"{pdf_file_name}.md",
                     md_content_str,
@@ -3639,7 +3767,11 @@ def do_parse(
 
             if f_dump_content_list:
                 image_dir = str(os.path.basename(local_image_dir))
-                content_list = pipeline_union_make(pdf_info, MakeMode.CONTENT_LIST, image_dir)
+                content_list = mineru_runtime.pipeline_union_make(
+                    pdf_info,
+                    mineru_runtime.MakeMode.CONTENT_LIST,
+                    image_dir,
+                )
                 md_writer.write_string(
                     f"{pdf_file_name}_content_list.json",
                     json.dumps(content_list, ensure_ascii=False, indent=4),
@@ -3659,8 +3791,14 @@ def do_parse(
 
             logger.info(f"local output dir is {local_md_dir}")
 
-        if pipeline_doc_analyze is not None:
-            infer_results, all_image_lists, all_pdf_docs, lang_list, ocr_enabled_list = pipeline_doc_analyze(
+        if mineru_runtime.pipeline_doc_analyze is not None:
+            (
+                infer_results,
+                all_image_lists,
+                all_pdf_docs,
+                lang_list,
+                ocr_enabled_list,
+            ) = mineru_runtime.pipeline_doc_analyze(
                 pdf_bytes_list,
                 p_lang_list,
                 parse_method=parse_method,
@@ -3674,7 +3812,7 @@ def do_parse(
                 pdf_doc = all_pdf_docs[idx]
                 _lang = lang_list[idx]
                 _ocr_enable = ocr_enabled_list[idx]
-                middle_json = pipeline_result_to_middle_json(
+                middle_json = mineru_runtime.pipeline_result_to_middle_json(
                     model_list,
                     images_list,
                     pdf_doc,
@@ -3699,7 +3837,7 @@ def do_parse(
                     "ocr_enable": ocr_enable,
                 }
 
-            pipeline_doc_analyze_streaming(
+            mineru_runtime.pipeline_doc_analyze_streaming(
                 pdf_bytes_list,
                 [ctx["image_writer"] for ctx in pipeline_contexts],
                 p_lang_list,
@@ -3727,13 +3865,20 @@ def do_parse(
         f_draw_span_bbox = False
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
             pdf_file_name = pdf_file_names[idx]
-            pdf_bytes = convert_pdf_bytes_to_bytes(pdf_bytes, start_page_id, end_page_id)
+            pdf_bytes = mineru_runtime.convert_pdf_bytes_to_bytes(
+                pdf_bytes, start_page_id, end_page_id
+            )
             if flat_output and len(pdf_file_names) == 1:
                 local_image_dir, local_md_dir = _prepare_env_flat(output_dir, resolved_output_subdir)
             else:
-                local_image_dir, local_md_dir = prepare_env(output_dir, pdf_file_name, resolved_output_subdir)
-            image_writer, md_writer = FileBasedDataWriter(local_image_dir), FileBasedDataWriter(local_md_dir)
-            middle_json, infer_result = vlm_doc_analyze(
+                local_image_dir, local_md_dir = mineru_runtime.prepare_env(
+                    output_dir,
+                    pdf_file_name,
+                    resolved_output_subdir,
+                )
+            image_writer = mineru_runtime.FileBasedDataWriter(local_image_dir)
+            md_writer = mineru_runtime.FileBasedDataWriter(local_md_dir)
+            middle_json, infer_result = mineru_runtime.vlm_doc_analyze(
                 pdf_bytes,
                 image_writer=image_writer,
                 backend=backend,
@@ -3744,10 +3889,20 @@ def do_parse(
             pdf_info = middle_json["pdf_info"]
 
             if f_draw_layout_bbox:
-                draw_layout_bbox(pdf_info, pdf_bytes, local_md_dir, f"{pdf_file_name}_layout.pdf")
+                mineru_runtime.draw_layout_bbox(
+                    pdf_info,
+                    pdf_bytes,
+                    local_md_dir,
+                    f"{pdf_file_name}_layout.pdf",
+                )
 
             if f_draw_span_bbox:
-                draw_span_bbox(pdf_info, pdf_bytes, local_md_dir, f"{pdf_file_name}_span.pdf")
+                mineru_runtime.draw_span_bbox(
+                    pdf_info,
+                    pdf_bytes,
+                    local_md_dir,
+                    f"{pdf_file_name}_span.pdf",
+                )
 
             if f_dump_orig_pdf:
                 md_writer.write(
@@ -3757,7 +3912,11 @@ def do_parse(
 
             if f_dump_md:
                 image_dir = str(os.path.basename(local_image_dir))
-                md_content_str = vlm_union_make(pdf_info, f_make_md_mode, image_dir)
+                md_content_str = mineru_runtime.vlm_union_make(
+                    pdf_info,
+                    f_make_md_mode,
+                    image_dir,
+                )
                 md_writer.write_string(
                     f"{pdf_file_name}.md",
                     md_content_str,
@@ -3765,7 +3924,11 @@ def do_parse(
 
             if f_dump_content_list:
                 image_dir = str(os.path.basename(local_image_dir))
-                content_list = vlm_union_make(pdf_info, MakeMode.CONTENT_LIST, image_dir)
+                content_list = mineru_runtime.vlm_union_make(
+                    pdf_info,
+                    mineru_runtime.MakeMode.CONTENT_LIST,
+                    image_dir,
+                )
                 md_writer.write_string(
                     f"{pdf_file_name}_content_list.json",
                     json.dumps(content_list, ensure_ascii=False, indent=4),
@@ -3822,12 +3985,13 @@ def parse_doc(
         server_url: When the backend is `sglang-client`, you need to specify the server_url, for example:`http://127.0.0.1:30000`
     """
     try:
+        mineru_runtime = _load_mineru_runtime()
         file_name_list = []
         pdf_bytes_list = []
         lang_list = []
         for path in path_list:
             file_name = str(Path(path).stem)
-            pdf_bytes = read_fn(path)
+            pdf_bytes = mineru_runtime.read_fn(path)
             file_name_list.append(file_name)
             pdf_bytes_list.append(pdf_bytes)
             lang_list.append(lang)
@@ -3884,6 +4048,7 @@ def mineru_process(pdf_file_path, output_dir, keep_pdf_subdir: bool = True):
 
 async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: bool = True):
     """第一阶段：解析文档并产出增强后的最终 md（包含图片多模态描述回写）。"""
+    aiofiles_module = _require_aiofiles()
     await ensure_startup_model_check_once()
     progress_tracker = _TerminalProgressTracker("MD")
     with _maybe_create_usage_collector("build_enhanced_md") as collector:
@@ -3912,7 +4077,7 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
 
                 progress_tracker.update(0.55, "mineru_parse", "Markdown artifacts generated")
 
-                async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
+                async with aiofiles_module.open(md_path, "r", encoding="utf-8") as f:
                     md_text = await f.read()
                 if not md_text:
                     raise ValueError("md_text is empty")
@@ -4057,7 +4222,9 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                         continue
                     image_stem = os.path.splitext(image_file_name)[0]
                     image_dismantle = os.path.join(image_dir, image_stem + ".txt")
-                    async with aiofiles.open(image_dismantle, "w", encoding="utf-8") as f:
+                    async with aiofiles_module.open(
+                        image_dismantle, "w", encoding="utf-8"
+                    ) as f:
                         await f.write(combined_desc or "")
                     _print_pipeline_progress(
                         "image_desc_written",
@@ -4069,7 +4236,7 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
 
                 # 将图片描述回写到 md 中，并加标记避免重复注入
                 try:
-                    async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
+                    async with aiofiles_module.open(md_path, "r", encoding="utf-8") as f:
                         current_md_content = await f.read()
 
                     image_occurrences = _find_markdown_image_occurrences(current_md_content)
@@ -4160,7 +4327,7 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                     new_content_parts.append(current_md_content[last_pos:])
 
                     if has_modification:
-                        async with aiofiles.open(md_path, "w", encoding="utf-8") as f:
+                        async with aiofiles_module.open(md_path, "w", encoding="utf-8") as f:
                             await f.write("".join(new_content_parts))
                     _print_pipeline_progress(
                         "md_injection_finished",
@@ -4212,6 +4379,7 @@ async def index_md_to_rag(
     progress: dict[str, Any] | None = None,
 ):
     """第二阶段：基于最终 md 和图片描述文件，构建 RAG/KG 索引。"""
+    aiofiles_module = _require_aiofiles()
     progress_tracker = _TerminalProgressTracker("KG")
     rag: Ragent | None = None
     with _maybe_create_usage_collector("index_md_to_rag") as collector:
@@ -4235,7 +4403,7 @@ async def index_md_to_rag(
                 timeout_backoff = float(os.getenv("RAG_INSERT_TIMEOUT_BACKOFF", "1.8"))
                 max_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_MAX_SECONDS", "600"))
 
-                async with aiofiles.open(md_path, "r", encoding="utf-8") as f:
+                async with aiofiles_module.open(md_path, "r", encoding="utf-8") as f:
                     md_text = await f.read()
                 if not md_text:
                     raise ValueError("md_text is empty")
@@ -4246,7 +4414,7 @@ async def index_md_to_rag(
                 content_list: list[dict[str, Any]] = []
                 if resolved_content_list_path and os.path.exists(resolved_content_list_path):
                     try:
-                        async with aiofiles.open(
+                        async with aiofiles_module.open(
                             resolved_content_list_path, "r", encoding="utf-8"
                         ) as f:
                             content_list = json.loads(await f.read())
@@ -4771,6 +4939,7 @@ async def wide_table_insert(table_file_path, project_dir):
 
     progress_tracker = _TerminalProgressTracker("TABLE")
     rag: Ragent | None = None
+    _, load_wide_table_dataframe = _load_wide_table_support()
 
     sheet_name = _parse_wide_table_sheet_name_env()
 

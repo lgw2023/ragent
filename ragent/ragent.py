@@ -18,6 +18,7 @@ from typing import (
     Optional,
     List,
     Dict,
+    TYPE_CHECKING,
 )
 from ragent.constants import (
     DEFAULT_MAX_GLEANING,
@@ -86,13 +87,10 @@ from .utils import (
     logger,
 )
 from .types import KnowledgeGraph
-from .wide_table import (
-    PreparedWideTableImport,
-    WideTableImportConfig,
-    build_wide_table_chunk_result,
-    prepare_wide_table_import,
-)
 from collections import defaultdict
+
+if TYPE_CHECKING:
+    from .wide_table import PreparedWideTableImport, WideTableImportConfig
 
 RAG_INSERT_TRACE_ENABLED = os.getenv("RAG_INSERT_TRACE", "0") == "1"
 _INDEX_METADATA_KEY = "corpus"
@@ -101,6 +99,28 @@ _INDEX_METADATA_KEY = "corpus"
 def _trace_insert(msg: str) -> None:
     if RAG_INSERT_TRACE_ENABLED:
         logger.info(f"[RAG-TRACE] {msg}")
+
+
+def _load_wide_table_support():
+    try:
+        from .wide_table import (
+            PreparedWideTableImport,
+            WideTableImportConfig,
+            build_wide_table_chunk_result,
+            prepare_wide_table_import,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "Wide-table import requires the optional build dependencies. "
+            "Install them with `uv sync --extra build` or "
+            '`pip install -e ".[build]"` in the build environment.'
+        ) from exc
+    return (
+        PreparedWideTableImport,
+        WideTableImportConfig,
+        build_wide_table_chunk_result,
+        prepare_wide_table_import,
+    )
 
 
 def clean_text_for_xml(text):
@@ -1111,6 +1131,7 @@ class Ragent:
         file_path: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
+        (_, _, _, prepare_wide_table_import) = _load_wide_table_support()
         prepared_import = prepare_wide_table_import(
             source,
             config,
@@ -1318,6 +1339,7 @@ class Ragent:
         doc_id: str,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[dict[str, dict[str, Any]], list]:
+        (_, _, build_wide_table_chunk_result, _) = _load_wide_table_support()
         chunks: dict[str, dict[str, Any]] = {}
         chunk_results = []
         total_rows = len(prepared_import.rows)
