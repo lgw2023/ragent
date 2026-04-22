@@ -1,0 +1,414 @@
+
+工作台
+知识库
+当前知识库
+请输入关键字搜索
+
+常见问题
+
+
+主页 (企业MLOps平台)
+我收藏的文档
+企业知识库
+回收站
+
+企业MLOps平台/
+企业知识库/
+企业MLOps平台/
+最佳实践/
+基于电影推荐场景的一次WiseMLOps端到端实践
+
+ 5
+ 0
+ 4
+ 4518
+基于电影推荐场景的一次WiseMLOps端到端实践
+2022-08-04 17:08 由 [作者已脱敏] [工号已脱敏] 创建，于 2025-04-25 17:37 由 [作者已脱敏] [工号已脱敏] 最后修改。 内容存疑 点我
+1. 背景介绍
+案例选取的是推荐场景下，运用NeuMF模型，对MovieLens-20M进行训练、推理。
+
+MovieLens-20M
+
+MovieLens-20M是一个稳定的基准数据集。此数据集包含了138493个用户对27278个电影的20000263个评分和465564个标签。
+
+用户为随机选取，每个用户只给出一个ID，且不涉及其他私人信息。
+
+MovieLens-20M以csv格式存储，便于直接可视化分析。
+
+文件列表：genome_scores.csv、genome-tags.csv、links.csv、movies.csv、ratings.csv、tags.csv。
+
+movies.csv
+
+MovieId+title+geners。以此表示电影ID、电影名称、电影流派/种类。其中电影流派具有多个标签，即可以表示电影的多个属性。
+
+
+
+ratings.csv
+
+userId+movieId+rating+timestamp。分别表示用户ID、电影ID、评分，以及截至时间戳。给出了用户对电影的评分列表。
+
+
+
+tags.csv
+
+userId+ movieId+tag+timestamp。分别表示用户ID、电影ID、用户对电影的标签、时间戳。给出了用户对电影的标签列表。
+
+
+
+links.csv
+
+moviesId+imdeId+tmdbId。IMDB为互联网电影资料库。tMDB为电影数据集。给出了电影ID和两个数据标记ID的对应关系。
+
+
+
+genome_tags.csv
+
+电影标签 DNA标记，唯一标识符。
+
+
+
+genome_scores.csv
+
+movieId+tagId+relevance。分别表示电影ID、电影标签ID、官方标签相关性。给出了电影的官方标签。
+
+
+
+ 
+
+NeuMF模型
+
+NeuMF模型基于神经网络的协同过滤框架NCF，通过隐式反馈解决个性化排名任务。在推荐系统中，点击、购买和观看等操作是常见的隐式反馈，易于收集并能一定程度上代表用户的偏好。
+
+NeuMF模型的结构图如下所示：
+
+
+
+ 
+
+GMF为广义矩阵分解，通过MF user向量和MF item向量之间的逐元素相乘，将生成向量映射到GMF层。
+
+MLP为多层感知器，在多模态深度学习中被广泛应用。在MLP user向量和MLP item向量连接的基础上，增加隐藏层。对于感知层的激活函数，ReLU激活函数是较好的选择，因为相比Sigmoid和tanh，ReLU更具有生物合理性，并且被证明不会导致过饱和。
+
+NeuMF模型结合了GMF的线性度和MLP的非线性度对用户-物品之间的潜在结构进行建模，通过权重在输出层将GMF和MLP预训练的向量连接起来。
+
+ 
+
+2. 数据准备
+将MovieLens-20M上传到数据准备（DPP）中的数据集。参考: 6.2.3 数据集
+
+数据集如下：
+
+MovieLens-20M.zip
+
+
+ 本案例的数据集上传过程如下：
+
+
+
+
+
+ 
+
+3. 模型训练
+3.1 上传算法
+将算法包上传到模型训练（MTP）中的算法。
+
+算法包如下：
+
+Algorithm.zip
+
+3.1.1 数据预处理
+ 算法包中convert.py为数据预处理过程，具体步骤如下：
+
+ 读取movies.csv，将数据按userId分类，筛选评分电影至少20次以上的用户。
+ 将原本的userId和movieId映射成新的序列Id
+ 将新获得的dataframe按照时间戳排序
+ 去除数据集中的重复项
+ 按照userId分类，将每个用户最后一次给电影评分的数据作为验证集，其余为训练集。
+ 将训练集和验证集分别转为tensor，以'.pt'的格式保存。
+ 
+
+3.1.2 模型训练
+ncf.py为训练过程，采用pytorch框架，具体步骤如下：
+
+ 在已有的训练数据集，生成等量的负样本（即与用户没有交集的movieId）。
+ 用于单机多卡训练，引入分布式参数：
+ world size ： 全局（一个分布式任务）中，rank的数量。
+
+ local_rank：指在一个node上进程的相对序号
+
+ 将训练、验证数据按照rank切分。
+
+if args.distributed:
+        test_users = torch.chunk(test_users, args.world_size)[args.local_rank]
+        test_items = torch.chunk(test_items, args.world_size)[args.local_rank]
+        dup_mask = torch.chunk(dup_mask, args.world_size)[args.local_rank]
+        real_indices = torch.chunk(real_indices, args.world_size)[args.local_rank]
+ 
+
+    iii.  建立NeuMF模型，将模型加载到指定设备上，并调用DistributedDataParallel将模型初始化。因为采用单机多卡分布式训练，模型被加载到GPU上。
+
+from apex.parallel import DistributedDataParallel as DDP
+model = model.to('cuda')
+model = DDP(model)
+     iv.  使用基于Apex的amp对训练过程进行混合精度加速
+
+model, optimizer = amp.initialize(model, optimizer, opt_level="O2")
+opt_level共有四个等级
+
+O0相当于原始的单精度训练。
+
+O1在大部分计算时采用半精度，但是所有的模型参数依然保持单精度，对于少数单精度较好的计算（如softmax）依然保持单精度。
+
+O2相比于O1，将模型参数也变为半精度。
+
+O3基本等于最开始实验的全半精度的运算
+
+这里选择的是O2对模型训练进行加速。
+
+等级	O0	O1	O2	O3
+cast_model_type	torch.float32	None	torch.float16	torch.float16
+patch_torch_functions	False	True	False	False
+keep_batchnorm_fp32	None	None	True	False
+master_weights	False	None	True	False
+loss_scale	1.0	“dynamic”	“dynamic”	1.0
+ 
+
+outputs = model(user, item)
+loss = traced_criterion(outputs, label).float()
+loss = torch.mean(loss.view(-1), 0)    
+with amp.scale_loss(loss,optimizer) as loss:
+        loss.backward()
+optimizer.step()
+模型训练时，前向传播过程中传入了user和item向量，经过GMF层和MLP层，通过权重将向量连接得到预测输出。
+
+在得到输出后，首先与真实label相比较，其次通过amp.scale_loss 进行回传。在反向传播的过程中更新优化器的学习率。
+
+    v.  验证时，验证数据集（即每个用户最后一次给电影评分的数据）为真实结果。除此之外，每个用户生成999个负样本（即与用户没有交集的movieId）。
+
+将新生成的样本（user-item）放入模型，并运用topK（）为每个用户从1000个电影中推荐10个电影。
+
+若真实交互电影在前10个电影中，则记为1，反之记为0。
+
+将命中次数/用户总数得到命中率。
+
+通过命中率决定训练是否停止。
+
+ifzero = (out == real_indices.view(-1,1))
+hits = ifzero.sum()
+value = hits / num_user
+   vi.  保存模型参数
+
+一般情况下，只需要保存一份ckpt即可，可以用rank来指定一个进程保存，并通过修改文件权限将模型参数保存到输出文件夹中。
+
+if torch.distributed.get_rank() == 0:  #一般用0，当然，可以选任意的rank保存。
+    output_path = os.path.join(OUTPUT_dir, "net.pth")
+    torch.save(model.module.state_dict(), output_path )
+    os.chmod(output_path, stat.S_IRWXU|stat.S_IRWXG|stat.S_IRWXO)
+ 
+
+3.2 创建训练任务
+创建训练任务的详细步骤可参考: 7. 创建训练任务并执行
+
+注意点：
+
+镜像选择提供pytorch框架的镜像。(镜像环境可选择内部提供的 PyTorch GPU 镜像，具体名称与版本以环境为准，此处已脱敏)
+
+
+模型资源规格与算法包中的config_DGX1.sh相对应。以选用某容器/训练引擎，单机二卡运行为例。
+资源规格选择16C128G2GPU（示例规格），脚本文件中配置参数DGXNGPU为2.
+
+
+
+
+
+任务中算法配置的参数为algorithm.meta所定义。如需修改algorithm.meta中的配置，需要重新上传算法包才会生效。
+
+
+以该引擎中仅用某计算集群为例，此案例任务完整配置如下：
+
+
+
+
+
+任务配置完成后，点击执行
+
+
+
+在更多里，选择查看输出，查看生成的离线模型
+
+
+
+ 
+
+3.3 发布模型
+将模型发布到模型执行（MEP）的模型中，详细步骤可参考：5.5.2 规则配置与发布
+
+注意点：
+
+需选择合适的推理模型类型，此案例选择的是自定义，对模型文件类型没有限制。
+
+
+此案例的模型发布过程如下：
+
+
+
+ 
+
+
+
+ 
+4. 模型执行
+在执行模型前，首先需要编写推理代码，即为组件包。Python组件包代码开发可参考：6.3.2.2 组件包开发
+
+本案例编写的组件包如下：
+
+Component.zip
+ 
+
+4.1 代码编写
+process.py中主要有模型加载和推理计算两个方法。
+
+因为保存的模型是在GPU上，若是推理时无GPU，需要在加载模型时将模型映射到cpu上。值得注意的是，当模型大的情况下，独立加载最好将模型映射到cpu上，不然容易出现加载模型的OOM。
+
+self.model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+推理过程分为两种方式：
+
+方式一：仅输入userId，以string的形式传入，逗号分隔userId。
+
+根据输入的userId，随机生成指定数量的movieId。将userId和movieId作为输入，经过模型输出user和movie的关联度，通过topK()选出前K个推荐的电影Id，并通过movies.csv，得到推荐的前K部电影的名字，使推理数据更具备现实意义。
+
+user_list = user.split(',')
+items = []
+user_all = np.array([[int(u)] * 100 for u in user_list])
+user_all = torch.from_numpy(user_all)
+for i in range(len(user_list)):
+        for j in range(100):
+        items.append(random.randint(0, 26743))
+items = np.array(items).reshape(-1, 100)
+items = torch.from_numpy(items)
+方式二：输入指定的userId和movieId。
+
+跟据输入的userId和movieId，给每个user从指定的movie候选集中推荐前K部电影的名字。
+
+user_list = user.split(',')
+items = []
+item_list = item.split(",")
+user_all = np.array([[int(u)] * len(item_list) for u in user_list])
+user_all = torch.from_numpy(user_all)
+item_list = [int(i) for i in item_list]
+items = len(user_list) * item_list
+items = np.array(items).reshape(-1,len(item_list))
+items = torch.from_numpy(items)
+筛选topK电影，本案例选择的是10。
+
+with torch.no_grad():
+        p = []
+        for u, n in zip(user_all, items):
+                p.append(self.model(u, n, sigmoid=True).detach())
+        temp = torch.cat(p).view(-1, len(items[0]))
+        out = torch.topk(temp, 10)[1]
+ 
+
+4.2 服务部署
+在模型执行（MEP）模型中找到发布的模型，点击部署，详细操作步骤参考：云化部署指导
+
+只验证mep流程，可以本地上传模型，模型如下
+
+model.zip
+
+
+
+本案例的服务部署过程如下：
+
+
+
+
+
+
+
+
+
+ 
+
+选择新增组件包，组件包类型选择python。
+
+
+
+探索环境，镜像选择企业内部容器镜像仓库中的推理镜像（Registry 域名、命名空间、镜像名与标签已脱敏，请按实际环境填写）
+
+yaml选择自己租户/业务线下的配置文件（路径已脱敏）
+
+
+
+注意点：
+
+推理框架选择适配模型的框架，本案例需选择支持pytorch的推理框架。
+ 
+
+4.3 服务测试
+配置完成后，点击下一步进入到服务测试，样例报文格式可参考 
+
+{
+ "version": "0.0.1",
+ "meta": {
+ 	"bid": "10",
+ 	"flowId": "1001",
+ 	"uuid": "1502346942471"
+ },
+ "data": {
+	业务入参
+	}
+}
+本案例报文有两种格式
+
+第一种： 提供userId，随机生成候选集
+
+{
+  "version": "1.2",
+  "meta": {
+    "bId": "41",
+    "flowId": "4101",
+    "uuId": "1502346942471"
+  },
+  "data": {
+    "userId": "123,222,676,989"
+  }
+}
+userId以string的格式传入，以逗号隔开，对推理的用户数量没有限制。
+
+ 
+
+第二种： 指定userId和movieId，在给定的电影候选集中为用户推荐
+
+{
+       "version": "1.2",
+       "meta": {
+              "bId": "41",
+              "flowId":"4101",
+              "uuId":"1502346942471"
+       },
+       "data": {
+            "userId":"123,222,561","itemId":"1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+        }
+}
+userId和itemId均以string的格式传入，以逗号隔开，对推理的用户数量和候选集数量没有限制。
+
+ 
+
+配置完成后，可在服务列表中查看部署情况。
+
+
+
+ 
+
+4.4 推理结果
+以报文提供的第一种格式为例，所推理的结果如下：
+
+
+
+
+
+
+
+

@@ -1,0 +1,447 @@
+异步场景组件包接口说明
+2021-03-30 15:29 由 [已脱敏] 创建，于 2025-02-20 10:33 由 [已脱敏] 最后修改。 内容存疑 点我
+非SFS异步场景接口说明请查看：https://wiki.<内部Wiki主机已脱敏>/domains/1465/wiki/6348/WIKI2022012001535
+或者该菜单栏下的子菜单。
+
+3.1 接口描述
+业务调用MEP的该接口，可执行对应场景的模型，根据预定的路由规则分发到不同的模型服务，并返回对应的模型执行结果。下面以图像处理为例，介绍异步处理的流程：
+
+采用异步接口，模型服务与业务服务会通过SFS共享图片存储；业务请求中传入一组图片存储位置信息、相应的处理要求，以及处理后结果文件的存放位置；模型服务接受到请求后放入异步队列后台进行处理；业务服务器定期过来查询任务处理情况，待任务处理完成后，业务服务读取结果文件内容并进行后续处理。如图所示：
+
+
+
+ 
+
+ 
+
+ 
+
+3.2 接口地址
+POST /service
+
+3.3 请求消息
+参数定义
+
+参数列表
+
+类型
+
+M/O
+
+字段描述
+
+version
+
+String{1,64}
+
+M
+
+服务协议版本号，目前值为1.0
+
+meta
+
+JSONObject
+
+M
+
+请求元数据，由框架约定，JSON结构体
+
+data
+
+JSONObject
+
+M
+
+请求具体数据，JSON结构体 ,各个业务场景定制
+
+ 
+
+meta对象
+
+字段名
+
+类型
+
+M/O
+
+描述
+
+bId
+
+String{1,128}
+
+M
+
+业务标识，比如浏览器、某出行类应用（示例）
+
+flowId
+
+String{1,128}
+
+M
+
+业务场景，比如裁剪图片，图片语义理解
+
+subId
+
+String{1,128}
+
+O
+
+子场景标识，可选
+
+uuId
+
+String{1,128}
+
+O
+
+请求唯一标识，可以使用uuid、时间戳
+
+traceId
+
+String{1,128}
+
+O
+
+日志跟踪唯一标识，用于调试问题，如果请求中携带了traceID会把各个部件关联的日志(包含debug级别)输出到统一的文件
+
+
+
+
+data对象，JSON结构体，业务定制内容
+
+字段名
+
+类型
+
+M/O
+
+描述
+
+taskId
+
+string
+
+M
+
+任务唯一标识，后续任务查询也需要使用该字段
+
+action
+
+string
+
+M
+
+动作，“create”表示创建，“query”表示查询
+
+basePath
+
+String
+
+M
+
+任务根目录
+
+fileInfo
+
+List<JsonObject>
+
+O
+
+待处理的图片信息，该内容业务根据需要自定义
+
+动作为”create”必选；动作为“query”时不需要携带
+
+ 
+
+fileInfo的字段举例：
+
+字段名
+
+类型
+
+M/O
+
+描述
+
+sourceImage
+
+String
+
+M
+
+图片名称
+
+sourcePath
+
+String
+
+M
+
+原图片存放的根路径
+
+generatePath
+
+String
+
+M
+
+处理后的结果存放根路径
+
+processSpec
+
+List<JsonObject>
+
+M
+
+业务自定义处理的配置信息
+
+ 
+
+消息样例
+
+以下接口样例都是业务——>MSG的参数说明
+
+ 
+
+POST /service
+
+#创建任务场景
+Content Type:
+application/json;charset=UTF-8
+
+{
+    "version": "1.2",
+    "meta": {
+        "bId": "businessId",
+        "flowId": "imageprocess",
+        "uuId": "1502346942471"
+    },
+    "data": {
+        "taskId": "100002455",
+        "action": "create",
+        "basePath": "/opt/example_vendor/businessId /100002455",
+        "fileInfo": [
+            {
+                "sourceImage": "image1.png",
+                "sourcePath": "/opt/example_vendor/businessId/100002455/sourcepath",
+                "generatePath": "/opt/example_vendor/businessId/100002455/generatePath",
+                "processSpec": []
+            }
+        ]
+    }
+}
+
+
+#查询任务场景
+{
+    "version": "1.2",
+    "meta": {
+        "bId": "businessId",
+        "flowId": "imageprocess",
+        "uuId": "1502346942471"
+    },
+    "data": {
+        "taskId": "100002455",
+        "action": "query",
+        "basePath": "/opt/example_vendor/businessId /100002455"
+    }
+}
+ 
+
+3.4  响应消息
+参数定义
+
+version
+
+String
+
+M
+
+服务协议版本号
+
+meta
+
+JSONObject
+
+M
+
+响应元数据， JSON结构体，取自请求中meta信息
+
+result
+
+JSONObject
+
+M
+
+返回数据，JSON结构体
+
+ 
+
+ 
+
+meta对象
+
+字段名
+
+类型
+
+M/O
+
+描述
+
+bId
+
+String
+
+M
+
+业务标识，来源于请求中的meta.bId
+
+flowId
+
+String
+
+M
+
+场景标识，来源于请求中的meta.flowId
+
+subId
+
+String
+
+O
+
+子场景标识，来源于请求中的meta.subId
+
+uuId
+
+String
+
+O
+
+请求唯一标识，来源于请求中meta.uuId
+
+ 
+
+ 
+
+result对象
+
+字段名
+
+类型
+
+M/O
+
+描述
+
+code
+
+String
+
+M
+
+响应码，0为成功，其他为异常
+
+des
+
+String
+
+M
+
+响应描述
+
+length
+
+String
+
+M
+
+模型执行对应业务响应数，返回的content条数
+
+content
+
+JSONArray
+
+M
+
+响应内容列表，数组。
+
+ 
+
+ 
+
+响应样例
+
+POST /service
+
+
+Content Type:
+application/json;charset=UTF-8
+{
+    "version": "1.2",
+    "meta": {
+        "bId": " browser",
+        "flowId": "imageCrop",
+        "uuId": "1502346942471"
+    },
+    "result": {
+        "code": "0",
+        "des": "success",
+        "length": "0",
+        "content": []
+    }
+}
+ 
+
+响应码取值返回及定义
+
+响应码
+
+场景
+
+描述
+
+0
+
+创建任务/查询任务
+
+1、  如请求为创建任务，返回0表示任务创建成功
+
+2、  如请求为查询任务，返回0表示任务执行完成并成功
+
+1
+
+创建任务
+
+该响应码用于创建任务，返回1表示系统忙需要重试
+
+2
+
+查询任务
+
+该响应码用于查询任务，返回2表示任务正在处理中
+
+3
+
+创建任务/查询任务
+
+1、如请求为创建任务，返回3表示任务创建结束，异常
+
+2、如请求为查询任务，返回3表示任务查询结束，异常
+
+4
+
+查询任务
+
+该响应码用于查询任务，返回4表示没有对应的任务
+
+5
+
+创建任务
+
+该响应码用于创建任务，返回5表示所创建任务已存在，创建了重复任务
+
+ 

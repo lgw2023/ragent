@@ -10,7 +10,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from integrations import (
+from ragent.inference_runtime import (
     _close_rag,
     _run_one_hop_with_rag,
     ensure_startup_model_check_once,

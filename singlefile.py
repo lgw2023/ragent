@@ -15,8 +15,13 @@ if __package__:
         build_enhanced_md,
         index_md_to_rag,
         get_mineru_output_subdirs_for_lookup,
+    )
+    from .ragent.inference_runtime import (
         inference_one_hop_problem,
         inference_multi_hop_problem,
+        normalize_conversation_history as _runtime_normalize_conversation_history,
+        normalize_query_mode as _runtime_normalize_query_mode,
+        parse_history_turns as _runtime_parse_history_turns,
         trace_multi_hop_problem,
         trace_one_hop_problem,
     )
@@ -29,8 +34,13 @@ else:
         build_enhanced_md,
         index_md_to_rag,
         get_mineru_output_subdirs_for_lookup,
+    )
+    from ragent.inference_runtime import (
         inference_one_hop_problem,
         inference_multi_hop_problem,
+        normalize_conversation_history as _runtime_normalize_conversation_history,
+        normalize_query_mode as _runtime_normalize_query_mode,
+        parse_history_turns as _runtime_parse_history_turns,
         trace_multi_hop_problem,
         trace_one_hop_problem,
     )
@@ -1107,55 +1117,21 @@ def _truncate_console(text: str, limit: int = 240) -> str:
 
 
 def _normalize_query_mode(mode: str | None) -> str:
-    normalized_mode = (mode or "hybrid").strip().lower()
-    if normalized_mode not in {"graph", "hybrid"}:
-        raise ValueError("Invalid mode. Use one of: graph | hybrid")
-    return normalized_mode
+    return _runtime_normalize_query_mode(mode)
 
 
 def _parse_history_turns(raw_value: str | None) -> int | None:
-    if raw_value is None:
-        return None
-    history_turns = int(raw_value)
-    if history_turns <= 0:
-        raise ValueError("history_turns must be a positive integer")
-    return history_turns
+    return _runtime_parse_history_turns(raw_value)
 
 
 def _normalize_conversation_history(
     payload: Any,
     history_path: str,
 ) -> list[dict[str, str]]:
-    if isinstance(payload, dict):
-        if "conversation_history" not in payload:
-            raise ValueError(
-                f"Invalid conversation history file: {history_path}. "
-                "Expected a JSON list or an object with conversation_history."
-            )
-        payload = payload.get("conversation_history")
-
-    if payload is None:
-        return []
-    if not isinstance(payload, list):
-        raise ValueError(
-            f"Invalid conversation history file: {history_path}. Expected a JSON list."
-        )
-
-    conversation_history = []
-    for index, item in enumerate(payload):
-        if not isinstance(item, dict):
-            raise ValueError(
-                f"Invalid conversation history entry at index {index}: expected an object."
-            )
-        role = item.get("role")
-        content = item.get("content")
-        if not isinstance(role, str) or not isinstance(content, str):
-            raise ValueError(
-                f"Invalid conversation history entry at index {index}: "
-                "role/content must both be strings."
-            )
-        conversation_history.append({"role": role, "content": content})
-    return conversation_history
+    return _runtime_normalize_conversation_history(
+        payload,
+        source_name=f"conversation history file: {history_path}",
+    )
 
 
 def _load_conversation_history(history_path: str) -> list[dict[str, str]]:
