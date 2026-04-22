@@ -306,6 +306,20 @@ class BaseKVStorage(StorageNameSpace, ABC):
              False: if the cache drop failed, or the cache mode is not supported
         """
 
+    async def drop_cache_entries(
+        self,
+        modes: list[str] | None = None,
+        cache_types: list[str] | None = None,
+    ) -> bool:
+        """Delete cache entries using mode and cache-type filters.
+
+        Storage implementations that only understand mode-level invalidation can
+        ignore ``cache_types`` and fall back to ``drop_cache_by_modes``.
+        """
+        if cache_types:
+            return False
+        return await self.drop_cache_by_modes(modes)
+
 
 @dataclass
 class BaseGraphStorage(StorageNameSpace, ABC):
@@ -669,6 +683,14 @@ class DocStatusStorage(BaseKVStorage, ABC):
         """Get all documents with a specific status"""
 
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
+        """Drop cache is not supported for Doc Status storage"""
+        return False
+
+    async def drop_cache_entries(
+        self,
+        modes: list[str] | None = None,
+        cache_types: list[str] | None = None,
+    ) -> bool:
         """Drop cache is not supported for Doc Status storage"""
         return False
 
