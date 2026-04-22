@@ -39,14 +39,20 @@ cd ragent_master
 
 ### 2. 安装依赖
 
-`README` 中下面的命令按当前代码入口整理过：
+当前代码已经按职责拆成两套环境：
 
-- 当前 `integrations.py` / `singlefile.py` 会在导入阶段直接加载 `MinerU` 的 `pipeline` / `vlm` 内部模块，所以即使只跑 `onehop` / `multihop` / `chat`，环境里也必须具备对应依赖。
-- 当前仓库只按 `mineru[pipeline,vlm]==3.0.8` 这一路径维护，不再兼容旧版 `MinerU` API，也不再依赖仓库内置源码。
-- 对本仓库来说，`pipeline + vlm` 已覆盖当前代码实际 import 的模块；不需要额外安装更重的 `mineru[all]`。
-- 如果你要直接运行 `integrations.py` / `singlefile.py` 的主流程，建议至少安装 `openai` 和 `api` 两组 extra。
-  这里的 `openai` extra 现在实际包含 `litellm`，用于统一适配 OpenAI-compatible / 多提供商模型调用。
-- `api` 这个名字虽然偏服务端，但当前文档解析主流程里实际用到了其中的 `aiofiles` 依赖。
+- `build`：文档解析、增强 Markdown、宽表导入、建图索引。
+- `inference`：基于已有 `project_dir` 执行 `onehop` / `multihop` / `chat`。
+
+这次拆分后，`singlefile.py onehop` / `multihop` / `chat` 不再在模块导入阶段强制加载 `MinerU`、`pandas`、`openpyxl`、`markdown-it-py`。如果你只运行已经建好的图谱推理，可以只装推理环境。
+
+模型提供商 extra 与环境职责正交，可按需叠加：
+
+- `openai`：OpenAI-compatible / LiteLLM 路线。
+- `hf`：HuggingFace 本地模型。
+- `ollama`：Ollama 本地模型。
+- `neo4j` / `milvus` / `faiss`：可选存储后端。
+- `api`：只在你要跑服务端接口时再加。
 
 **使用 uv（推荐）：**
 
@@ -54,36 +60,43 @@ cd ragent_master
 # 安装 uv（如未安装）
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 推荐：可直接跑当前 README 中的 parse / onehop / multihop / chat 全流程
-# 会自动安装锁定版标准包 MinerU 依赖
-uv sync --extra openai --extra api
+# 环境 A：build（解析 / 建图）
+uv sync --extra build --extra openai
+
+# 环境 B：inference（onehop / multihop / chat）
+uv sync --extra inference --extra openai
 
 # 其他可选依赖
-uv sync --extra hf        # HuggingFace 本地模型
-uv sync --extra ollama    # Ollama 本地模型
-uv sync --extra neo4j     # Neo4j 图后端
-uv sync --extra milvus    # Milvus 向量库后端
-uv sync --extra faiss     # FAISS 向量库后端
+uv sync --extra build --extra hf         # build + HuggingFace
+uv sync --extra inference --extra ollama # inference + Ollama
+uv sync --extra inference --extra openai --extra neo4j
+uv sync --extra inference --extra openai --extra milvus
+uv sync --extra inference --extra openai --extra faiss
+uv sync --extra build --extra openai --extra api
 
 # 或一次性安装全部
 uv sync --all-extras
 
-# 如果你只想单独安装本仓库依赖的 MinerU 版本，也可以显式执行
+# 只补 build 环境里的 MinerU 时，也可以显式执行
 uv pip install "mineru[pipeline,vlm]==3.0.8" -i https://mirrors.aliyun.com/pypi/simple
 ```
 
 **使用 pip：**
 
 ```bash
-python -m venv env
-source env/bin/activate   # Windows: env\Scripts\activate
+python -m venv .venv-build
+source .venv-build/bin/activate   # Windows: .venv-build\Scripts\activate
+pip install -e ".[build,openai]"
 
-# 直接安装当前项目及推荐 extra；其中已包含标准包 MinerU 依赖
-pip install -e ".[openai,api]"
+python -m venv .venv-infer
+source .venv-infer/bin/activate   # Windows: .venv-infer\Scripts\activate
+pip install -e ".[inference,openai]"
 ```
 
 
 ### 3. 安装 MinerU 模型
+
+这一步只属于 `build` 环境。`inference` 环境不需要安装 MinerU 模型。
 
 当前仓库中用于解析 PDF 的是 `MinerU`。推荐使用 `MinerU` 自带的 CLI 下载模型，而不是根目录下的 `models_download.py`。
 
@@ -111,95 +124,79 @@ sudo apt update && sudo apt install libreoffice libreoffice-writer
 
 ### 5. 配置环境变量
 
-在项目根目录创建 `.env` 文件。下面这些变量是当前代码路径里实际会读取到的关键配置：
+推荐直接基于仓库里的两份示例文件创建 `.env`：
+
+- `build` 环境：复制 `.env.build.example`
+- `inference` 环境：复制 `.env.inference.example`
+
+```bash
+# build 环境
+cp .env.build.example .env
+
+# inference 环境
+cp .env.inference.example .env
+```
+
+`build` 环境至少需要：
 
 ```.env
-# ========== LLM（必需）==========
 LLM_MODEL_KEY=""
 LLM_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 LLM_MODEL="qwen3-max"
-# 可选：显式指定 LiteLLM provider；不填时会自动推断
-# 例如 openai / custom_openai / anthropic / openrouter / ollama
-# LLM_API_PROVIDER="custom_openai"
-LLM_API_TIMEOUT_SECONDS="180"
-LLM_API_CLIENT_MAX_RETRIES="0"
 
-# ========== Embedding（必需）==========
-# 当前实现不会复用 LLM_API_*，而是单独读取这组变量
 EMBEDDING_MODEL_KEY=""
 EMBEDDING_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 EMBEDDING_MODEL="text-embedding-v3"
-# 可选：显式指定 LiteLLM provider；不填时会自动推断
-# EMBEDDING_PROVIDER="custom_openai"
 EMBEDDING_DIMENSIONS="256"
 
-# ========== Rerank（默认推荐）==========
-# 当前启动检查会验证 rerank；如果不配置 rerank，请看下面的“关闭开关”
 RERANK_MODEL_KEY=""
 RERANK_MODEL_URL="https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
 RERANK_MODEL="qwen3-rerank"
 
-# ========== 图像模型（可选）==========
-# 不配置时，图片描述会被跳过
 IMAGE_MODEL_KEY=""
 IMAGE_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 IMAGE_MODEL="qwen3-vl-flash"
 IMAGE_MODEL_TIMEOUT="300"
-# 图片描述模式:
-# - single_multimodal: 单次多模态调用，直接结合图片和上下文生成最终描述
-# - two_stage: 先看图，再用文本模型结合上下文二次整合
 IMAGE_DESCRIPTION_MODE="single_multimodal"
 
-# 回答阶段提示词模式:
-# - single_prompt: 单次 LLM 调用，直接生成自然答案（默认，延迟更低）
-# - two_stage: 先生成带 RAG 痕迹的答案，再用第二轮 LLM 做润色
+MODEL_STARTUP_CHECK_ENABLED="1"
+ENABLE_RERANK="true"
 RAG_ANSWER_PROMPT_MODE="single_prompt"
 
-# ========== 可选开关 / 调优 ==========
-MODEL_STARTUP_CHECK_ENABLED="1"
-# 可选：不设置时，启动健康检查超时会自动跟随 LLM_API_TIMEOUT_SECONDS
-# 若配置了图片模型，则也会参考 IMAGE_MODEL_TIMEOUT；需要更大值时可显式覆盖
-# MODEL_STARTUP_CHECK_TIMEOUT_SECONDS="180"
-ENABLE_RERANK="true"
-num_chars_of_front="512"
-num_chars_of_behind="512"
-chunk_size="1024"
-overlap_size="128"
-# 实体抽取补抽策略:
-# 1 = 首轮后直接进入第一轮 gleaning，不先做 YES/NO 判断（默认）
-# 2 = 首轮后先做 YES/NO 判断，只有明确回答 YES 才进入第一轮 gleaning
-ENTITY_EXTRACT_GLEANING_LEVEL="1"
-# 每个 chunk 最多额外补抽几轮；为 0 时只做首轮抽取
-MAX_GLEANING="1"
-RAG_INSERT_TIMEOUT_SECONDS="30"
-RAG_INSERT_TIMEOUT_MAX_SECONDS="60"
-RAG_INDEX_TIMEOUT_SECONDS="1800"
-RAG_PROGRESS_BAR="1"
-
-# ========== MinerU 解析模式（可选）==========
-# 支持: pipeline | vlm-engine | hybrid-engine
 MINERU_PARSE_MODE="pipeline"
-
-# pipeline 模式默认保持当前仓库的旧行为：优先文本提取，输出到 <mineru_output_dir>/txt/
 MINERU_PIPELINE_METHOD="txt"
-
-# hybrid-engine 在当前仓库里兼容映射到 MinerU 的 pipeline 路径，
-# 默认使用 auto 方法，以便对扫描页/OCR页更友好，输出仍保持在 txt/ 下
 MINERU_HYBRID_METHOD="auto"
-
-# vlm-engine 会输出到 <mineru_output_dir>/vlm/
-# auto: 有 MINERU_VLM_SERVER_URL 时优先 client；否则有 sglang 环境就走 sglang-engine；再否则回退 transformers
 MINERU_VLM_BACKEND="auto"
-
-# 仅当 MINERU_VLM_BACKEND=sglang-client 时需要
-# MINERU_VLM_SERVER_URL="http://127.0.0.1:30000"
-
-# 模型来源：local | modelscope | huggingface
 MINERU_MODEL_SOURCE="local"
-
-# 可选：显式指定本地 VLM 模型目录
-# MINERU_VLM_MODEL_PATH="/absolute/path/to/mineru-vlm"
 ```
+
+`inference` 环境只需要保留查询阶段会读到的变量，不需要 `IMAGE_*` 和 `MINERU_*`：
+
+```.env
+LLM_MODEL_KEY=""
+LLM_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_MODEL="qwen3-max"
+
+EMBEDDING_MODEL_KEY=""
+EMBEDDING_MODEL_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+EMBEDDING_MODEL="text-embedding-v3"
+EMBEDDING_DIMENSIONS="256"
+
+RERANK_MODEL_KEY=""
+RERANK_MODEL_URL="https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
+RERANK_MODEL="qwen3-rerank"
+
+MODEL_STARTUP_CHECK_ENABLED="1"
+ENABLE_RERANK="true"
+RAG_ANSWER_PROMPT_MODE="single_prompt"
+```
+
+补充说明：
+
+- `build` 环境里的 `MINERU_PARSE_MODE` 支持 `pipeline | vlm-engine | hybrid-engine`。
+- `MINERU_VLM_BACKEND=sglang-client` 时，还需要设置 `MINERU_VLM_SERVER_URL`。
+- 宽表建图仍然属于 `build` 环境，因此 `pandas/openpyxl/xlsxwriter` 也只在 `build` 环境安装。
+- `num_chars_of_front`、`num_chars_of_behind`、`chunk_size`、`overlap_size`、`ENTITY_EXTRACT_GLEANING_LEVEL`、`MAX_GLEANING`、`RAG_INSERT_TIMEOUT_SECONDS`、`RAG_INDEX_TIMEOUT_SECONDS` 这类切块和建图调优项，也只在 `build` 环境有意义。
 
 如果你暂时不打算接 rerank 服务，至少同时设置：
 
@@ -254,6 +251,8 @@ uv run python singlefile.py parse \
 ```
 
 如果对应 Markdown 已存在，上面的命令会自动只执行 `rag` 阶段；如果不存在，则会自动走完整 `all` 流程。
+
+完成 `demo_kg` 构建后，你可以切换到单独的 `inference` 环境，只保留 `demo_kg` 和推理所需的 `.env` 配置来执行查询。
 
 ### 3. 提问
 

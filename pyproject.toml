@@ -24,19 +24,14 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp",
-    "aiofiles",
     "configparser",
     "dotenv",
     "future",
     "httpx",
     "litellm",
-    "markdown-it-py",
-    "mineru[pipeline,vlm]==3.0.8",
     "nano-vectordb",
     "networkx",
     "numpy",
-    "openpyxl>=3.1.0",
-    "pandas>=2.0.0",
     "pipmaster",
     "pydantic",
     "python-dotenv",
@@ -45,10 +40,22 @@ dependencies = [
     "setuptools",
     "tenacity",
     "tiktoken",
-    "xlsxwriter>=3.1.0",
 ]
 
 [project.optional-dependencies]
+# 运行已建好的图谱，执行 onehop / multihop / chat
+inference = []
+
+# 文档解析、Markdown/宽表建图
+build = [
+    "aiofiles",
+    "markdown-it-py",
+    "mineru[pipeline,vlm]==3.0.8",
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+    "xlsxwriter>=3.1.0",
+]
+
 # LiteLLM / OpenAI-compatible LLM 提供商
 openai = [
     "litellm",
@@ -94,7 +101,7 @@ api = [
 
 # 安装全部可选依赖
 all = [
-    "ragent[openai,hf,ollama,neo4j,milvus,faiss,api]",
+    "ragent[inference,build,openai,hf,ollama,neo4j,milvus,faiss,api]",
 ]
 
 [tool.setuptools.packages.find]
