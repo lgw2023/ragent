@@ -123,6 +123,16 @@ def _load_wide_table_support():
     )
 
 
+def prepare_wide_table_import(*args, **kwargs):
+    (_, _, _, prepare_impl) = _load_wide_table_support()
+    return prepare_impl(*args, **kwargs)
+
+
+def build_wide_table_chunk_result(*args, **kwargs):
+    (_, _, build_chunk_impl, _) = _load_wide_table_support()
+    return build_chunk_impl(*args, **kwargs)
+
+
 def clean_text_for_xml(text):
     # Remove control characters and NULL bytes, but keep valid Unicode
     # Keep newlines, tabs, and carriage returns as they are valid XML characters
@@ -1131,7 +1141,6 @@ class Ragent:
         file_path: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        (_, _, _, prepare_wide_table_import) = _load_wide_table_support()
         prepared_import = prepare_wide_table_import(
             source,
             config,
@@ -1339,7 +1348,6 @@ class Ragent:
         doc_id: str,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[dict[str, dict[str, Any]], list]:
-        (_, _, build_wide_table_chunk_result, _) = _load_wide_table_support()
         chunks: dict[str, dict[str, Any]] = {}
         chunk_results = []
         total_rows = len(prepared_import.rows)

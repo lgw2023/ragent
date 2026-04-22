@@ -6,13 +6,11 @@ import logging
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 import math
-from dotenv import load_dotenv
 from pathlib import Path
-# use the .env that is inside the current folder
-# allows to use different .env file for each ragent instance
-# .env values take precedence over inherited OS environment variables
-_ENV_PATH = Path(__file__).resolve().with_name(".env")
-load_dotenv(dotenv_path=_ENV_PATH, override=True) #$HOME替换为本地ragent存储的绝对路径
+
+from ragent.runtime_env import bootstrap_runtime_environment
+
+bootstrap_runtime_environment(repo_root=Path(__file__).resolve().parent)
 
 
 def _resolve_project_relative_mineru_config() -> None:
@@ -35,6 +33,7 @@ def _resolve_project_relative_mineru_config() -> None:
 _resolve_project_relative_mineru_config()
 import subprocess
 from ragent import QueryParam, Ragent
+import ragent.inference_runtime as _inference_runtime
 from ragent.llm.openai import env_openai_complete, openai_embed
 from ragent.rerank import rerank_from_env
 from ragent.kg.shared_storage import initialize_pipeline_status, finalize_share_data
@@ -66,6 +65,9 @@ import sys
 import threading
 from collections import Counter
 from typing import Any, TYPE_CHECKING
+
+_RUNTIME_RUN_ONE_HOP_WITH_RAG = _inference_runtime._run_one_hop_with_rag
+_RUNTIME_RUN_MULTI_HOP_WITH_RAG = _inference_runtime._run_multi_hop_with_rag
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -5135,3 +5137,36 @@ async def docx2pdf(docx_path, pdf_path):
 async def docx_insert(doc_file_path, pdf_file_path, mineru_output_dir, project_dir):
     await docx2pdf(doc_file_path, pdf_file_path)
     await pdf_insert(pdf_file_path, mineru_output_dir, project_dir)
+
+
+# Inference runtime now lives in ragent.inference_runtime.
+# Keep these compatibility wrappers so existing imports and monkeypatch-based
+# tests continue to work while parse/build remains in integrations.py.
+ensure_startup_model_check_once = _inference_runtime.ensure_startup_model_check_once
+initialize_rag = _inference_runtime.initialize_rag
+_close_rag = _inference_runtime._close_rag
+trace_one_hop_problem = _inference_runtime.trace_one_hop_problem
+trace_multi_hop_problem = _inference_runtime.trace_multi_hop_problem
+inference_one_hop_problem = _inference_runtime.inference_one_hop_problem
+inference_multi_hop_problem = _inference_runtime.inference_multi_hop_problem
+
+
+async def _run_one_hop_with_rag(*args, **kwargs):
+    original_hybrid_query = _inference_runtime.hybrid_query
+    original_graph_query = _inference_runtime.graph_query
+    _inference_runtime.hybrid_query = hybrid_query
+    _inference_runtime.graph_query = graph_query
+    try:
+        return await _RUNTIME_RUN_ONE_HOP_WITH_RAG(*args, **kwargs)
+    finally:
+        _inference_runtime.hybrid_query = original_hybrid_query
+        _inference_runtime.graph_query = original_graph_query
+
+
+async def _run_multi_hop_with_rag(*args, **kwargs):
+    original_one_hop = _inference_runtime._run_one_hop_with_rag
+    _inference_runtime._run_one_hop_with_rag = _run_one_hop_with_rag
+    try:
+        return await _RUNTIME_RUN_MULTI_HOP_WITH_RAG(*args, **kwargs)
+    finally:
+        _inference_runtime._run_one_hop_with_rag = original_one_hop

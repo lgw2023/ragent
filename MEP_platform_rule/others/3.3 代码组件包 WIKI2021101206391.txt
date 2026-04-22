@@ -1,0 +1,179 @@
+
+工作台
+知识库
+当前知识库
+请输入关键字搜索
+
+常见问题
+
+
+主页 (WiseMLOps平台)
+我收藏的文档
+Confluence知识库
+回收站
+
+WiseMLOps平台/
+Confluence知识库/
+WiseMLOps平台/
+模型执行（MEP）/
+定制开发/
+Python自定义组件开发/
+6.3.2.2 组件包开发/
+2 组件包component/
+(2) 异步场景组件包开发
+
+ 2
+ 0
+ 0
+ 4152
+(2) 异步场景组件包开发
+2021-03-30 15:29 由 [已脱敏] 创建，于 2026-03-16 09:54 由 [已脱敏] 最后修改。 内容存疑 点我
+自定义组件包component必须包含两个文件：config.json、process.py。
+
+config.json文件，用来约定推理组件的入口文件以及入口类，main_file表示入口文件（去掉后缀），main_class表示入口文件中的类名。
+
+{
+	"main_file": "process",
+	"main_class": "CustomerModel"
+}
+容器通过config.json找到process.py，然后顺序调用process.py 中 的CustomerModel类的load()、calc()方法。
+
+组件代码开发时，可在load()方法中加载模型以及一些耗时的初始化操作。框架会调用calc()方法并传递业务的请求数据，在calc()中需支持对业务数据的接收、业务逻辑处理（如果业务处理逻辑复杂，此处作为业务逻辑处理入口）以及处理结果的返回。处理流程如下：
+
+#!/usr/bin/env python
+# -*- coding:utf-8 -*-
+import os
+import json
+from component.util import logutil
+from component import handwrite_recognition
+
+logger = logutil.logger_run
+currentdir = os.path.dirname(__file__)
+parentdir = os.path.abspath(os.path.join(currentdir, os.pardir))
+# 模型文件中model目录
+model_path = os.path.join(parentdir, "model")
+# 模型文件中data目录
+data_path = os.path.join(parentdir, "data")
+
+class CustomerModel:
+    # 模型加载
+    def load(self):
+        logger.info("load model start~")
+        self.new_model = handwrite_recognition.Test()
+        self.new_model.load_pb(os.path.join(model_path, 'test.pb'))
+        logger.info("load model end~")
+
+    # 推理计算
+    def calc(self, req_Data):
+        # 对输入数据的校验和接收
+        logger.info("~~~~~~~~~~~~request of component ~~~~~~~~~~~")
+        logger.info(req_Data)
+        logger.info('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+
+        if req_Data is None:
+            result_code = 3
+            des = "request data is missing."
+            logger.info("request data is missing.")
+            return self.build_response(result_code, des)
+
+        # 注意：依赖SFS异步框架使用如下方式
+        data = req_Data.get('data')
+        #  data =  req_Data   # 非SFS异步框架使用该方式
+        if data is None:
+            result_code = 3
+            des = "data is missing."
+            logger.info("data is missing.")
+            return self.build_response(result_code, des)
+
+        # 后续参数校验类似，业务根据具体需要补充,例如
+        fileInfo = data.get('fileInfo')
+        fileInfo_0 = fileInfo[0]
+        sourceImage = fileInfo_0.get('sourceImage')
+        sourcePath = fileInfo_0.get('sourcePath')
+        generatePath = fileInfo_0.get('generatePath')
+        img_path = os.path.join(sourcePath,sourceImage)
+
+
+        # 调用推理计算
+        calc_res = self.new_model.infer(img_path)
+        print(calc_res)
+
+        # 结果存储到sfs
+        result_path = os.path.join(generatePath,"gen.json")
+        with open(result_path,mode='w',encoding='utf-8') as f:
+            json.dump(calc_res,f)
+
+
+        # 处理无误时，返回0
+        result_code = 0
+        des = 'success'
+        return self.build_response(result_code, des)
+
+
+
+    # 封装response
+    def build_response(self, result_code, result_des):
+        res_raw = {"code": str(result_code), "des": result_des, "length": 0, "content": []}
+        res = {"recommendResult": res_raw}
+
+        logger.info("result of calc function:%s" % res)
+        return res
+
+# 单元测试用例（上传到管理台时以下测试代码须注释）
+# test = CustomerModel()
+# test.load()
+# req_Data = \
+#     {
+#         "data":
+#             {
+#                 "taskId": "000000000",
+#                 "action": "create",
+#                 "basePath": "/opt/<组织>/businessId/000000000",
+#                 "fileInfo": [{
+#                            "sourceImage": "test0.jpg",
+#                             "sourcePath":"/path/to/example/data/sourcePath",
+#                             "generatePath": "/path/to/example/data/generatePath"
+#             }
+#         ]
+#     }
+#     }
+# result = test.calc(req_Data)
+# print(result)
+ 
+
+组件包压缩为zip包上传，压缩时须进入到component内进行压缩，样例：
+
+
+
+component.zip
+ 
+
+（该样例组件包是可直接上传到管理台的）。
+
+ 
+
+【同步和异步区别】
+
+MEP支持的同步和异步场景，组件包开发基本相同，区别的地方主要在于接口调用参数，详见：异步场景接口说明
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+分享
+添加收藏
+点赞 0
+
+内容存疑 点我
+
+评论

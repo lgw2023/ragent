@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
+from ragent.runtime_env import should_skip_dotenv
 
 
 MANAGED_QUERY_MODES = ("graph", "hybrid")
@@ -51,6 +52,9 @@ def resolve_workspace_name(
     raw_workspace = (os.getenv("WORKSPACE") or "").strip().strip('"').strip("'")
     if raw_workspace:
         return raw_workspace
+
+    if should_skip_dotenv():
+        return ""
 
     resolved_env_file = env_file
     if resolved_env_file is None and repo_root is not None:

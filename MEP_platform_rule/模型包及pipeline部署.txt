@@ -1,0 +1,430 @@
+
+工作台
+知识库
+当前知识库
+请输入关键字搜索
+
+常见问题
+
+
+主页 (AI多模态数据)
+我收藏的文档
+新员工工作指南
+回收站
+
+AI多模态数据/
+新员工工作指南/
+MEP平台pipeline部署
+
+ 1
+ 0
+ 0
+ 569
+MEP平台pipeline部署md
+2024-10-26 14:35 由 [已脱敏] 创建，于 2025-05-26 10:12 由 [已脱敏] 最后修改。 内容存疑 点我
+MEP平台pipeline部署
+MEP平台介绍：[内部文档链接已脱敏，请从公司知识库检索同名主题]
+
+1.为什么需要使用到MEP平台？
+当在内部Notebook/调试平台的notebook上调通pipeline后，由于我们需要跑大批量的数据进行清洗，该平台notebook的算力是无法满足的，它只能作为调试的平台，我们需要使用MEP平台上的310集群才能够跑批量数据。此外，由于MEP上是310集群环境，而我们用于调试的是v100卡，所以还需要在昇腾310服务器上进行环境适配。
+
+所以，构建一个数据处理pipeline的完整闭环流程应该是：
+
+算法设计
+
+本地/内部Notebook调通
+
+昇腾服务器310环境适配
+
+MEP组件包以及模型包打包
+
+部署到MEP
+
+2.快速入门
+平台学习路径：
+最简单的部署封装：
+[内部培训材料] MEP 快速跑通第一个云侧推理 Demo（标题以知识库为准）
+在公司MLOps链路上完成从模型训练到模型参数文件输出，再到部署推理的过程，MEP平台在部署推理部分，属于一个闭环流程，建议认真阅读：
+基于电影推荐场景的一次端到端MLOps实践（文档标题以内部知识库为准）
+
+3. MEP平台部署准备件
+我们来梳理一下流程，假设你的原始代码是在本地/内部Notebook平台的notebook上调通了，之后的步骤包括：
+
+1.昇腾310环境适配：由于v100和310的基础架构不一样，我们需要在一台310昇腾服务器上适配好环境，跑通代码。
+
+2.模型包：我们的原代码中，若用到多个模型进行推理，必定有对应的模型参数文件，需要单独打包为模型包。模型包的作用就是放置模型参数文件。
+
+3.代码组件包：使用异步场景组件包,这个组件包里是要重构代码，CustomerModel.load()函数里加载模型以及一些耗时的初始化操作。框架会调用calc()方法并传递业务的请求数据req_Data，在calc()中需支持对业务数据的接收、业务逻辑处理。
+
+3.1 昇腾310环境适配
+在适配时，由于是310环境，需要进行一些代码的变量设定修改。
+
+1.torch_npu变量设定
+
+昇腾310用的是torch_npu框架，在代码导入部分加入：
+
+import torch_npu
+​
+device和torch_dtype的修改
+
+#原先的device和torch_dtype
+device = "cuda" if torch.cuda.is_available() else "cpu"
+torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+#修改后
+device = "npu" if torch_npu.npu.is_available() else "cpu"
+torch_dtype = torch_npu.float16 if torch_npu.npu.is_available() else torch_npu.float32
+​
+2.线程设置(maybe有？[同事名已脱敏]补充)
+
+3.mep上对应镜像的匹配
+
+在310环境中拉取某个框架的镜像进行调试，这当中，我们肯定有一些包是基础镜像不能满足其要求的，当调试好后，我们需要怎么把这个环境适用到mep平台上呢？这里分为两种情况：
+
+(1)需要单独加载的包比较少
+
+如果需要额外安装的包较少，可以在ComponentModel.load()中进行安装，因为每次部署服务的时候，框架会先调用ComponentModel.load()加载耗时的模型等。
+
+具体步骤：
+
+需要加载的包在github上下载，打包为whl文件，可以直接运行文件夹中的setup.py，在anaconda prompt中输入
+
+python setup.py bdist_wheel
+​
+把所有需要导入的包以whl文件的形式放在一个resource文件中，后续在组件包process.py的ComponentModel.load()函数中加入
+
+resource_folder = "./resource"  # 替换为你的 resource 文件夹路径
+install_packages_from_folder(resource_folder)
+​
+install_packages_from_folder函数如下：
+
+import os
+import subprocess
+import sys
+def install_packages_from_folder(folder_path):
+    # 获取 resource 文件夹中所有包的完整路径
+    package_paths = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.whl') or f.endswith('.tar.gz')]
+    
+    if package_paths:
+        # 使用 pip 一次性安装所有包
+        print("Installing packages from resource folder...")
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', *package_paths])
+    else:
+        print("No packages found in the folder.")
+​
+（2）需要单独加载的包比较多
+
+若要在基础镜像环境上安装的包过多，每次部署运行的时候较为耗时，建议使用dockerfile申请发布一个新的镜像环境。
+
+具体步骤：
+
+[同事名已脱敏]补充
+
+3.2 模型包
+[内部Wiki-模型包主题链接已脱敏]
+
+模型包用来放置用到的推理模型参数，一般为从huggingface上下载/pt格式的模型参数文件。
+
+以huggingface上加载的模型为例,这里model_path中存放的参数文件就是要放到模型包中的文件:
+
+model = AutoModelForSpeechSeq2Seq.from_pretrained(
+    model_path,
+    torch_dtype=torch_dtype,
+    low_cpu_mem_usage=True,
+    use_safetensors=True).to(device)
+​
+model中必须包含配置文件sysconfig.properties，用于存储系统运行所需的配置数据以及业务自定义的配置数据。如果有训练的业务推理模型，置于该目录下。模型包打包结构如下：
+
+image-20241025150633230
+这张图展示的是一个压缩模型包解压后的目录结构示意图。
+从上到下看：
+
+* 最上面是一个压缩文件：xx_xx.zip
+* 解压后得到一个目录：modelDir
+* modelDir 下面包含 3 个子目录：
+    * meta
+    * model
+    * data
+* 其中 meta 目录下面还有一个文件：type.mf
+
+可以把它理解成：
+
+1. zip 压缩包是整体交付文件
+2. 解压后形成 模型主目录
+3. 主目录里通常分成：
+    * meta：保存元信息、配置说明
+    * model：保存模型本体
+    * data：保存相关数据
+4. type.mf 很可能是一个类型/格式说明文件
+
+这是一张层级结构图，重点不是具体内容，而是说明这个模型包内部文件夹之间的组织关系。
+
+
+注意
+
+modelDir名称固定，不要修改，修改后会导致后续模型解压失败。
+
+data目录下为训练过程中产生的模型评估数据和模型请求样例sample.json，可选；
+
+model目录下为真正的模型文件，比如PMML文件等，必选。
+
+meta目录下固定为type.mf，标识模型的算法类型等信息，必选。
+
+模型文件命名格式：业务_场景_算法_备注（可选），譬如appstore_game_spark，表示应用市场游戏场景spark模型。appstore_ads_dcn_diversty表示应用市场付费推广DCN算法Diversty策略模型。
+
+3.3 代码组件包
+[内部Wiki-组件包主题链接已脱敏]
+
+我们需要规范化改造代码，这里我们使用[异步场景组件包]。[组件包地址]
+
+业务调用MEP的该接口，可执行对应场景的模型，根据预定的路由规则分发到不同的模型服务，并返回对应的模型执行结果。下面以图像处理为例，介绍异步处理的流程：采用异步接口，模型服务与业务服务会通过SFS共享图片存储；业务请求中传入一组图片存储位置信息、相应的处理要求，以及处理后结果文件的存放位置；模型服务接受到请求后放入异步队列后台进行处理；业务服务器定期过来查询任务处理情况，待任务处理完成后，业务服务读取结果文件内容并进行后续处理。
+
+image-20241025151605773
+
+异步场景组件包开发指南
+
+[内部Wiki-异步组件包开发指南链接已脱敏]
+
+3.4 模型包上传
+上传方式：本地-OBS-数据集（具体平台名称与 bucket 编号以内部规范为准），需选择指定 bucket，否则无法生成 url
+
+联系[运维/平台对接人-姓名已脱敏]生成URL
+
+接下来，在MEP平台导入模型：
+
+image
+
+image
+除了模型导入，其他步骤可以暂时跳过，之后可以根据具体情况来配置。
+
+3.5 组件包上传
+1. 压缩组件包，打包成zip格式：
+(1)注意！！上传压缩包到wisedevops时，必须添加package.json文件,文件中的信息为
+
+{
+  "scope": "<按DevOps平台要求的组织/命名空间>",#不变
+  "version": "20250111",#自定义
+  "type": "aiexplore",#不变
+  "name": "xxxx_component_mep"#自定义
+}
+​
+image
+(2)注意压缩包的打包层级，要求第一层必须有process.py文件，参考下面截图的打包方式，直接在process.py目录下——右键——add_to_archive——zip打包
+image
+
+image
+2. 打包好的组件包先上传WiseDevOps平台（[内部DevOps地址已脱敏]），再传到MEP平台：
+服务[内部平台服务名已脱敏],站点[区域已脱敏]
+
+image
+
+image
+
+image
+
+3.6 模型部署及调试
+1. 模型部署：
+
+image
+
+image
+
+image
+
+集群部署后，必填项按要求填，其他的可先跳过。
+2. 组件包更新：
+
+image
+
+image
+
+image
+3. 显示正常即部署成功：
+
+image
+4. 调试：
+在Notebook/调试环境，运行如下脚本来测试服务，主要修改body_json内容：
+
+import json
+import os
+import requests
+import uuid
+import base64
+import hashlib
+import hmac
+import os
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# 构建请求头
+def calc_sign(data, sign_key, query_param, path, method, app_id):
+        """
+        云服务推理模型提前的签名算法，未进行过变更
+        :param data: 数据体
+        :param sign_key: 签名key
+        :param query_param: 请求参数
+        :param path: 请求路径
+        :param method: 请求方式
+        :param app_id: appId
+        :return: 时间戳,签名
+        """
+        payload = ""
+        if data:
+            payload += data
+        query_str = ""
+        path_str = ""
+        for k, v in query_param.items():
+            query_str += "{}={}&".format(k, v)
+        query_str = query_str[:-1]
+        for v in path:
+            path_str += "/{}".format(v)
+        timestamp = int(time.time() * 1000)
+        sign_str = "{}&{}&{}&{}&appid={}&timestamp={}".format(method, path_str, query_str, payload, app_id, timestamp)
+        sign_key = sign_key.encode('utf-8')
+        sign_str = sign_str.encode('utf-8')
+        sign = base64.b64encode(hmac.new(sign_key, sign_str, digestmod=hashlib.sha256).digest()).decode("utf-8")
+        return timestamp, sign
+
+
+# 发送请求，在这里构建多线程
+def fetch_url(MEP_URL,headers,body,latch):
+    try:
+        start_time = time.time()
+        response = requests.request('POST', MEP_URL, headers=headers, data=body)
+        elapsed_time = time.time() - start_time
+        resp_json = response.status_code
+    finally:
+        latch.count_down()
+
+    return resp_json, elapsed_time
+
+
+class CountDownLatch:
+    def __init__(self, count):
+        self.count = count
+        self.event = threading.Event()
+
+    def count_down(self):
+        self.count -= 1
+        if self.count == 0:
+            self.event.set()
+
+    def latch_await(self, timeout=None):
+        self.event.wait(timeout)
+
+
+def test_concurrency(num_requests,NUM_REQUESTS,MEP_URL, headers, body):
+    # 使用线程池执行并发请求
+    latch = CountDownLatch(num_requests)
+    executor = ThreadPoolExecutor(max_workers=num_requests) 
+
+    # 提交所有请求任务
+
+    future_to_url = {executor.submit(fetch_url, MEP_URL, headers, body,latch): MEP_URL for _ in range(num_requests)}
+
+    executor.shutdown(wait=True)
+    latch.latch_await(num_requests)
+
+    # 等待所有请求完成，并打印结果
+    for future in as_completed(future_to_url):
+        status_code, elapsed_time = future.result()
+        print(f"URL: {MEP_URL}, Status Code: {status_code}, Time: {elapsed_time:.4f} seconds")
+
+
+
+if __name__ == "__main__":
+    MEP_URL = 'http://<内网服务IP或域名>:<端口>/service'  # 示例占位，请按环境替换
+    SIGN_KEY = "<从平台获取的签名密钥-切勿泄露>"  # 已脱敏：勿将真实密钥写入文档或版本库
+    SERVICE_PATHS = ['service']
+    APP_ID = "<你的应用标识>"
+
+    # 设置并发请求数量
+    NUM_REQUESTS = 1
+
+    body_json = {
+            "data": {
+                "tar_path": f"<OBS或共享存储前缀>:<项目路径>/data/<示例ID>/speech_segments/test-clean-wav.tar",
+                "json_path": f"<OBS或共享存储前缀>:<项目路径>/data/<示例ID>/speech_segments_metadata/test.json",
+                "output_path": "<项目路径>/data/<示例ID>/speech_segments_metadata2/test-clean-wav.json",
+                "batch_size": 16,
+                "num_beams": 1,
+                "temperature": 1,
+                "TEST_ON_LOCAL": False,
+                "nsp_host": "<数据面域名或主机-按环境配置>"
+            },
+            "meta": {
+                    "bId": "<与路由配置一致的业务标识>",
+                    "flowId": "<流程/模型路由标识>",
+                    "uuId": "<流程/模型路由标识>"
+                },
+            "version": "1.2"
+        }
+
+
+    body = json.dumps(body_json)
+
+    timestamp, sign = calc_sign(body, SIGN_KEY, {}, SERVICE_PATHS, "POST", APP_ID)
+    headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'CLOUDSOA-HMAC-SHA256 appid={APP_ID}, timestamp={timestamp}, signature="{sign}"'
+        }
+
+    test_concurrency(NUM_REQUESTS,NUM_REQUESTS,MEP_URL, headers, body)
+​
+通过服务的日志查看调试结果：
+
+image
+
+4.模型部署
+发布模型
+
+上传组件包
+
+服务部署
+
+服务测试
+
+返回推理结果
+
+4.1 路由设置
+应用标识需与平台配置一致（示例中的具体标识已脱敏），| 业务场景 | 路由标识 要同名
+image
+
+5.数据请求体
+分享
+添加收藏
+点赞 0
+
+内容存疑 点我
+
+评论
+ 1个子文件
+
+ (不用看，有时间再改)whisper模型推理源代码修改为组件包代码	[作者与工号已脱敏]	 更新于 2024-12-24 16:42:08
+大纲
+MEP平台pipeline部署
+
+1.为什么需要使用到MEP平台？
+
+2.快速入门
+
+3. MEP平台部署准备件
+
+3.1 昇腾310环境适配
+
+3.2 模型包
+
+3.3 代码组件包
+
+3.4 模型包上传
+
+3.5 组件包上传
+
+3.6 模型部署及调试
+
+4.模型部署
+
+4.1 路由设置
+
+5.数据请求体
+
