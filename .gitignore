@@ -52,9 +52,14 @@ benchmark/
 !benchmark/
 benchmark/*
 !benchmark/verify_query_cache_hits.py
+!benchmark/README.md
 example_v1/
 example/
 example_test/
 script/
+!script/
+script/*
+!script/latency_service.sh
+!script/latency_test.sh
 .env_bak
 .env_onehop

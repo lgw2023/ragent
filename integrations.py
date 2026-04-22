@@ -2543,8 +2543,14 @@ async def _run_one_hop_with_rag(
     history_turns: int | None = None,
     include_trace: bool = False,
     prefill_stage_timings: list[dict[str, Any]] | None = None,
+    enable_rerank: bool | None = None,
+    response_type: str | None = None,
 ):
     query_param = QueryParam(mode=mode)
+    if enable_rerank is not None:
+        query_param.enable_rerank = enable_rerank
+    if response_type:
+        query_param.response_type = response_type
     if conversation_history:
         query_param.conversation_history = [
             {
@@ -2676,6 +2682,8 @@ async def trace_one_hop_problem(
     mode="hybrid",
     conversation_history: list[dict[str, Any]] | None = None,
     history_turns: int | None = None,
+    enable_rerank: bool | None = None,
+    response_type: str | None = None,
 ):
     stage_timings: list[dict[str, Any]] = []
     with _maybe_create_usage_collector("onehop_trace") as collector:
@@ -2689,6 +2697,8 @@ async def trace_one_hop_problem(
                 history_turns=history_turns,
                 include_trace=True,
                 prefill_stage_timings=stage_timings,
+                enable_rerank=enable_rerank,
+                response_type=response_type,
             )
         finally:
             await _close_rag(rag)
@@ -2704,6 +2714,8 @@ async def trace_one_hop_problem(
             "trace": True,
             "history_messages": len(conversation_history or []),
             "history_turns": history_turns,
+            "enable_rerank": enable_rerank,
+            "response_type": response_type,
         },
     )
     return result["trace"]
@@ -3504,6 +3516,8 @@ async def inference_one_hop_problem(
     return_all: bool = False,
     conversation_history: list[dict[str, Any]] | None = None,
     history_turns: int | None = None,
+    enable_rerank: bool | None = None,
+    response_type: str | None = None,
 ):
     rag = await initialize_rag(work_dir)
     try:
@@ -3515,6 +3529,8 @@ async def inference_one_hop_problem(
                 conversation_history=conversation_history,
                 history_turns=history_turns,
                 include_trace=False,
+                enable_rerank=enable_rerank,
+                response_type=response_type,
             )
     finally:
         await _close_rag(rag)
@@ -3528,6 +3544,8 @@ async def inference_one_hop_problem(
             "trace": False,
             "history_messages": len(conversation_history or []),
             "history_turns": history_turns,
+            "enable_rerank": enable_rerank,
+            "response_type": response_type,
         },
     )
     one_hop_query_response = result["answer"]

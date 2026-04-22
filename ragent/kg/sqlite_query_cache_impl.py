@@ -326,15 +326,35 @@ class SQLiteQueryCacheStorage(BaseKVStorage):
             conn.commit()
 
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
-        if not modes:
+        return await self.drop_cache_entries(modes=modes)
+
+    async def drop_cache_entries(
+        self,
+        modes: list[str] | None = None,
+        cache_types: list[str] | None = None,
+    ) -> bool:
+        normalized_modes = [str(item) for item in (modes or _QUERY_CACHE_MANAGED_MODES)]
+        normalized_cache_types = [str(item) for item in (cache_types or [])]
+
+        clauses: list[str] = []
+        parameters: list[str] = []
+        if normalized_modes:
+            placeholders = ",".join("?" for _ in normalized_modes)
+            clauses.append(f"mode IN ({placeholders})")
+            parameters.extend(normalized_modes)
+        if normalized_cache_types:
+            placeholders = ",".join("?" for _ in normalized_cache_types)
+            clauses.append(f"cache_type IN ({placeholders})")
+            parameters.extend(normalized_cache_types)
+
+        if not clauses:
             return False
 
         async with self._lock:
             conn = self._get_connection()
-            placeholders = ",".join("?" for _ in modes)
             conn.execute(
-                f"DELETE FROM query_cache_entries WHERE mode IN ({placeholders})",
-                tuple(modes),
+                "DELETE FROM query_cache_entries WHERE " + " AND ".join(clauses),
+                tuple(parameters),
             )
             conn.commit()
         return True

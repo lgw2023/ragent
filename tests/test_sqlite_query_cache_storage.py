@@ -133,5 +133,71 @@ class SQLiteQueryCacheStorageTests(unittest.IsolatedAsyncioTestCase):
             "keep-me",
         )
 
+    async def test_drop_cache_entries_can_target_cache_type_only(self):
+        storage, _ = await self._create_storage()
+        await storage.upsert(
+            {
+                "hybrid:answer:a": {
+                    "return": _build_query_cache_payload(
+                        result_kind=_QUERY_RESULT_KIND_ANSWER,
+                        answer="hybrid-answer",
+                    )
+                },
+                "hybrid:retrieval:b": {
+                    "return": _build_query_cache_payload(
+                        result_kind=_QUERY_RESULT_KIND_ANSWER,
+                        answer="hybrid-retrieval",
+                    )
+                },
+                "graph:answer:c": {
+                    "return": _build_query_cache_payload(
+                        result_kind=_QUERY_RESULT_KIND_ANSWER,
+                        answer="graph-answer",
+                    )
+                },
+                "default:extract:d": {"return": "keep-me"},
+            }
+        )
+
+        self.assertTrue(await storage.drop_cache_entries(cache_types=["answer"]))
+        self.assertIsNone(await storage.get_by_id("hybrid:answer:a"))
+        self.assertIsNone(await storage.get_by_id("graph:answer:c"))
+        self.assertEqual(
+            (await storage.get_by_id("hybrid:retrieval:b"))["return"]["answer"],
+            "hybrid-retrieval",
+        )
+        self.assertEqual(
+            (await storage.get_by_id("default:extract:d"))["return"],
+            "keep-me",
+        )
+
+    async def test_drop_cache_entries_defaults_to_managed_query_modes(self):
+        storage, _ = await self._create_storage()
+        await storage.upsert(
+            {
+                "hybrid:answer:a": {
+                    "return": _build_query_cache_payload(
+                        result_kind=_QUERY_RESULT_KIND_ANSWER,
+                        answer="hybrid",
+                    )
+                },
+                "graph:answer:b": {
+                    "return": _build_query_cache_payload(
+                        result_kind=_QUERY_RESULT_KIND_ANSWER,
+                        answer="graph",
+                    )
+                },
+                "default:extract:c": {"return": "keep-me"},
+            }
+        )
+
+        self.assertTrue(await storage.drop_cache_entries())
+        self.assertIsNone(await storage.get_by_id("hybrid:answer:a"))
+        self.assertIsNone(await storage.get_by_id("graph:answer:b"))
+        self.assertEqual(
+            (await storage.get_by_id("default:extract:c"))["return"],
+            "keep-me",
+        )
+
 if __name__ == "__main__":
     unittest.main()
