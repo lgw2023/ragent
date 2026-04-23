@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ragent.mep_adapter import (
     build_action_query_response,
     build_recommend_success,
@@ -199,6 +201,47 @@ def test_normalize_mep_request_fixes_async_result_filename():
     assert direct_request.result_filename == "custom.json"
 
 
+@pytest.mark.parametrize(
+    "result_filename",
+    [
+        "../gen.json",
+        "..",
+        ".",
+        "nested/gen.json",
+        "nested\\gen.json",
+        "/tmp/gen.json",
+        "C:\\tmp\\gen.json",
+        "C:gen.json",
+    ],
+)
+def test_normalize_mep_request_rejects_path_like_result_filename(result_filename: str):
+    with pytest.raises(ValueError, match="plain file name"):
+        normalize_mep_request(
+            {
+                "data": {
+                    "query_type": "onehop",
+                    "query": "direct query",
+                    "result_filename": result_filename,
+                }
+            }
+        )
+
+
+def test_normalize_mep_request_create_action_forces_gen_json_for_result_filename():
+    normalized = normalize_mep_request(
+        {
+            "data": {
+                "action": "create",
+                "query_type": "onehop",
+                "query": "async query",
+                "result_filename": "../escape.json",
+            }
+        }
+    )
+
+    assert normalized.result_filename == "gen.json"
+
+
 def test_resolve_component_bundle_paths_prefers_model_dir_layout(tmp_path: Path):
     process_file = tmp_path / "process.py"
     process_file.write_text("# entry\n", encoding="utf-8")
@@ -223,6 +266,79 @@ def test_resolve_component_bundle_paths_falls_back_to_parent_layout(tmp_path: Pa
 
     assert paths.data_dir == (tmp_path / "data").resolve()
     assert paths.model_dir == (tmp_path / "model").resolve()
+
+
+def test_prepare_runtime_project_layout_keeps_writable_snapshot_outside_mep(
+    monkeypatch,
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    snapshot_dir = data_dir / "demo_kg"
+    _write_snapshot(snapshot_dir)
+
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "local")
+    monkeypatch.delenv("RAGENT_ENV", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_USE_SOURCE_SNAPSHOT", raising=False)
+
+    layout = prepare_runtime_project_layout(
+        data_dir=data_dir,
+        runtime_root=tmp_path / "runtime",
+    )
+
+    assert layout.copied_to_runtime_dir is False
+    assert layout.source_project_dir == snapshot_dir.resolve()
+    assert layout.runtime_project_dir == layout.source_project_dir
+    assert layout.runtime_temp_root is None
+
+
+def test_prepare_runtime_project_layout_copies_writable_snapshot_by_default_in_mep(
+    monkeypatch,
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    snapshot_dir = data_dir / "demo_kg"
+    _write_snapshot(snapshot_dir)
+    runtime_root = tmp_path / "runtime"
+
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    monkeypatch.delenv("RAGENT_ENV", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_USE_SOURCE_SNAPSHOT", raising=False)
+
+    layout = prepare_runtime_project_layout(
+        data_dir=data_dir,
+        runtime_root=runtime_root,
+    )
+
+    assert layout.copied_to_runtime_dir is True
+    assert layout.source_project_dir == snapshot_dir.resolve()
+    assert layout.runtime_project_dir != layout.source_project_dir
+    assert layout.runtime_project_dir.exists()
+    assert layout.runtime_temp_root is not None
+    assert layout.runtime_temp_root.parent == runtime_root.resolve()
+    assert (layout.runtime_project_dir / "vdb_chunks.json").exists()
+
+    cleanup_runtime_project_layout(layout)
+
+
+def test_prepare_runtime_project_layout_mep_escape_hatch_keeps_writable_snapshot(
+    monkeypatch,
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    snapshot_dir = data_dir / "demo_kg"
+    _write_snapshot(snapshot_dir)
+
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    monkeypatch.setenv("RAGENT_MEP_USE_SOURCE_SNAPSHOT", "1")
+
+    layout = prepare_runtime_project_layout(
+        data_dir=data_dir,
+        runtime_root=tmp_path / "runtime",
+    )
+
+    assert layout.copied_to_runtime_dir is False
+    assert layout.runtime_project_dir == snapshot_dir.resolve()
+    assert layout.runtime_temp_root is None
 
 
 def test_prepare_runtime_project_layout_copies_read_only_snapshot(
@@ -290,7 +406,11 @@ def test_example_snapshot_is_accepted():
     assert resolved == snapshot_dir.resolve()
 
 
-def test_build_result_payload_contains_stable_fields(tmp_path: Path):
+def test_build_result_payload_contains_stable_fields(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "local")
+    monkeypatch.delenv("RAGENT_ENV", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_USE_SOURCE_SNAPSHOT", raising=False)
+
     req_data = normalize_mep_request(
         {
             "data": {
@@ -355,6 +475,17 @@ def test_maybe_write_result_payload_writes_valid_gen_json(tmp_path: Path):
     written_payload = json.loads(written)
     assert written_payload["code"] == "0"
     assert written_payload["result_file_path"] == str(output_path)
+
+
+def test_maybe_write_result_payload_rejects_path_like_result_filename(tmp_path: Path):
+    with pytest.raises(ValueError, match="plain file name"):
+        maybe_write_result_payload(
+            {"code": "0"},
+            generate_path=tmp_path / "generate",
+            result_filename="../escape.json",
+        )
+
+    assert not (tmp_path / "escape.json").exists()
 
 
 def test_build_recommend_success_defaults_to_empty_async_content():

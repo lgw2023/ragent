@@ -8,7 +8,7 @@
 
 - `process.py`: MEP 入口，导出 `CustomerModel`
 - `config.json`: 指向 `process.CustomerModel`
-- `package.json`: 组件元信息，上传前需要替换真实 `scope`
+- `package.json`: 组件元信息，当前 `scope` 为 `semtp`，若目标 WiseDevOps 命名空间不同，上传前需替换为目标值
 
 模型包使用固定目录：
 
@@ -166,14 +166,19 @@ SFS 异步 create：
 
 ## 本地模拟
 
-本地调试时，用环境变量指向已有快照和模型包：
+本地调试时，用环境变量指向已有快照和模型包。`process.py` 会按 MEP runtime 启动，默认不会自动加载 `.env`；如果要使用本地 `.env` 里的外部 LLM / embedding 配置，需要先在 shell 中显式导出：
 
 ```bash
+set -a
+source /Volumes/SSD1/ragent/.env
+set +a
 export RAGENT_MEP_DATA_DIR=/Volumes/SSD1/ragent/example/demo_diet_kg
 export RAGENT_MEP_MODEL_DIR=/Volumes/SSD1/ragent/model_packages/bge-m3/modelDir/model
 python /Volumes/SSD1/ragent/run_mep_local.py \
   --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
 ```
+
+如果不导出 `EMBEDDING_MODEL`、`EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_KEY`，组件会在 `load()` 阶段按模型包的 `sysconfig.properties` 尝试拉起本地 vLLM embedding 服务。
 
 脚本会打印 `calc()` 返回值，并在 stderr 打印目标 `gen.json` 路径。
 

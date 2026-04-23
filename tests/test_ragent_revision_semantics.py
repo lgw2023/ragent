@@ -1,14 +1,12 @@
 import asyncio
 import importlib
 import sys
-import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from ragent.base import DeletionResult, DocStatus, QueryParam
 from ragent.kg.shared_storage import initialize_share_data
-from ragent.namespace import NameSpace
 from ragent.utils import compute_mdhash_id
 
 

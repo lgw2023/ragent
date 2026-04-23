@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest import mock
 
 from ragent.kg.sqlite_query_cache_impl import SQLiteQueryCacheStorage
 from ragent.namespace import NameSpace
@@ -198,6 +199,19 @@ class SQLiteQueryCacheStorageTests(unittest.IsolatedAsyncioTestCase):
             (await storage.get_by_id("default:extract:c"))["return"],
             "keep-me",
         )
+
+    async def test_drop_error_path_returns_error_without_logger_name_error(self):
+        storage, _ = await self._create_storage()
+
+        with mock.patch.object(
+            storage,
+            "_get_connection",
+            side_effect=RuntimeError("drop failed"),
+        ):
+            result = await storage.drop()
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("drop failed", result["message"])
 
 if __name__ == "__main__":
     unittest.main()

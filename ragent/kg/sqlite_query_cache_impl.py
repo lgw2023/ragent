@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, final
 
 from ragent.base import BaseKVStorage
+from ragent.utils import logger
 
 
 _QUERY_CACHE_MANAGED_MODES = {"graph", "hybrid"}
