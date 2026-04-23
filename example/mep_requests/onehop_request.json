@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "meta": {
+    "bId": "local-debug",
+    "flowId": "ragent-onehop"
+  },
+  "data": {
+    "query_type": "onehop",
+    "query": "文档的主要主题是什么？",
+    "mode": "hybrid",
+    "enable_rerank": true,
+    "response_type": "Multiple Paragraphs",
+    "generatePath": "/tmp/ragent_mep_output"
+  }
+}

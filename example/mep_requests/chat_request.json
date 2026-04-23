@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "meta": {
+    "bId": "local-debug",
+    "flowId": "ragent-chat"
+  },
+  "data": {
+    "query_type": "chat",
+    "query": "请继续解释上一条建议的注意事项。",
+    "mode": "hybrid",
+    "conversation_history": [
+      {
+        "role": "user",
+        "content": "请先总结这份知识库的核心内容。"
+      },
+      {
+        "role": "assistant",
+        "content": "这份知识库主要围绕饮食结构、营养搭配和健康建议展开。"
+      }
+    ],
+    "history_turns": 4,
+    "generatePath": "/tmp/ragent_mep_output"
+  }
+}

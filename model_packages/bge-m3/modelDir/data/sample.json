@@ -1,0 +1,7 @@
+{
+  "model": "BAAI/bge-m3",
+  "texts": [
+    "这是一个用于验证本地 vLLM embedding 服务是否可用的样例文本。",
+    "知识图谱 inference 链路会复用同一个 embedding 服务实例。"
+  ]
+}

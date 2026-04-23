@@ -47,13 +47,17 @@ MinerU model download instructions, CLI usage, and Python examples.
 
 ## MEP Component
 
-The repository root now also serves as the MEP component package root. The
-top-level [process.py](process.py), [config.json](config.json), and
-[package.json](package.json) are laid out for MEP packaging.
+The repository root also serves as a MEP SFS async KG QA inference component.
+The top-level [process.py](process.py), [config.json](config.json), and
+[package.json](package.json) are laid out for MEP packaging; replace the
+placeholder `scope` in [package.json](package.json) before uploading.
 
-Before uploading to WiseDevOps/MEP, replace the placeholder `scope` value in
-[package.json](package.json) with the real organization/namespace required by
-your DevOps workspace. The current `replace-me` value is only a template.
+The component only queries an existing KG snapshot. The model package standard
+is `modelDir/model/` for the embedding model and `sysconfig.properties`, plus
+`modelDir/data/` for one KG snapshot. `action=create` writes
+`{generatePath}/gen.json` and returns `recommendResult`; direct local requests
+without `action` still return the result payload in `recommendResult.content`.
 
-See [MEP_COMPONENT.md](MEP_COMPONENT.md) for the MEP-specific request format,
-runtime behavior, and local simulation flow.
+See [MEP_COMPONENT.md](MEP_COMPONENT.md) for the full component/model package
+boundary, request parsing rules, async response contract, deployment notes, and
+local simulation flow.
