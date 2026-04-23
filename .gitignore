@@ -55,7 +55,12 @@ benchmark/*
 !benchmark/README.md
 example_v1/
 example/
+!example/
+example/*
+!example/mep_requests/
+!example/mep_requests/*.json
 example_test/
+model_packages/**/*.bin
 script/
 !script/
 script/*

@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "meta": {
+    "bId": "businessId",
+    "flowId": "kg_qa",
+    "uuId": "xxx"
+  },
+  "data": {
+    "taskId": "100002455",
+    "action": "create",
+    "basePath": "/opt/business/100002455",
+    "query_type": "onehop",
+    "query": "文档的主要主题是什么？",
+    "mode": "hybrid",
+    "fileInfo": [
+      {
+        "generatePath": "/opt/business/100002455/generatePath",
+        "processSpec": []
+      }
+    ]
+  }
+}

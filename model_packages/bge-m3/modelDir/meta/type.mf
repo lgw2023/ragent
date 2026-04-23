@@ -1,0 +1,4 @@
+type=model
+framework=vllm
+task=embedding
+name=baai_bge_m3

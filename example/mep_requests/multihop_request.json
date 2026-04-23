@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "meta": {
+    "bId": "local-debug",
+    "flowId": "ragent-multihop"
+  },
+  "data": {
+    "query_type": "multihop",
+    "query": "比较文档中提到的两类饮食策略，它们的主要差异是什么？",
+    "include_trace": true,
+    "generatePath": "/tmp/ragent_mep_output"
+  }
+}
