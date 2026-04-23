@@ -7,12 +7,12 @@ from dataclasses import dataclass
 import numpy as np
 from ragent.utils import logger, compute_mdhash_id
 from ..base import BaseVectorStorage
+from .backend_config import get_backend_config_value, load_backend_config
 import pipmaster as pm
 
 if not pm.is_installed("pymilvus"):
     pm.install("pymilvus")
 
-import configparser
 from pymilvus import MilvusClient, DataType, CollectionSchema, FieldSchema  # type: ignore
 
 @final
@@ -736,28 +736,36 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         if "created_at" not in self.meta_fields:
             self.meta_fields.add("created_at")
 
+        config = load_backend_config("MILVUS_CONFIG_FILE")
         self._client = MilvusClient(
-            uri=os.environ.get(
-                "MILVUS_URI",
-                config.get(
-                    "milvus",
-                    "uri",
-                    fallback=os.path.join(
-                        self.global_config["working_dir"], "milvus_lite.db"
-                    ),
+            uri=get_backend_config_value(
+                config,
+                "milvus",
+                "uri",
+                env_var="MILVUS_URI",
+                fallback=os.path.join(
+                    self.global_config["working_dir"], "milvus_lite.db"
                 ),
             ),
-            user=os.environ.get(
-                "MILVUS_USER", config.get("milvus", "user", fallback=None)
+            user=get_backend_config_value(
+                config, "milvus", "user", env_var="MILVUS_USER", fallback=None
             ),
-            password=os.environ.get(
-                "MILVUS_PASSWORD", config.get("milvus", "password", fallback=None)
+            password=get_backend_config_value(
+                config,
+                "milvus",
+                "password",
+                env_var="MILVUS_PASSWORD",
+                fallback=None,
             ),
-            token=os.environ.get(
-                "MILVUS_TOKEN", config.get("milvus", "token", fallback=None)
+            token=get_backend_config_value(
+                config, "milvus", "token", env_var="MILVUS_TOKEN", fallback=None
             ),
-            db_name=os.environ.get(
-                "MILVUS_DB_NAME", config.get("milvus", "db_name", fallback=None)
+            db_name=get_backend_config_value(
+                config,
+                "milvus",
+                "db_name",
+                env_var="MILVUS_DB_NAME",
+                fallback=None,
             ),
         )
         self._max_batch_size = self.global_config["embedding_batch_num"]

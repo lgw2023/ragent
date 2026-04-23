@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import threading
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .inference_runtime import (
@@ -17,7 +17,7 @@ from .inference_runtime import (
     normalize_query_mode,
     parse_history_turns,
 )
-from .runtime_env import bootstrap_runtime_environment
+from .runtime_env import bootstrap_runtime_environment, is_mep_runtime
 
 
 bootstrap_runtime_environment()
@@ -346,6 +346,10 @@ def _directory_is_writable(path: Path) -> bool:
         return False
 
 
+def _env_flag_enabled(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in _TRUE_VALUES
+
+
 def prepare_runtime_project_layout(
     *,
     data_dir: str | os.PathLike[str],
@@ -360,7 +364,11 @@ def prepare_runtime_project_layout(
     )
     source_project_dir = resolve_single_snapshot_from_data_dir(resolved_data_dir)
 
-    if _directory_is_writable(source_project_dir):
+    use_source_snapshot = _directory_is_writable(source_project_dir)
+    if is_mep_runtime() and not _env_flag_enabled("RAGENT_MEP_USE_SOURCE_SNAPSHOT"):
+        use_source_snapshot = False
+
+    if use_source_snapshot:
         return RuntimeProjectLayout(
             data_dir=resolved_data_dir,
             model_dir=resolved_model_dir,
@@ -401,6 +409,24 @@ def cleanup_runtime_project_layout(layout: RuntimeProjectLayout | None) -> None:
         return
 
     shutil.rmtree(layout.runtime_temp_root, ignore_errors=True)
+
+
+def _normalize_result_filename(value: Any) -> str:
+    result_filename = str(value).strip()
+    if not result_filename:
+        raise ValueError("result filename must not be empty")
+    if "\x00" in result_filename:
+        raise ValueError("result filename must be a plain file name")
+    if result_filename in {".", ".."}:
+        raise ValueError("result filename must be a plain file name")
+    if "/" in result_filename or "\\" in result_filename:
+        raise ValueError("result filename must be a plain file name")
+    windows_path = PureWindowsPath(result_filename)
+    if Path(result_filename).is_absolute() or windows_path.is_absolute():
+        raise ValueError("result filename must be a plain file name")
+    if windows_path.drive or windows_path.root:
+        raise ValueError("result filename must be a plain file name")
+    return result_filename
 
 
 def normalize_mep_request(req_data: Any) -> NormalizedMepRequest:
@@ -522,9 +548,8 @@ def normalize_mep_request(req_data: Any) -> NormalizedMepRequest:
             )
             or os.getenv("RAGENT_MEP_RESULT_FILENAME")
             or "gen.json"
-        ).strip()
-    if not result_filename:
-        raise ValueError("result filename must not be empty")
+        )
+    result_filename = _normalize_result_filename(result_filename)
 
     return NormalizedMepRequest(
         inference_request=inference_request,
@@ -597,6 +622,7 @@ def maybe_write_result_payload(
 ) -> Path | None:
     if generate_path is None:
         return None
+    result_filename = _normalize_result_filename(result_filename)
     generate_path.mkdir(parents=True, exist_ok=True)
     output_path = generate_path / result_filename
     payload["result_file_path"] = str(output_path)

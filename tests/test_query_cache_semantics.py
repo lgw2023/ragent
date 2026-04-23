@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 from ragent.base import QueryParam
 from ragent.operate import (
     _QUERY_CACHE_TYPE_ANSWER,
-    _QUERY_CACHE_TYPE_RENDER,
     _QUERY_CACHE_TYPE_RETRIEVAL,
     _QUERY_RESULT_KIND_ANSWER,
     _build_query_cache_payload,

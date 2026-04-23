@@ -1,5 +1,5 @@
 {
-  "scope": "replace-me",
+  "scope": "semtp",
   "version": "20260422",
   "type": "aiexplore",
   "name": "ragent_inference_mep"

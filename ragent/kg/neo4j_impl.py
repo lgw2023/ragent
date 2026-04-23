@@ -2,7 +2,6 @@ import os
 import re
 from dataclasses import dataclass
 from typing import final
-import configparser
 
 
 from tenacity import (
@@ -17,6 +16,7 @@ from ..utils import logger
 from ..base import BaseGraphStorage
 from ..types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
 from ..constants import GRAPH_FIELD_SEP
+from .backend_config import get_backend_config_value, load_backend_config
 import pipmaster as pm
 
 if not pm.is_installed("neo4j"):
@@ -56,39 +56,58 @@ class Neo4JStorage(BaseGraphStorage):
         return workspace if workspace else "base"
 
     async def initialize(self):
-        URI = os.environ.get("NEO4J_URI", config.get("neo4j", "uri", fallback=None))
-        USERNAME = os.environ.get(
-            "NEO4J_USERNAME", config.get("neo4j", "username", fallback=None)
+        config = load_backend_config("NEO4J_CONFIG_FILE")
+        URI = get_backend_config_value(
+            config, "neo4j", "uri", env_var="NEO4J_URI", fallback=None
         )
-        PASSWORD = os.environ.get(
-            "NEO4J_PASSWORD", config.get("neo4j", "password", fallback=None)
+        USERNAME = get_backend_config_value(
+            config, "neo4j", "username", env_var="NEO4J_USERNAME", fallback=None
+        )
+        PASSWORD = get_backend_config_value(
+            config, "neo4j", "password", env_var="NEO4J_PASSWORD", fallback=None
         )
         MAX_CONNECTION_POOL_SIZE = int(
-            os.environ.get(
-                "NEO4J_MAX_CONNECTION_POOL_SIZE",
-                config.get("neo4j", "connection_pool_size", fallback=50),
+            get_backend_config_value(
+                config,
+                "neo4j",
+                "connection_pool_size",
+                env_var="NEO4J_MAX_CONNECTION_POOL_SIZE",
+                fallback=50,
             )
         )
         CONNECTION_TIMEOUT = float(
-            os.environ.get(
-                "NEO4J_CONNECTION_TIMEOUT",
-                config.get("neo4j", "connection_timeout", fallback=30.0),
+            get_backend_config_value(
+                config,
+                "neo4j",
+                "connection_timeout",
+                env_var="NEO4J_CONNECTION_TIMEOUT",
+                fallback=30.0,
             ),
         )
         CONNECTION_ACQUISITION_TIMEOUT = float(
-            os.environ.get(
-                "NEO4J_CONNECTION_ACQUISITION_TIMEOUT",
-                config.get("neo4j", "connection_acquisition_timeout", fallback=30.0),
+            get_backend_config_value(
+                config,
+                "neo4j",
+                "connection_acquisition_timeout",
+                env_var="NEO4J_CONNECTION_ACQUISITION_TIMEOUT",
+                fallback=30.0,
             ),
         )
         MAX_TRANSACTION_RETRY_TIME = float(
-            os.environ.get(
-                "NEO4J_MAX_TRANSACTION_RETRY_TIME",
-                config.get("neo4j", "max_transaction_retry_time", fallback=30.0),
+            get_backend_config_value(
+                config,
+                "neo4j",
+                "max_transaction_retry_time",
+                env_var="NEO4J_MAX_TRANSACTION_RETRY_TIME",
+                fallback=30.0,
             ),
         )
-        DATABASE = os.environ.get(
-            "NEO4J_DATABASE", re.sub(r"[^a-zA-Z0-9-]", "-", self.namespace)
+        DATABASE = get_backend_config_value(
+            config,
+            "neo4j",
+            "database",
+            env_var="NEO4J_DATABASE",
+            fallback=re.sub(r"[^a-zA-Z0-9-]", "-", self.namespace),
         )
 
         self._driver: AsyncDriver = AsyncGraphDatabase.driver(

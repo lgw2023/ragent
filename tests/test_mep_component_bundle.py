@@ -17,6 +17,17 @@ def test_root_component_files_exist():
     assert config == {"main_file": "process", "main_class": "CustomerModel"}
 
 
+def test_package_json_uses_non_placeholder_scope():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    package = json.loads((repo_root / "package.json").read_text(encoding="utf-8"))
+
+    assert package["scope"]
+    assert package["scope"] != "replace-me"
+    assert package["type"] == "aiexplore"
+    assert package["name"] == "ragent_inference_mep"
+
+
 def test_root_process_exports_customer_model():
     repo_root = Path(__file__).resolve().parents[1]
     process_path = repo_root / "process.py"

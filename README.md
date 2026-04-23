@@ -49,8 +49,9 @@ MinerU model download instructions, CLI usage, and Python examples.
 
 The repository root also serves as a MEP SFS async KG QA inference component.
 The top-level [process.py](process.py), [config.json](config.json), and
-[package.json](package.json) are laid out for MEP packaging; replace the
-placeholder `scope` in [package.json](package.json) before uploading.
+[package.json](package.json) are laid out for MEP packaging. The current
+`scope` is `semtp`; replace it before uploading if the target WiseDevOps
+namespace is different.
 
 The component only queries an existing KG snapshot. The model package standard
 is `modelDir/model/` for the embedding model and `sysconfig.properties`, plus
