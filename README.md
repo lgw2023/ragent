@@ -67,6 +67,10 @@ and archive the assembled runtime:
 python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-format zip
 ```
 
+If `--archive-output` is provided, point it outside the assembled runtime root;
+the builder rejects paths inside `component/` / `model/` / `data` / `meta` so the
+archive cannot include itself.
+
 The component only queries an existing KG snapshot. The model package standard
 is `modelDir/model/` for Hugging Face model directories only, plus
 `modelDir/data/` for component-readable read-only data such as embedding config,

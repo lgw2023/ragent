@@ -271,6 +271,8 @@ data/deps/wheelhouse/*.whl
 
 这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 只负责在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `data/deps` 中的依赖影响后续导入。
 
+如果本轮没有找到任何可加入的依赖路径，bootstrap 会清理 `RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH`，避免平台诊断读到上一轮进程留下的过期路径。
+
 ## 6. 接口契约
 
 当前 ragent 顶层返回约定仍保持：
@@ -427,6 +429,8 @@ python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
 ```
 
 支持的归档格式为 `zip`、`tar`、`tar.gz`/`tgz`。归档内容的第一层就是 `component/`、`model/`、`data/`、`meta/`，不会额外套一层 `runtime/`。
+
+如果显式指定 `--archive-output`，输出路径必须位于 runtime 根目录之外；装配脚本会拒绝把归档写到 runtime 内部，避免归档过程中把自身也打入包中。
 
 兼容调试时仍可使用显式 env override 或直接传 `model_root`：
 

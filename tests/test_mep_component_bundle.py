@@ -53,6 +53,29 @@ def test_mep_data_dependency_bootstrap_uses_runtime_sibling_data_dir(
     )
 
 
+def test_mep_data_dependency_bootstrap_clears_stale_record_when_no_paths(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", "stale")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert added_paths == ()
+    assert "RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH" not in os.environ
+
+
 def test_package_json_uses_non_placeholder_scope():
     repo_root = Path(__file__).resolve().parents[1]
 
