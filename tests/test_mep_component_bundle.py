@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import importlib.util
+import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+from mep_dependency_bootstrap import bootstrap_mep_data_dependencies
 
 
 def test_root_component_files_exist():
@@ -14,9 +18,39 @@ def test_root_component_files_exist():
     assert (repo_root / "init.py").exists()
     assert (repo_root / "config.json").exists()
     assert (repo_root / "package.json").exists()
+    assert (repo_root / "mep_dependency_bootstrap.py").exists()
 
     config = json.loads((repo_root / "config.json").read_text(encoding="utf-8"))
     assert config == {"main_file": "process", "main_class": "CustomerModel"}
+
+
+def test_mep_data_dependency_bootstrap_uses_runtime_sibling_data_dir(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    pythonpath_dir = runtime_root / "data" / "deps" / "pythonpath"
+    pythonpath_dir.mkdir(parents=True)
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", raising=False)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert added_paths == (str(pythonpath_dir.resolve()),)
+    assert sys.path[0] == str(pythonpath_dir.resolve())
+    assert (
+        os.environ["RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH"]
+        == str(pythonpath_dir.resolve())
+    )
 
 
 def test_package_json_uses_non_placeholder_scope():

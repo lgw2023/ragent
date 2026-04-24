@@ -60,6 +60,13 @@ directories, matching the MEP platform view. The current `scope` in
 [package.json](package.json) is `semtp`; replace it before uploading if the
 target WiseDevOps namespace is different.
 
+For a materialized local handoff artifact, copy the model package directories
+and archive the assembled runtime:
+
+```bash
+python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-format zip
+```
+
 The component only queries an existing KG snapshot. The model package standard
 is `modelDir/model/` for Hugging Face model directories only, plus
 `modelDir/data/` for component-readable read-only data such as embedding config,

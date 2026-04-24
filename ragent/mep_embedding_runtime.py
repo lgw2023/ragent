@@ -265,12 +265,23 @@ def _resolve_model_path(
         "model.relative_path",
     )
     if configured_path is not None:
-        candidate = Path(configured_path).expanduser()
+        configured_path_obj = Path(configured_path).expanduser()
+        candidate = configured_path_obj
         if not candidate.is_absolute():
             candidate = (model_dir / candidate).resolve()
         else:
             candidate = candidate.resolve()
         if not _looks_like_embedding_model_dir(candidate):
+            if (
+                not configured_path_obj.is_absolute()
+                and preferred_model_path is not None
+                and _looks_like_embedding_model_dir(preferred_model_path)
+                and (
+                    str(configured_path_obj) == "."
+                    or configured_path_obj.parts == (preferred_model_path.name,)
+                )
+            ):
+                return preferred_model_path.resolve()
             raise FileNotFoundError(
                 f"Configured embedding model path is invalid: {candidate}"
             )
