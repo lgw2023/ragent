@@ -91,6 +91,41 @@ def test_resolve_embedding_launch_config_reads_sysconfig(tmp_path: Path):
     assert config.dimensions == 1024
     assert config.max_token_size == 8192
     assert config.port > 0
+    assert config.config_path == (model_dir / "sysconfig.properties").resolve()
+
+
+def test_resolve_embedding_launch_config_prefers_data_config(tmp_path: Path):
+    model_dir = tmp_path / "model"
+    embedding_root = model_dir / "baai_bge_m3"
+    embedding_root.mkdir(parents=True, exist_ok=True)
+    (embedding_root / "config.json").write_text("{}", encoding="utf-8")
+    (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+    data_dir = tmp_path / "data"
+    config_dir = data_dir / "config"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "embedding.properties"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model.name=BAAI/bge-m3-data-config",
+                "model.relative_path=baai_bge_m3",
+                "embedding.dimensions=1024",
+                "embedding.max_token_size=8192",
+                "vllm.runner=pooling",
+                "vllm.port=0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+
+    assert config.model_dir == model_dir.resolve()
+    assert config.model_path == embedding_root.resolve()
+    assert config.served_model_name == "BAAI/bge-m3-data-config"
+    assert config.config_path == config_path.resolve()
 
 
 def test_resolve_embedding_launch_config_accepts_direct_model_dir_input(tmp_path: Path):

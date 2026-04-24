@@ -257,7 +257,11 @@ def test_customer_model_load_passes_model_root_without_legacy_suffixing(
 
     monkeypatch.setattr(module, "AsyncLoopThread", FakeLoopRunner)
     monkeypatch.setattr(module, "resolve_component_bundle_paths", _fake_resolve_component_bundle_paths)
-    monkeypatch.setattr(module, "bootstrap_local_embedding_runtime", lambda model_dir: None)
+    monkeypatch.setattr(
+        module,
+        "bootstrap_local_embedding_runtime",
+        lambda model_dir, **kwargs: None,
+    )
     monkeypatch.setattr(module, "prepare_runtime_project_layout", lambda **kwargs: runtime_layout)
     monkeypatch.setattr(module, "InferenceRuntimeSession", FakeRuntimeSession)
 

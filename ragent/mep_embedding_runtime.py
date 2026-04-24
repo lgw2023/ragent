@@ -33,6 +33,10 @@ _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_RUNNER = "pooling"
 _DEFAULT_STARTUP_TIMEOUT_SECONDS = 300.0
 _MODEL_DIR_MARKERS = ("config.json", "tokenizer.json")
+_DATA_CONFIG_FILENAMES = (
+    "embedding.properties",
+    "sysconfig.properties",
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ class MepEmbeddingLaunchConfig:
     max_model_len: int | None = None
     extra_args: tuple[str, ...] = ()
     launch_mode: str = "auto"
+    config_path: Path | None = None
 
     @property
     def base_url(self) -> str:
@@ -117,6 +122,58 @@ def _read_properties_file(path: Path) -> dict[str, str]:
             key, value = line, ""
         properties[key.strip()] = value.strip()
     return properties
+
+
+def _iter_embedding_config_candidates(
+    *,
+    model_dir: Path,
+    data_dir: Path | None,
+) -> list[Path]:
+    candidates: list[Path] = []
+
+    configured_path = _normalize_optional_str(
+        os.getenv("RAGENT_MEP_EMBEDDING_CONFIG_PATH")
+    )
+    if configured_path is not None:
+        candidate = Path(configured_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = ((data_dir or model_dir) / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        candidates.append(candidate)
+
+    if data_dir is not None:
+        for filename in _DATA_CONFIG_FILENAMES:
+            candidates.append((data_dir / "config" / filename).resolve())
+        for filename in _DATA_CONFIG_FILENAMES:
+            candidates.append((data_dir / filename).resolve())
+
+    # Legacy compatibility: older local model packages stored component-readable
+    # bootstrap config beside the HF model directory under model/.
+    candidates.append((model_dir / "sysconfig.properties").resolve())
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        deduped.append(candidate)
+        seen.add(candidate)
+    return deduped
+
+
+def _read_embedding_properties(
+    *,
+    model_dir: Path,
+    data_dir: Path | None,
+) -> tuple[dict[str, str], Path | None]:
+    for candidate in _iter_embedding_config_candidates(
+        model_dir=model_dir,
+        data_dir=data_dir,
+    ):
+        if candidate.is_file():
+            return _read_properties_file(candidate), candidate
+    return {}, None
 
 
 def _normalize_optional_str(value: Any) -> str | None:
@@ -251,23 +308,32 @@ def _resolve_model_path(
         )
     raise RuntimeError(
         "Multiple embedding model directories found under model/. "
-        f"Please set RAGENT_MEP_EMBEDDING_MODEL_PATH explicitly. Candidates: {', '.join(str(item) for item in candidates)}"
+        "Please set RAGENT_MEP_EMBEDDING_MODEL_PATH explicitly. "
+        f"Candidates: {', '.join(str(item) for item in candidates)}"
     )
 
 
 def resolve_embedding_launch_config(
     model_dir: str | os.PathLike[str],
+    *,
+    data_dir: str | os.PathLike[str] | None = None,
 ) -> MepEmbeddingLaunchConfig:
     resolved_model_dir_input = Path(model_dir).expanduser().resolve()
     resolved_model_dir, preferred_model_path = _normalize_model_dir_input(
         resolved_model_dir_input
+    )
+    resolved_data_dir = (
+        Path(data_dir).expanduser().resolve() if data_dir is not None else None
     )
     if not resolved_model_dir.exists():
         raise FileNotFoundError(f"MEP model directory does not exist: {resolved_model_dir}")
     if not resolved_model_dir.is_dir():
         raise ValueError(f"MEP model path is not a directory: {resolved_model_dir}")
 
-    properties = _read_properties_file(resolved_model_dir / "sysconfig.properties")
+    properties, config_path = _read_embedding_properties(
+        model_dir=resolved_model_dir,
+        data_dir=resolved_data_dir,
+    )
     model_path = _resolve_model_path(
         resolved_model_dir,
         properties,
@@ -331,11 +397,13 @@ def resolve_embedding_launch_config(
 
     logger.info(
         "Resolved embedding launch config. input_model_dir=%s bundle_model_dir=%s "
-        "model_path=%s path_appendix=%s sysconfig_present=%s",
+        "data_dir=%s model_path=%s path_appendix=%s config_path=%s legacy_sysconfig_present=%s",
         resolved_model_dir_input,
         resolved_model_dir,
+        resolved_data_dir,
         model_path,
         _normalize_optional_str(os.getenv("path_appendix")),
+        config_path,
         (resolved_model_dir / "sysconfig.properties").exists(),
     )
 
@@ -362,6 +430,7 @@ def resolve_embedding_launch_config(
         ),
         extra_args=extra_args,
         launch_mode=launch_mode,
+        config_path=config_path,
     )
 
 
@@ -535,6 +604,8 @@ def _apply_embedding_function_attributes(config: MepEmbeddingLaunchConfig) -> No
 
 def bootstrap_local_embedding_runtime(
     model_dir: str | os.PathLike[str],
+    *,
+    data_dir: str | os.PathLike[str] | None = None,
 ) -> LocalEmbeddingRuntime | None:
     autostart_enabled = _parse_optional_bool(
         os.getenv("RAGENT_MEP_EMBEDDING_AUTOSTART", "1")
@@ -553,7 +624,7 @@ def bootstrap_local_embedding_runtime(
         )
         return None
 
-    config = resolve_embedding_launch_config(model_dir)
+    config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
     launch_errors: list[str] = []
     for command in build_vllm_command_candidates(config):
         logger.info(

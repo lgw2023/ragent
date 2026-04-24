@@ -175,7 +175,7 @@ class CustomerModel:
 4. 本地调试 env fallback：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
 5. 源码目录同级 `model/`、`data/` 作为最后兜底
 
-其中 `path_appendix` 不改变 bundle 级 `model_dir` 解析，而是用于 embedding runtime 选择 `model/` 下的实际权重子目录。
+其中 `path_appendix` 不改变 bundle 级 `model_dir` 解析，而是用于 embedding runtime 选择 `model/` 下的实际权重子目录。当前仓库推荐通过 `tools/build_mep_layout.py` 生成 `.mep_build/<model-package>/runtime`，用平台形态验证这条路径解析，而不是把模型包直接当成组件源码的一部分。
 
 ### 3.4 参照样例后修正的目标理解
 
@@ -197,9 +197,12 @@ DATA_DIR = os.path.join(ROOT_DIR, "data")
     <main_file>.py
     ...
   model/
-    ...
+    <huggingface-model-dir>/
   data/
-    ...
+    config/
+    kg/
+    deps/
+    samples/
   meta/
     ...
 ```
@@ -209,6 +212,7 @@ DATA_DIR = os.path.join(ROOT_DIR, "data")
 - 组件包最终位于 `<runtime_root>/component`
 - 模型包解压/挂载后向组件暴露的是平级 `model/`、`data/`、`meta/`
 - `component/` 通过父目录访问 `model/` 和 `data/`
+- `model/` 顶层只放 Hugging Face 模型目录；`data/` 放组件侧只读配置、KG、依赖包、样例等自定义数据
 
 因此此前把 `model_root` 默认理解为“模型包根目录 `modelDir`”并不稳妥。
 
@@ -254,7 +258,7 @@ EMBEDDING_MODEL_KEY
 
 第二种：本地 vLLM embedding 服务。
 
-如果没有完整外部 embedding 配置，`CustomerModel.load()` 会读取模型目录下的 `sysconfig.properties`，并通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 拉起本地 OpenAI-compatible embedding 服务。
+如果没有完整外部 embedding 配置，`CustomerModel.load()` 会优先读取 `data/config/embedding.properties`，并通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 拉起本地 OpenAI-compatible embedding 服务。旧的 `model/sysconfig.properties` 只作为兼容兜底，新模型包不再把组件配置文件放入 `model/`。
 
 当前代码支持两种 vLLM 启动候选：
 
@@ -612,7 +616,7 @@ LLM_MODEL_KEY
 | 运行时目录布局 | `cwd`、入口 `__file__`、`component/` 是否包含 `config.json`、`component/` 父目录下是否存在 `model/`、`data/`、`meta/` | 决定 `runtime_sibling_*` 路径是否是主路径 |
 | `model_root` 传参 | 平台实例化入口类时是否传入 `model_root`；传入值是 `<runtime_root>`、`<runtime_root>/model`、模型包根目录，还是为空 | 决定兼容输入是否命中，避免误把它当主契约 |
 | SFS 环境变量 | `MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_ABSOLUTE_DIR`、`MODEL_RELATIVE_DIR`、`path_appendix` 的原始值和最终落盘目标 | 决定模型目录、数据目录和具体 embedding 权重子目录解析 |
-| 模型包 `data/` 暴露形态 | `data/` 是平铺 KG snapshot，还是 `data/<snapshot_name>/`；是否可能有多个 snapshot | 决定 `resolve_single_snapshot_from_data_dir()` 是否需要新增平台目标选择规则 |
+| 模型包 `data/` 暴露形态 | 推荐 `data/kg/<snapshot_name>/`；如平台或业务包使用其他位置，需要通过 `RAGENT_MEP_KG_DIR` 指定 | 决定 `resolve_single_snapshot_from_data_dir()` 的目标选择规则 |
 | vLLM embedding 能力 | `vllm serve ... --runner pooling`、`python -m vllm.entrypoints.openai.api_server --task embed`、`/v1/models`、`/v1/embeddings` 是否可用 | 决定本地 embedding runtime 是否能在目标镜像上工作 |
 | 子进程生命周期限制 | `load()` 超时上限、端口监听限制、同容器多实例行为、组件退出时子进程是否被平台清理 | 决定 vLLM 启动超时、端口和 cleanup 策略 |
 | 资源隔离 | GPU/NPU 是否会被多个组件实例竞争，平台是否限制子进程资源 | 决定是否需要单实例保护或资源配置约束 |
@@ -632,19 +636,18 @@ LLM_MODEL_KEY
 - 准备完整 embedding 模型包，或配置外部 embedding API
 - 配置外部 LLM API
 
-当前代码可直接使用的本地方式：
+推荐优先使用接近平台的本地装配目录：
 
 ```bash
 cd /Volumes/SSD1/ragent
+
+python tools/build_mep_layout.py --model-package bge-m3
 
 set -a
 source .env
 set +a
 
-export RAGENT_MEP_MODEL_DIR=/Volumes/SSD1/ragent/model_packages/bge-m3/modelDir/model
-export RAGENT_MEP_DATA_DIR=/Volumes/SSD1/ragent/model_packages/bge-m3/modelDir/data
-
-python run_mep_local.py \
+python .mep_build/bge-m3/runtime/component/run_mep_local.py \
   --request example/mep_requests/sfs_create_request.json
 ```
 
@@ -671,10 +674,13 @@ python run_mep_local.py \
     package.json
     ragent/
   model/
-    sysconfig.properties
     baai_bge_m3/
   data/
-    <kg snapshot>/
+    config/
+      embedding.properties
+    kg/
+      <kg snapshot>/
+    deps/
   meta/
     ...
 ```
@@ -815,7 +821,7 @@ find /data -maxdepth 3 -type f | head -50
 4. 本地显式 env fallback：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
 5. 源码目录同级 `model/`、`data/` 作为最后兜底
 
-重点不是继续强化 `model_root/model` 这一条，而是先对齐样例暴露出的原生平台路径契约。
+重点不是继续强化 `model_root/model` 这一条，而是先对齐样例暴露出的原生平台路径契约。当前推荐用 `.mep_build/<model-package>/runtime` 做本地仿真，避免把仓库里的模型包源码位置误认为平台运行时位置。
 
 ### 7.2 已补充 `MODEL_SFS` 系列 fallback
 

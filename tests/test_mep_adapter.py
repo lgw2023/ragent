@@ -495,6 +495,30 @@ def test_prepare_runtime_project_layout_keeps_writable_snapshot_outside_mep(
     assert layout.runtime_temp_root is None
 
 
+def test_resolve_single_snapshot_from_data_dir_supports_data_kg_layout(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    snapshot_dir = data_dir / "kg" / "demo_kg"
+    _write_snapshot(snapshot_dir)
+
+    resolved = resolve_single_snapshot_from_data_dir(data_dir)
+
+    assert resolved == snapshot_dir.resolve()
+
+
+def test_resolve_single_snapshot_from_data_dir_supports_relative_env_override(
+    monkeypatch,
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    snapshot_dir = data_dir / "kg" / "demo_kg"
+    _write_snapshot(snapshot_dir)
+    monkeypatch.setenv("RAGENT_MEP_KG_DIR", "kg/demo_kg")
+
+    resolved = resolve_single_snapshot_from_data_dir(data_dir)
+
+    assert resolved == snapshot_dir.resolve()
+
+
 def test_prepare_runtime_project_layout_copies_writable_snapshot_by_default_in_mep(
     monkeypatch,
     tmp_path: Path,
