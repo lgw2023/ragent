@@ -19,6 +19,8 @@
 - `package.json`
 - `ragent/`
 - `example/`
+- `mep/model_packages/`
+- `tools/build_mep_layout.py`
 
 这只是源码组织方式，不等于 MEP 运行时最终目录。
 
@@ -99,9 +101,12 @@ modelDir/
   meta/
     ...
   model/
-    ...
+    <huggingface-model-dir>/
   data/
-    ...
+    config/
+    kg/
+    deps/
+    samples/
 ```
 
 但组件在运行时真正看到的重点不是 `modelDir` 这个名字，而是服务根目录下的平级目录：
@@ -110,7 +115,26 @@ modelDir/
 - `<runtime_root>/data`
 - `<runtime_root>/meta`
 
-因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念。
+`model/` 顶层只放 Hugging Face 模型目录；组件可读取的只读自定义数据放在 `data/`，例如配置、KG 快照、依赖包、样例请求等。因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念。
+
+当前仓库内的模型包源码放在：
+
+```text
+mep/model_packages/bge-m3/modelDir/
+  meta/
+    type.mf
+  model/
+    baai_bge_m3/
+  data/
+    config/
+      embedding.properties
+    kg/
+      sample_kg/
+    deps/
+      README.md
+    samples/
+      sample.json
+```
 
 ## 3. 目录映射约定
 
@@ -209,7 +233,7 @@ EMBEDDING_MODEL_KEY
 
 第二种：本地 vLLM embedding 服务。
 
-如果没有完整外部 embedding 配置，`CustomerModel.load()` 会读取模型目录下的 `sysconfig.properties`，再通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 拉起本地 OpenAI-compatible embedding 服务。
+如果没有完整外部 embedding 配置，`CustomerModel.load()` 会优先读取 `data/config/embedding.properties`，再通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 拉起本地 OpenAI-compatible embedding 服务。旧的 `model/sysconfig.properties` 仍作为兼容兜底，但新模型包不再把组件配置文件放入 `model/`。
 
 当前代码支持的 vLLM 启动候选仍是：
 
@@ -231,6 +255,19 @@ python -m vllm.entrypoints.openai.api_server --model <model_path> ...
 - 后续 ragent 继续使用“组件进程 + 本地 embedding/vLLM 子进程”是合理方向
 
 但具体的初始化超时、端口限制、资源隔离和子进程清理策略仍要通过平台实测确认。
+
+### 5.6 `data/` 自定义依赖
+
+`data/` 被视为模型包随附的只读自定义数据目录。当前组件在导入 ragent 之前会尝试把以下路径加入 Python import path：
+
+```text
+data/deps/pythonpath/
+data/deps/site-packages/
+data/deps/python/
+data/deps/wheelhouse/*.whl
+```
+
+这用于承载目标 vLLM 镜像中没有的轻量 Python 依赖。纯 Python wheel 可以直接放入 `wheelhouse/`；带 native 扩展的依赖应在和目标镜像兼容的环境中预先安装或展开到 `site-packages/`。运行时不会默认向只读 `data/` 写入任何文件。
 
 ## 6. 接口契约
 
@@ -363,23 +400,29 @@ SFS 异步 create：
 
 ### 10.1 当前代码可直接工作的本地调试方式
 
-当前仓库本地调试可使用显式 env override，也可直接传 `model_root`：
+推荐先用装配脚本生成接近 MEP 平台的本地运行时目录：
 
 ```bash
+python /Volumes/SSD1/ragent/tools/build_mep_layout.py --model-package bge-m3
+
 set -a
 source /Volumes/SSD1/ragent/.env
 set +a
-export RAGENT_MEP_DATA_DIR=/Volumes/SSD1/ragent/example/demo_diet_kg
-export RAGENT_MEP_MODEL_DIR=/Volumes/SSD1/ragent/model_packages/bge-m3/modelDir/model
-python /Volumes/SSD1/ragent/run_mep_local.py \
-  --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
 
-python /Volumes/SSD1/ragent/run_mep_local.py \
-  --model-root /Volumes/SSD1/ragent/model_packages/bge-m3/modelDir/model \
+python /Volumes/SSD1/ragent/.mep_build/bge-m3/runtime/component/run_mep_local.py \
   --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
 ```
 
-这些都是本地调试入口；平台运行时仍以平级目录和 SFS env 为优先契约。
+装配脚本默认对 `model/`、`data/`、`meta/` 使用软链，避免复制大模型；如果需要物化目录用于离线包检查，可加 `--materialize`。
+
+兼容调试时仍可使用显式 env override 或直接传 `model_root`：
+
+```bash
+export RAGENT_MEP_MODEL_DIR=/Volumes/SSD1/ragent/mep/model_packages/bge-m3/modelDir/model
+export RAGENT_MEP_DATA_DIR=/Volumes/SSD1/ragent/mep/model_packages/bge-m3/modelDir/data
+python /Volumes/SSD1/ragent/run_mep_local.py \
+  --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
+```
 
 ### 10.2 参照样例的目标容器布局
 
@@ -393,10 +436,13 @@ python /Volumes/SSD1/ragent/run_mep_local.py \
     ragent/
     ...
   model/
-    sysconfig.properties
-    <embedding-model-files>/
+    <huggingface-model-dir>/
   data/
-    <kg snapshot>/
+    config/
+      embedding.properties
+    kg/
+      <kg snapshot>/
+    deps/
   meta/
     ...
 ```
@@ -410,7 +456,7 @@ python /Volumes/SSD1/ragent/run_mep_local.py \
 - 入口 `__file__`、`cwd`、`component/`、`model/`、`data/`、`meta/` 的实际落盘位置
 - 平台是否传入 `model_root`，以及传入值的真实含义
 - `MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_ABSOLUTE_DIR`、`MODEL_RELATIVE_DIR`、`path_appendix` 的原始值和指向关系
-- 模型包 `data/` 是平铺 KG snapshot 还是 `data/<snapshot_name>/`
+- 模型包 `data/` 是否按 `data/kg/<snapshot_name>/` 提供 KG snapshot；如不是，需设置 `RAGENT_MEP_KG_DIR`
 - 目标 vLLM Ascend 镜像是否支持 embedding / pooling runner 和 OpenAI-compatible `/v1/embeddings`
 - 组件内 vLLM 子进程的启动超时、端口、资源隔离和清理限制
 - `{generatePath}` 是否可写，组件自行创建目录是否被允许，写出的 `gen.json` 是否业务方可见
@@ -432,5 +478,6 @@ pytest \
   tests/test_mep_adapter.py \
   tests/test_mep_component_bundle.py \
   tests/test_mep_embedding_runtime.py \
+  tests/test_mep_layout_builder.py \
   tests/test_model_package_bundle.py
 ```

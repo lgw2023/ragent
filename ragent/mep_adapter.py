@@ -555,19 +555,50 @@ def resolve_single_snapshot_from_data_dir(data_dir: str | os.PathLike[str]) -> P
     if not resolved_data_dir.is_dir():
         raise ValueError(f"MEP data path is not a directory: {resolved_data_dir}")
 
+    snapshot_override = os.getenv("RAGENT_MEP_KG_DIR") or os.getenv("RAGENT_MEP_SNAPSHOT_DIR")
+    if snapshot_override:
+        override_path = Path(snapshot_override).expanduser()
+        if not override_path.is_absolute():
+            override_path = (resolved_data_dir / override_path).resolve()
+        else:
+            override_path = override_path.resolve()
+        if not is_ragent_project_snapshot(override_path):
+            raise ValueError(
+                "Configured Ragent knowledge graph snapshot is invalid: "
+                f"{override_path}"
+            )
+        return override_path
+
     if is_ragent_project_snapshot(resolved_data_dir):
         return resolved_data_dir
 
-    candidates = sorted(
+    candidates: list[Path] = []
+    for container in (
+        resolved_data_dir / "kg",
+        resolved_data_dir / "snapshots",
+    ):
+        if is_ragent_project_snapshot(container):
+            candidates.append(container)
+        elif container.is_dir():
+            candidates.extend(
+                child
+                for child in container.iterdir()
+                if child.is_dir() and is_ragent_project_snapshot(child)
+            )
+
+    # Legacy compatibility: older local packages placed the one KG snapshot
+    # directly under data/.
+    candidates.extend(
         child
         for child in resolved_data_dir.iterdir()
         if child.is_dir() and is_ragent_project_snapshot(child)
     )
+    candidates = sorted(set(candidates))
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
         raise ValueError(
-            "No Ragent knowledge graph snapshot found under data/. "
+            "No Ragent knowledge graph snapshot found under data/ or data/kg/. "
             f"Checked: {resolved_data_dir}"
         )
     raise ValueError(

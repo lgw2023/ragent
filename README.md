@@ -47,15 +47,23 @@ MinerU model download instructions, CLI usage, and Python examples.
 
 ## MEP Component
 
-The repository root also serves as a MEP SFS async KG QA inference component.
-The top-level [process.py](process.py), [config.json](config.json), and
-[package.json](package.json) are laid out for MEP packaging. The current
-`scope` is `semtp`; replace it before uploading if the target WiseDevOps
-namespace is different.
+The repository root contains the MEP component source, but it is not treated as
+the final platform runtime layout. Use [tools/build_mep_layout.py](tools/build_mep_layout.py)
+to assemble a local MEP-like runtime under `.mep_build/`:
+
+```bash
+python tools/build_mep_layout.py --model-package bge-m3
+```
+
+The assembled runtime has sibling `component/`, `model/`, `data/`, and `meta/`
+directories, matching the MEP platform view. The current `scope` in
+[package.json](package.json) is `semtp`; replace it before uploading if the
+target WiseDevOps namespace is different.
 
 The component only queries an existing KG snapshot. The model package standard
-is `modelDir/model/` for the embedding model and `sysconfig.properties`, plus
-`modelDir/data/` for one KG snapshot. `action=create` writes
+is `modelDir/model/` for Hugging Face model directories only, plus
+`modelDir/data/` for component-readable read-only data such as embedding config,
+KG snapshots, dependency payloads, and samples. `action=create` writes
 `{generatePath}/gen.json` and returns `recommendResult`; direct local requests
 without `action` still return the result payload in `recommendResult.content`.
 
