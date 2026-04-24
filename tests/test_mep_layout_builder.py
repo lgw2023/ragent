@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tarfile
 import zipfile
 from pathlib import Path
@@ -94,6 +95,45 @@ def test_build_mep_layout_materializes_and_archives_zip(tmp_path: Path):
     assert "meta/type.mf" in names
 
 
+def test_build_mep_layout_materialize_dereferences_source_symlinks(tmp_path: Path):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symlink is not available on this platform")
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    output = tmp_path / "runtime"
+
+    external_config = tmp_path / "external_config.json"
+    external_config.write_text('{"source": "external"}\n', encoding="utf-8")
+    model_config = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "demo"
+        / "modelDir"
+        / "model"
+        / "hf_model"
+        / "config.json"
+    )
+    model_config.unlink()
+    try:
+        model_config.symlink_to(external_config)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is not available: {exc}")
+
+    build_mep_layout(
+        repo_root=repo_root,
+        model_package="demo",
+        output=output,
+        materialize=True,
+    )
+
+    materialized_config = output / "model" / "hf_model" / "config.json"
+    assert not materialized_config.is_symlink()
+    assert materialized_config.read_text(encoding="utf-8") == '{"source": "external"}\n'
+
+
 @pytest.mark.parametrize(
     ("archive_format", "archive_name", "expected_result_format"),
     [
@@ -164,4 +204,41 @@ def test_build_mep_layout_rejects_archive_output_inside_runtime_root(tmp_path: P
             materialize=True,
             archive_format="zip",
             archive_output=output / "runtime.zip",
+        )
+
+
+def test_build_mep_layout_rejects_archive_output_existing_directory(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    archive_output = tmp_path / "existing_dir"
+    archive_output.mkdir()
+    marker = archive_output / "marker.txt"
+    marker.write_text("keep\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="file path, not a directory"):
+        build_mep_layout(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "runtime",
+            materialize=True,
+            archive_format="zip",
+            archive_output=archive_output,
+        )
+
+    assert marker.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_build_mep_layout_rejects_model_root_top_level_files(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    model_root = repo_root / "mep" / "model_packages" / "demo" / "modelDir" / "model"
+    (model_root / "sysconfig.properties").write_text("legacy=true\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="top level must contain only"):
+        build_mep_layout(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "runtime",
         )

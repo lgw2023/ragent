@@ -417,7 +417,7 @@ python /Volumes/SSD1/ragent/.mep_build/bge-m3/runtime/component/run_mep_local.py
   --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
 ```
 
-装配脚本默认对 `model/`、`data/`、`meta/` 使用软链，避免复制大模型；如果需要物化目录用于离线包检查，可加 `--materialize`。
+装配脚本默认对 `model/`、`data/`、`meta/` 使用软链，避免复制大模型；如果需要物化目录用于离线包检查，可加 `--materialize`。物化模式会解引用源目录内部的软链，生成自包含的本地运行时目录。
 
 如果需要生成本地交付归档，可以在物化模式下追加 archive 参数：
 
@@ -430,7 +430,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
 
 支持的归档格式为 `zip`、`tar`、`tar.gz`/`tgz`。归档内容的第一层就是 `component/`、`model/`、`data/`、`meta/`，不会额外套一层 `runtime/`。
 
-如果显式指定 `--archive-output`，输出路径必须位于 runtime 根目录之外；装配脚本会拒绝把归档写到 runtime 内部，避免归档过程中把自身也打入包中。
+如果显式指定 `--archive-output`，输出路径必须位于 runtime 根目录之外，并且必须是文件路径而不是已有目录；装配脚本会拒绝把归档写到 runtime 内部，避免归档过程中把自身也打入包中。装配脚本还会拒绝 `model/` 顶层出现非目录项，防止把组件配置重新放回模型目录。
 
 兼容调试时仍可使用显式 env override 或直接传 `model_root`：
 

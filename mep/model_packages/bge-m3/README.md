@@ -36,7 +36,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
   --archive-format zip
 ```
 
-`--archive-output` 可用于指定归档位置，但路径必须位于生成的 runtime 根目录之外，避免归档文件被再次打入归档。
+`--archive-output` 可用于指定归档位置，但路径必须位于生成的 runtime 根目录之外，并且必须是文件路径而不是已有目录，避免归档文件被再次打入归档。物化模式会解引用源目录内部软链，使本地归档内容自包含。
 
 也可以继续使用显式环境变量做局部调试：
 

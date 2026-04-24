@@ -1,0 +1,290 @@
+from __future__ import annotations
+
+import shutil
+import zipfile
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+
+from tools.build_mep_upload_packages import build_mep_upload_packages
+
+
+def _write_fake_repo(repo_root: Path) -> None:
+    files = {
+        "config.json": '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        "package.json": (
+            '{"scope": "demo", "version": "1", "type": "aiexplore", '
+            '"name": "ragent_inference_mep"}\n'
+        ),
+        "process.py": "class CustomerModel:\n    pass\n",
+        "init.py": "# init\n",
+        "mep_dependency_bootstrap.py": "# bootstrap\n",
+        "pyproject.toml": "[project]\nname = \"ragent\"\n",
+        "setup.py": "from setuptools import setup\nsetup()\n",
+        "run_mep_local.py": "# local runner\n",
+    }
+    for filename, contents in files.items():
+        (repo_root / filename).write_text(contents, encoding="utf-8")
+
+    (repo_root / "ragent").mkdir()
+    (repo_root / "ragent" / "__init__.py").write_text("", encoding="utf-8")
+
+    for excluded_dir in (
+        "tests",
+        "example",
+        "benchmark",
+        "vendor",
+        "presentation",
+        "MEP_platform_rule",
+        ".venv",
+        ".git",
+    ):
+        path = repo_root / excluded_dir
+        path.mkdir()
+        (path / "marker.txt").write_text("exclude\n", encoding="utf-8")
+
+    model_dir = repo_root / "mep" / "model_packages" / "demo" / "modelDir"
+    (model_dir / "model" / "hf_model").mkdir(parents=True)
+    (model_dir / "model" / "hf_model" / "config.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    (model_dir / "data" / "config").mkdir(parents=True)
+    (model_dir / "data" / "config" / "embedding.properties").write_text(
+        "model.relative_path=hf_model\n",
+        encoding="utf-8",
+    )
+    (model_dir / "meta").mkdir()
+    (model_dir / "meta" / "type.mf").write_text("model\n", encoding="utf-8")
+
+
+def test_build_mep_upload_packages_creates_upload_directories(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    output = tmp_path / "upload"
+
+    result = build_mep_upload_packages(
+        repo_root=repo_root,
+        model_package="demo",
+        output=output,
+    )
+
+    component_dir = output / "component_package"
+    model_package_dir = output / "model_package"
+    assert Path(result["component_package_dir"]) == component_dir.resolve()
+    assert Path(result["model_package_dir"]) == model_package_dir.resolve()
+
+    for filename in (
+        "config.json",
+        "package.json",
+        "process.py",
+        "init.py",
+        "mep_dependency_bootstrap.py",
+        "pyproject.toml",
+        "setup.py",
+    ):
+        assert (component_dir / filename).is_file()
+    assert (component_dir / "ragent" / "__init__.py").is_file()
+    assert not (component_dir / "run_mep_local.py").exists()
+
+    for excluded_dir in (
+        "tests",
+        "example",
+        "benchmark",
+        "vendor",
+        "presentation",
+        "MEP_platform_rule",
+        ".venv",
+        ".git",
+    ):
+        assert not (component_dir / excluded_dir).exists()
+
+    assert [path.name for path in model_package_dir.iterdir()] == ["modelDir"]
+    assert (model_package_dir / "modelDir" / "model" / "hf_model").is_dir()
+    assert (model_package_dir / "modelDir" / "data" / "config").is_dir()
+    assert (model_package_dir / "modelDir" / "meta" / "type.mf").is_file()
+    assert not (model_package_dir / "modelDir" / "model").is_symlink()
+
+
+def test_build_mep_upload_packages_can_include_local_runner(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+
+    build_mep_upload_packages(
+        repo_root=repo_root,
+        model_package="demo",
+        output=tmp_path / "upload",
+        include_local_runner=True,
+    )
+
+    assert (tmp_path / "upload" / "component_package" / "run_mep_local.py").is_file()
+
+
+def test_build_mep_upload_packages_filters_generated_files(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+
+    (repo_root / "ragent" / "__pycache__").mkdir()
+    (repo_root / "ragent" / "__pycache__" / "module.pyc").write_bytes(b"cached")
+    (repo_root / "ragent" / ".DS_Store").write_text("finder\n", encoding="utf-8")
+    (repo_root / "ragent" / ".pytest_cache").mkdir()
+    (repo_root / "ragent" / ".pytest_cache" / "cache.txt").write_text(
+        "cache\n",
+        encoding="utf-8",
+    )
+    model_root = repo_root / "mep" / "model_packages" / "demo" / "modelDir"
+    (model_root / "data" / ".DS_Store").write_text("finder\n", encoding="utf-8")
+    (model_root / "model" / "hf_model" / "__pycache__").mkdir()
+    (model_root / "model" / "hf_model" / "__pycache__" / "x.pyc").write_bytes(
+        b"cached"
+    )
+    (model_root / "model" / "hf_model" / "x.pyo").write_bytes(b"optimized")
+
+    build_mep_upload_packages(
+        repo_root=repo_root,
+        model_package="demo",
+        output=tmp_path / "upload",
+    )
+
+    output = tmp_path / "upload"
+    assert not (output / "component_package" / "ragent" / "__pycache__").exists()
+    assert not (output / "component_package" / "ragent" / ".DS_Store").exists()
+    assert not (output / "component_package" / "ragent" / ".pytest_cache").exists()
+    assert not (output / "model_package" / "modelDir" / "data" / ".DS_Store").exists()
+    assert not (
+        output
+        / "model_package"
+        / "modelDir"
+        / "model"
+        / "hf_model"
+        / "__pycache__"
+    ).exists()
+    assert not (
+        output / "model_package" / "modelDir" / "model" / "hf_model" / "x.pyo"
+    ).exists()
+
+
+def test_build_mep_upload_packages_rejects_missing_component_file(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    (repo_root / "process.py").unlink()
+
+    with pytest.raises(FileNotFoundError, match="process.py"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "upload",
+        )
+
+
+@pytest.mark.parametrize("missing_dir", ["model", "data", "meta"])
+def test_build_mep_upload_packages_rejects_missing_model_dir(
+    tmp_path: Path,
+    missing_dir: str,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    model_dir = repo_root / "mep" / "model_packages" / "demo" / "modelDir"
+    shutil.rmtree(model_dir / missing_dir)
+
+    with pytest.raises(FileNotFoundError, match=f"modelDir/{missing_dir}/"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "upload",
+        )
+
+
+def test_build_mep_upload_packages_rejects_model_root_top_level_files(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    model_root = repo_root / "mep" / "model_packages" / "demo" / "modelDir" / "model"
+    (model_root / "sysconfig.properties").write_text("legacy=true\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="top level must contain only"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "upload",
+        )
+
+
+@pytest.mark.parametrize(
+    ("output_factory", "expected_match"),
+    [
+        (lambda repo_root: repo_root, "repository root"),
+        (lambda repo_root: repo_root.parent, "repository parent"),
+        (lambda repo_root: repo_root / "mep", "contain the source model package"),
+        (
+            lambda repo_root: repo_root
+            / "mep"
+            / "model_packages"
+            / "demo"
+            / "nested",
+            "inside the source model package",
+        ),
+    ],
+)
+def test_build_mep_upload_packages_rejects_dangerous_output(
+    tmp_path: Path,
+    output_factory: Callable[[Path], Path],
+    expected_match: str,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    marker = repo_root / "config.json"
+    original_config = marker.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match=expected_match):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=output_factory(repo_root),
+        )
+
+    assert marker.read_text(encoding="utf-8") == original_config
+
+
+def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+
+    result = build_mep_upload_packages(
+        repo_root=repo_root,
+        model_package="demo",
+        output=tmp_path / "upload",
+        archive_format="zip",
+    )
+
+    assert result["archive_format"] == "zip"
+    component_archive = Path(result["component_archive_path"])
+    model_archive = Path(result["model_archive_path"])
+    assert component_archive.name == "ragent_inference_mep-component.zip"
+    assert model_archive.name == "demo-model.zip"
+
+    with zipfile.ZipFile(component_archive) as zf:
+        component_names = set(zf.namelist())
+    assert "config.json" in component_names
+    assert "process.py" in component_names
+    assert "mep_dependency_bootstrap.py" in component_names
+    assert "ragent/__init__.py" in component_names
+    assert not any(name.startswith("component_package/") for name in component_names)
+
+    with zipfile.ZipFile(model_archive) as zf:
+        model_names = set(zf.namelist())
+    assert "modelDir/" in model_names
+    assert "modelDir/model/hf_model/config.json" in model_names
+    assert "modelDir/data/config/embedding.properties" in model_names
+    assert "modelDir/meta/type.mf" in model_names
+    assert not any(name.startswith("model_package/") for name in model_names)
