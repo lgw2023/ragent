@@ -659,6 +659,8 @@ python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-
 
 如需指定 `--archive-output`，输出路径必须位于 `.mep_build/<model-package>/runtime/` 之外，避免归档过程把自身也写进交付包。
 
+物化模式会解引用 `model/`、`data/`、`meta/` 源目录内部的软链，以便本地归档内容自包含。`--archive-output` 必须是文件路径而不是已有目录；装配脚本也会拒绝 `model/` 顶层非目录项，避免把旧式组件配置重新打进模型目录。
+
 验证点：
 
 - `CustomerModel.load()` 成功

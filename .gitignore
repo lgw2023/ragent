@@ -16,6 +16,7 @@ requirements.txt.bak
 # Offline runtime artifacts
 .runtime/
 .mep_build/
+.mep_upload/
 vendor/mineru-models/
 vendor/modelscope/
 vendor/wheelhouse/

@@ -75,7 +75,7 @@ def _link_or_copy(source: Path, target: Path, *, materialize: bool) -> None:
     if target.exists() or target.is_symlink():
         _reset_path(target)
     if materialize:
-        shutil.copytree(source, target, ignore=_ignore_generated, symlinks=True)
+        shutil.copytree(source, target, ignore=_ignore_generated, symlinks=False)
         return
     target.symlink_to(source, target_is_directory=True)
 
@@ -120,7 +120,39 @@ def _resolve_archive_output_path(
             "Archive output must be outside the runtime root to avoid archiving itself: "
             f"{archive_path}"
         )
+    if archive_path.exists() and archive_path.is_dir() and not archive_path.is_symlink():
+        raise ValueError(
+            f"Archive output must be a file path, not a directory: {archive_path}"
+        )
     return archive_path
+
+
+def _visible_model_root_children(model_root: Path) -> list[Path]:
+    return sorted(
+        (
+            child
+            for child in model_root.iterdir()
+            if not child.name.startswith(".") and child.name not in IGNORE_NAMES
+        ),
+        key=lambda item: item.name,
+    )
+
+
+def _validate_model_root(model_root: Path) -> None:
+    children = _visible_model_root_children(model_root)
+    if not children:
+        raise FileNotFoundError(
+            "MEP model/ must contain at least one Hugging Face model directory: "
+            f"{model_root}"
+        )
+
+    invalid_children = [child for child in children if not child.is_dir()]
+    if invalid_children:
+        invalid_text = ", ".join(str(child) for child in invalid_children)
+        raise ValueError(
+            "MEP model/ top level must contain only Hugging Face model directories; "
+            f"found non-directory entries: {invalid_text}"
+        )
 
 
 def _archive_members(root: Path) -> list[Path]:
@@ -213,6 +245,7 @@ def build_mep_layout(
     for name, source in required_dirs.items():
         if not source.is_dir():
             raise FileNotFoundError(f"MEP {name}/ directory not found: {source}")
+    _validate_model_root(required_dirs["model"])
 
     if output.exists() or output.is_symlink():
         _reset_path(output)
