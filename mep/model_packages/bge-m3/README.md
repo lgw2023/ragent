@@ -27,6 +27,15 @@ python /Volumes/SSD1/ragent/.mep_build/bge-m3/runtime/component/run_mep_local.py
   --request /Volumes/SSD1/ragent/example/mep_requests/onehop_request.json
 ```
 
+如需生成本地归档用于检查或交付，可使用物化模式：
+
+```bash
+python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
+  --model-package bge-m3 \
+  --materialize \
+  --archive-format zip
+```
+
 也可以继续使用显式环境变量做局部调试：
 
 ```bash

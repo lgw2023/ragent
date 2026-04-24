@@ -269,6 +269,8 @@ data/deps/wheelhouse/*.whl
 
 这用于承载目标 vLLM 镜像中没有的轻量 Python 依赖。纯 Python wheel 可以直接放入 `wheelhouse/`；带 native 扩展的依赖应在和目标镜像兼容的环境中预先安装或展开到 `site-packages/`。运行时不会默认向只读 `data/` 写入任何文件。
 
+这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 只负责在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `data/deps` 中的依赖影响后续导入。
+
 ## 6. 接口契约
 
 当前 ragent 顶层返回约定仍保持：
@@ -414,6 +416,17 @@ python /Volumes/SSD1/ragent/.mep_build/bge-m3/runtime/component/run_mep_local.py
 ```
 
 装配脚本默认对 `model/`、`data/`、`meta/` 使用软链，避免复制大模型；如果需要物化目录用于离线包检查，可加 `--materialize`。
+
+如果需要生成本地交付归档，可以在物化模式下追加 archive 参数：
+
+```bash
+python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
+  --model-package bge-m3 \
+  --materialize \
+  --archive-format zip
+```
+
+支持的归档格式为 `zip`、`tar`、`tar.gz`/`tgz`。归档内容的第一层就是 `component/`、`model/`、`data/`、`meta/`，不会额外套一层 `runtime/`。
 
 兼容调试时仍可使用显式 env override 或直接传 `model_root`：
 

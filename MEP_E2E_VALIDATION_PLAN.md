@@ -651,6 +651,12 @@ python .mep_build/bge-m3/runtime/component/run_mep_local.py \
   --request example/mep_requests/sfs_create_request.json
 ```
 
+如需检查物化后的本地交付内容，可使用：
+
+```bash
+python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-format zip
+```
+
 验证点：
 
 - `CustomerModel.load()` 成功
