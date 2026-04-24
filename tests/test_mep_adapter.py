@@ -28,6 +28,24 @@ def _write_snapshot(snapshot_dir: Path) -> None:
         (snapshot_dir / filename).write_text("{}", encoding="utf-8")
 
 
+def _write_component_entry(component_dir: Path, relative_process_path: str = "process.py") -> Path:
+    component_dir.mkdir(parents=True, exist_ok=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    process_file = component_dir / relative_process_path
+    process_file.parent.mkdir(parents=True, exist_ok=True)
+    process_file.write_text("# entry\n", encoding="utf-8")
+    return process_file
+
+
+def _write_runtime_bundle_dirs(runtime_root: Path) -> None:
+    (runtime_root / "model").mkdir(parents=True, exist_ok=True)
+    (runtime_root / "data").mkdir(parents=True, exist_ok=True)
+    (runtime_root / "meta").mkdir(parents=True, exist_ok=True)
+
+
 def test_normalize_mep_request_chat_history_passthrough(tmp_path: Path):
     req_data = {
         "data": {
@@ -247,25 +265,211 @@ def test_resolve_component_bundle_paths_prefers_model_dir_layout(tmp_path: Path)
     process_file.write_text("# entry\n", encoding="utf-8")
     (tmp_path / "data").mkdir()
     (tmp_path / "model").mkdir()
+    (tmp_path / "meta").mkdir()
 
     paths = resolve_component_bundle_paths(process_file)
 
     assert paths.data_dir == (tmp_path / "data").resolve()
     assert paths.model_dir == (tmp_path / "model").resolve()
+    assert paths.meta_dir == (tmp_path / "meta").resolve()
 
 
 def test_resolve_component_bundle_paths_falls_back_to_parent_layout(tmp_path: Path):
-    component_dir = tmp_path / "component"
-    component_dir.mkdir()
-    process_file = component_dir / "process.py"
-    process_file.write_text("# entry\n", encoding="utf-8")
-    (tmp_path / "data").mkdir()
-    (tmp_path / "model").mkdir()
+    process_file = _write_component_entry(tmp_path / "component")
+    _write_runtime_bundle_dirs(tmp_path)
 
     paths = resolve_component_bundle_paths(process_file)
 
     assert paths.data_dir == (tmp_path / "data").resolve()
     assert paths.model_dir == (tmp_path / "model").resolve()
+    assert paths.meta_dir == (tmp_path / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_prefers_runtime_sibling_layout_over_model_root_and_local_env(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    process_file = _write_component_entry(runtime_root / "component")
+    _write_runtime_bundle_dirs(runtime_root)
+
+    override_root = tmp_path / "override"
+    (override_root / "data").mkdir(parents=True)
+    (override_root / "model").mkdir()
+    (override_root / "meta").mkdir()
+    monkeypatch.setenv("RAGENT_MEP_DATA_DIR", str(override_root / "data"))
+    monkeypatch.setenv("RAGENT_MEP_MODEL_DIR", str(override_root / "model"))
+
+    model_root = tmp_path / "model_root_runtime"
+    (model_root / "data").mkdir(parents=True)
+    (model_root / "model").mkdir()
+    (model_root / "meta").mkdir()
+
+    paths = resolve_component_bundle_paths(process_file, model_root=model_root)
+
+    assert paths.data_dir == (runtime_root / "data").resolve()
+    assert paths.model_dir == (runtime_root / "model").resolve()
+    assert paths.meta_dir == (runtime_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_does_not_treat_source_tree_parent_as_runtime_root(
+    tmp_path: Path,
+):
+    source_root = tmp_path / "repo"
+    source_root.mkdir()
+    process_file = source_root / "process.py"
+    process_file.write_text("# entry\n", encoding="utf-8")
+
+    misleading_parent_model = tmp_path / "model"
+    misleading_parent_data = tmp_path / "data"
+    misleading_parent_meta = tmp_path / "meta"
+    misleading_parent_model.mkdir()
+    misleading_parent_data.mkdir()
+    misleading_parent_meta.mkdir()
+
+    runtime_root = tmp_path / "runtime_root"
+    (runtime_root / "model").mkdir(parents=True)
+    (runtime_root / "data").mkdir()
+    (runtime_root / "meta").mkdir()
+
+    paths = resolve_component_bundle_paths(process_file, model_root=runtime_root)
+
+    assert paths.model_dir == (runtime_root / "model").resolve()
+    assert paths.data_dir == (runtime_root / "data").resolve()
+    assert paths.meta_dir == (runtime_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_ignores_unrelated_component_ancestor(
+    tmp_path: Path,
+):
+    unrelated_component_parent = tmp_path / "component"
+    source_root = unrelated_component_parent / "repo"
+    source_root.mkdir(parents=True)
+    process_file = source_root / "process.py"
+    process_file.write_text("# entry\n", encoding="utf-8")
+
+    _write_runtime_bundle_dirs(unrelated_component_parent.parent)
+
+    runtime_root = tmp_path / "runtime_root"
+    _write_runtime_bundle_dirs(runtime_root)
+
+    paths = resolve_component_bundle_paths(process_file, model_root=runtime_root)
+
+    assert paths.model_dir == (runtime_root / "model").resolve()
+    assert paths.data_dir == (runtime_root / "data").resolve()
+    assert paths.meta_dir == (runtime_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_supports_nested_entry_under_component(
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime_root"
+    process_file = _write_component_entry(
+        runtime_root / "component",
+        "pkg/process.py",
+    )
+    _write_runtime_bundle_dirs(runtime_root)
+
+    paths = resolve_component_bundle_paths(process_file)
+
+    assert paths.model_dir == (runtime_root / "model").resolve()
+    assert paths.data_dir == (runtime_root / "data").resolve()
+    assert paths.meta_dir == (runtime_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_supports_sfs_relative_layout(
+    monkeypatch,
+    tmp_path: Path,
+):
+    process_file = _write_component_entry(tmp_path / "component")
+
+    sfs_base = tmp_path / "sfs"
+    object_root = sfs_base / "object-123"
+    (object_root / "model").mkdir(parents=True)
+    (object_root / "data").mkdir()
+    (object_root / "meta").mkdir()
+
+    monkeypatch.setenv("MODEL_SFS", json.dumps({"sfsBasePath": str(sfs_base)}))
+    monkeypatch.setenv("MODEL_OBJECT_ID", "object-123")
+    monkeypatch.setenv("MODEL_RELATIVE_DIR", "model")
+
+    paths = resolve_component_bundle_paths(process_file)
+
+    assert paths.model_dir == (object_root / "model").resolve()
+    assert paths.data_dir == (object_root / "data").resolve()
+    assert paths.meta_dir == (object_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_supports_model_absolute_dir(
+    monkeypatch,
+    tmp_path: Path,
+):
+    process_file = _write_component_entry(tmp_path / "component")
+
+    sfs_base = tmp_path / "sfs"
+    object_root = sfs_base / "object-123"
+    absolute_model_dir = tmp_path / "mounted_model"
+    absolute_model_dir.mkdir()
+    (object_root / "data").mkdir(parents=True)
+    (object_root / "meta").mkdir()
+
+    monkeypatch.setenv("MODEL_SFS", json.dumps({"sfsBasePath": str(sfs_base)}))
+    monkeypatch.setenv("MODEL_OBJECT_ID", "object-123")
+    monkeypatch.setenv("MODEL_ABSOLUTE_DIR", str(absolute_model_dir))
+
+    paths = resolve_component_bundle_paths(process_file)
+
+    assert paths.model_dir == absolute_model_dir.resolve()
+    assert paths.data_dir == (object_root / "data").resolve()
+    assert paths.meta_dir == (object_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_infers_data_from_model_absolute_dir_without_sfs(
+    monkeypatch,
+    tmp_path: Path,
+):
+    process_file = _write_component_entry(tmp_path / "component")
+
+    runtime_root = tmp_path / "runtime_root"
+    model_dir = runtime_root / "model"
+    model_dir.mkdir(parents=True)
+    (model_dir / "sysconfig.properties").write_text("", encoding="utf-8")
+    (runtime_root / "data").mkdir()
+    (runtime_root / "meta").mkdir()
+
+    monkeypatch.setenv("MODEL_ABSOLUTE_DIR", str(model_dir))
+
+    paths = resolve_component_bundle_paths(process_file)
+
+    assert paths.model_dir == model_dir.resolve()
+    assert paths.data_dir == (runtime_root / "data").resolve()
+    assert paths.meta_dir == (runtime_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_supports_model_root_runtime_root(tmp_path: Path):
+    process_file = _write_component_entry(tmp_path / "component")
+    runtime_root = tmp_path / "runtime_root"
+    _write_runtime_bundle_dirs(runtime_root)
+
+    paths = resolve_component_bundle_paths(process_file, model_root=runtime_root)
+
+    assert paths.model_dir == (runtime_root / "model").resolve()
+    assert paths.data_dir == (runtime_root / "data").resolve()
+    assert paths.meta_dir == (runtime_root / "meta").resolve()
+
+
+def test_resolve_component_bundle_paths_supports_model_root_model_dir(tmp_path: Path):
+    process_file = _write_component_entry(tmp_path / "component")
+    runtime_root = tmp_path / "runtime_root"
+    model_dir = runtime_root / "model"
+    _write_runtime_bundle_dirs(runtime_root)
+    (model_dir / "sysconfig.properties").write_text("", encoding="utf-8")
+
+    paths = resolve_component_bundle_paths(process_file, model_root=model_dir)
+
+    assert paths.model_dir == model_dir.resolve()
+    assert paths.data_dir == (runtime_root / "data").resolve()
+    assert paths.meta_dir == (runtime_root / "meta").resolve()
 
 
 def test_prepare_runtime_project_layout_keeps_writable_snapshot_outside_mep(
