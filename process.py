@@ -17,6 +17,7 @@ bootstrap_runtime_environment(explicit_runtime_env="mep", repo_root=_CODE_ROOT)
 
 from ragent.mep_adapter import (  # noqa: E402
     AsyncLoopThread,
+    ComponentBundlePaths,
     InferenceRuntimeSession,
     build_action_query_response,
     build_recommend_error,
@@ -52,13 +53,58 @@ class CustomerModel:
         self._gpu_id = gpu_id
         self._model_root = Path(model_root).expanduser().resolve() if model_root else None
         self._loop_runner = AsyncLoopThread()
+        self._bundle_paths: ComponentBundlePaths | None = None
         self._runtime_session: InferenceRuntimeSession | None = None
         self._runtime_layout = None
         self._embedding_runtime: LocalEmbeddingRuntime | None = None
         self._closed = False
 
+    @staticmethod
+    def _diagnostic_env_value(name: str, *, max_length: int = 256) -> str | None:
+        raw_value = os.getenv(name)
+        if raw_value is None:
+            return None
+        value = raw_value.strip()
+        if len(value) <= max_length:
+            return value
+        return value[:max_length] + "...(truncated)"
+
+    def _log_bundle_path_resolution(self, bundle_paths: ComponentBundlePaths) -> None:
+        logger.debug(
+            "Resolving MEP bundle paths. process_file=%s cwd=%s gpu_id=%s model_root=%s "
+            "MODEL_SFS=%s MODEL_OBJECT_ID=%s MODEL_RELATIVE_DIR=%s MODEL_ABSOLUTE_DIR=%s "
+            "path_appendix=%s RAGENT_MEP_MODEL_DIR=%s RAGENT_MEP_DATA_DIR=%s",
+            __file__,
+            Path.cwd(),
+            self._gpu_id,
+            self._model_root,
+            self._diagnostic_env_value("MODEL_SFS"),
+            self._diagnostic_env_value("MODEL_OBJECT_ID"),
+            self._diagnostic_env_value("MODEL_RELATIVE_DIR"),
+            self._diagnostic_env_value("MODEL_ABSOLUTE_DIR"),
+            self._diagnostic_env_value("path_appendix"),
+            self._diagnostic_env_value("RAGENT_MEP_MODEL_DIR"),
+            self._diagnostic_env_value("RAGENT_MEP_DATA_DIR"),
+        )
+        logger.info(
+            "Resolved MEP bundle paths. model_dir=%s source=%s exists=%s; "
+            "data_dir=%s source=%s exists=%s; meta_dir=%s source=%s exists=%s",
+            bundle_paths.model_dir,
+            bundle_paths.model_source,
+            bundle_paths.model_dir.exists(),
+            bundle_paths.data_dir,
+            bundle_paths.data_source,
+            bundle_paths.data_dir.exists(),
+            bundle_paths.meta_dir,
+            bundle_paths.meta_source,
+            bundle_paths.meta_dir.exists(),
+        )
+        for note in bundle_paths.diagnostics:
+            logger.debug("MEP path diagnostic: %s", note)
+
     def _release_runtime_resources(self) -> None:
         runtime_session = self._runtime_session
+        self._bundle_paths = None
         runtime_layout = self._runtime_layout
         embedding_runtime = self._embedding_runtime
         self._runtime_session = None
@@ -79,13 +125,10 @@ class CustomerModel:
 
         bundle_paths = resolve_component_bundle_paths(
             __file__,
-            data_dir_override=(
-                self._model_root / "data" if self._model_root is not None else None
-            ),
-            model_dir_override=(
-                self._model_root / "model" if self._model_root is not None else None
-            ),
+            model_root=self._model_root,
         )
+        self._bundle_paths = bundle_paths
+        self._log_bundle_path_resolution(bundle_paths)
         embedding_runtime: LocalEmbeddingRuntime | None = None
         runtime_layout = None
         runtime_session = None
@@ -112,7 +155,8 @@ class CustomerModel:
         self._embedding_runtime = embedding_runtime
         logger.info(
             "MEP runtime loaded. "
-            "data_dir=%s source_project_dir=%s runtime_project_dir=%s copied=%s",
+            "model_dir=%s data_dir=%s source_project_dir=%s runtime_project_dir=%s copied=%s",
+            bundle_paths.model_dir,
             runtime_layout.data_dir,
             runtime_layout.source_project_dir,
             runtime_layout.runtime_project_dir,

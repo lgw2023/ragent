@@ -37,6 +37,11 @@ class ComponentBundlePaths:
     parent_dir: Path
     data_dir: Path
     model_dir: Path
+    meta_dir: Path
+    data_source: str
+    model_source: str
+    meta_source: str
+    diagnostics: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -264,12 +269,121 @@ def get_mep_action(req_data: Any) -> str | None:
     return _normalize_action(data)
 
 
-def _default_bundle_resource_dir(current_dir: Path, parent_dir: Path, name: str) -> Path:
-    current_candidate = current_dir / name
-    parent_candidate = parent_dir / name
-    if current_candidate.exists() or not parent_candidate.exists():
-        return current_candidate
-    return parent_candidate
+def _resolve_env_path(value: str | os.PathLike[str] | None) -> Path | None:
+    if value in (None, ""):
+        return None
+    return Path(value).expanduser().resolve()
+
+
+def _parse_model_sfs_object_root() -> tuple[Path | None, tuple[str, ...]]:
+    diagnostics: list[str] = []
+    raw_model_sfs = (os.getenv("MODEL_SFS") or "").strip()
+    model_object_id = (os.getenv("MODEL_OBJECT_ID") or "").strip()
+    if not raw_model_sfs:
+        diagnostics.append("MODEL_SFS is not set")
+        return None, tuple(diagnostics)
+    if not model_object_id:
+        diagnostics.append("MODEL_OBJECT_ID is not set")
+        return None, tuple(diagnostics)
+
+    payload = _maybe_json_loads(raw_model_sfs)
+    if not isinstance(payload, dict):
+        diagnostics.append("MODEL_SFS is not valid JSON")
+        return None, tuple(diagnostics)
+
+    sfs_base_path = payload.get("sfsBasePath")
+    if not isinstance(sfs_base_path, str) or not sfs_base_path.strip():
+        diagnostics.append("MODEL_SFS.sfsBasePath is missing")
+        return None, tuple(diagnostics)
+
+    object_root = (Path(sfs_base_path).expanduser() / model_object_id).resolve()
+    diagnostics.append(f"SFS object root candidate={object_root}")
+    return object_root, tuple(diagnostics)
+
+
+def _looks_like_model_bundle_dir(candidate: Path) -> bool:
+    return candidate.name == "model" or (candidate / "sysconfig.properties").exists()
+
+
+def _build_runtime_root_candidates(runtime_root: Path) -> dict[str, Path]:
+    resolved_runtime_root = runtime_root.expanduser().resolve()
+    return {
+        "model": resolved_runtime_root / "model",
+        "data": resolved_runtime_root / "data",
+        "meta": resolved_runtime_root / "meta",
+    }
+
+
+def _resolve_runtime_root_from_model_path(model_path: Path) -> Path | None:
+    resolved_model_path = model_path.expanduser().resolve()
+    if _looks_like_model_bundle_dir(resolved_model_path):
+        return resolved_model_path.parent
+    parent_dir = resolved_model_path.parent
+    if _looks_like_model_bundle_dir(parent_dir):
+        return parent_dir.parent
+    return None
+
+
+def _build_model_root_candidates(model_root: Path) -> dict[str, Path]:
+    resolved_model_root = model_root.expanduser().resolve()
+    if _looks_like_model_bundle_dir(resolved_model_root):
+        candidates = _build_runtime_root_candidates(resolved_model_root.parent)
+        candidates["model"] = resolved_model_root
+        return candidates
+    return _build_runtime_root_candidates(resolved_model_root)
+
+
+def _is_component_package_dir(candidate: Path) -> bool:
+    return candidate.name == "component" and (candidate / "config.json").is_file()
+
+
+def _resolve_component_runtime_root(current_dir: Path) -> Path | None:
+    resolved_current_dir = current_dir.expanduser().resolve()
+    for candidate in (resolved_current_dir, *resolved_current_dir.parents):
+        if _is_component_package_dir(candidate):
+            return candidate.parent.resolve()
+    return None
+
+
+def _select_component_bundle_path(
+    name: str,
+    candidates: list[tuple[str, Path | None]],
+) -> tuple[Path, str, tuple[str, ...]]:
+    diagnostics: list[str] = []
+    first_candidate: tuple[str, Path] | None = None
+    seen_paths: set[Path] = set()
+
+    for source, raw_path in candidates:
+        resolved_path = _resolve_env_path(raw_path)
+        if resolved_path is None:
+            continue
+        if resolved_path in seen_paths:
+            continue
+        seen_paths.add(resolved_path)
+
+        exists = resolved_path.exists()
+        diagnostics.append(
+            f"{name} candidate source={source} path={resolved_path} exists={exists}"
+        )
+        if first_candidate is None:
+            first_candidate = (source, resolved_path)
+        if exists:
+            diagnostics.append(
+                f"{name} selected source={source} path={resolved_path}"
+            )
+            return resolved_path, source, tuple(diagnostics)
+
+    if first_candidate is None:
+        raise RuntimeError(f"No candidate paths configured for {name}")
+
+    diagnostics.append(
+        f"{name} selected fallback source={first_candidate[0]} path={first_candidate[1]}"
+    )
+    return (
+        first_candidate[1],
+        f"{first_candidate[0]} (missing)",
+        tuple(diagnostics),
+    )
 
 
 def resolve_component_bundle_paths(
@@ -277,24 +391,153 @@ def resolve_component_bundle_paths(
     *,
     data_dir_override: str | os.PathLike[str] | None = None,
     model_dir_override: str | os.PathLike[str] | None = None,
+    model_root: str | os.PathLike[str] | None = None,
 ) -> ComponentBundlePaths:
     current_dir = Path(process_file).expanduser().resolve().parent
     parent_dir = current_dir.parent
-    data_dir = Path(
-        os.getenv("RAGENT_MEP_DATA_DIR")
-        or data_dir_override
-        or _default_bundle_resource_dir(current_dir, parent_dir, "data")
-    ).expanduser().resolve()
-    model_dir = Path(
-        os.getenv("RAGENT_MEP_MODEL_DIR")
-        or model_dir_override
-        or _default_bundle_resource_dir(current_dir, parent_dir, "model")
-    ).expanduser().resolve()
+    diagnostics: list[str] = []
+
+    component_runtime_root = _resolve_component_runtime_root(current_dir)
+    component_runtime_candidates = (
+        _build_runtime_root_candidates(component_runtime_root)
+        if component_runtime_root is not None
+        else None
+    )
+    if component_runtime_root is not None:
+        diagnostics.append(f"component runtime root={component_runtime_root}")
+    else:
+        diagnostics.append("component runtime root not detected from process_file")
+
+    sfs_object_root, sfs_diagnostics = _parse_model_sfs_object_root()
+    diagnostics.extend(sfs_diagnostics)
+
+    model_root_candidates = (
+        _build_model_root_candidates(Path(model_root))
+        if model_root is not None
+        else None
+    )
+    if model_root_candidates is not None:
+        diagnostics.append(
+            "model_root candidates="
+            f"model={model_root_candidates['model']} "
+            f"data={model_root_candidates['data']} "
+            f"meta={model_root_candidates['meta']}"
+        )
+
+    model_absolute_dir = _resolve_env_path(os.getenv("MODEL_ABSOLUTE_DIR"))
+    model_relative_dir = (
+        os.getenv("MODEL_RELATIVE_DIR") or ""
+    ).strip() or "model"
+    model_absolute_runtime_root = (
+        _resolve_runtime_root_from_model_path(model_absolute_dir)
+        if model_absolute_dir is not None
+        else None
+    )
+    model_absolute_sibling_candidates = (
+        _build_runtime_root_candidates(model_absolute_runtime_root)
+        if model_absolute_runtime_root is not None
+        else None
+    )
+
+    data_dir, data_source, data_diagnostics = _select_component_bundle_path(
+        "data",
+        [
+            ("explicit_data_dir_override", data_dir_override),
+            (
+                "runtime_sibling_data_dir",
+                None
+                if component_runtime_candidates is None
+                else component_runtime_candidates["data"],
+            ),
+            (
+                "sfs_object_data_dir",
+                None if sfs_object_root is None else sfs_object_root / "data",
+            ),
+            (
+                "model_absolute_data_dir",
+                None
+                if model_absolute_sibling_candidates is None
+                else model_absolute_sibling_candidates["data"],
+            ),
+            (
+                "model_root_data_dir",
+                None if model_root_candidates is None else model_root_candidates["data"],
+            ),
+            ("local_env_data_dir", os.getenv("RAGENT_MEP_DATA_DIR")),
+            ("legacy_current_dir_data_dir", current_dir / "data"),
+        ],
+    )
+    model_dir, model_source, model_diagnostics = _select_component_bundle_path(
+        "model",
+        [
+            ("explicit_model_dir_override", model_dir_override),
+            (
+                "runtime_sibling_model_dir",
+                None
+                if component_runtime_candidates is None
+                else component_runtime_candidates["model"],
+            ),
+            ("sfs_model_absolute_dir", model_absolute_dir),
+            (
+                "sfs_model_relative_dir",
+                None
+                if sfs_object_root is None
+                else sfs_object_root / model_relative_dir,
+            ),
+            (
+                "sfs_default_model_dir",
+                None if sfs_object_root is None else sfs_object_root / "model",
+            ),
+            (
+                "model_root_model_dir",
+                None
+                if model_root_candidates is None
+                else model_root_candidates["model"],
+            ),
+            ("local_env_model_dir", os.getenv("RAGENT_MEP_MODEL_DIR")),
+            ("legacy_current_dir_model_dir", current_dir / "model"),
+        ],
+    )
+    meta_dir, meta_source, meta_diagnostics = _select_component_bundle_path(
+        "meta",
+        [
+            (
+                "runtime_sibling_meta_dir",
+                None
+                if component_runtime_candidates is None
+                else component_runtime_candidates["meta"],
+            ),
+            (
+                "sfs_object_meta_dir",
+                None if sfs_object_root is None else sfs_object_root / "meta",
+            ),
+            (
+                "model_absolute_meta_dir",
+                None
+                if model_absolute_sibling_candidates is None
+                else model_absolute_sibling_candidates["meta"],
+            ),
+            (
+                "model_root_meta_dir",
+                None if model_root_candidates is None else model_root_candidates["meta"],
+            ),
+            ("legacy_current_dir_meta_dir", current_dir / "meta"),
+        ],
+    )
+
+    diagnostics.extend(data_diagnostics)
+    diagnostics.extend(model_diagnostics)
+    diagnostics.extend(meta_diagnostics)
     return ComponentBundlePaths(
         current_dir=current_dir,
         parent_dir=parent_dir,
         data_dir=data_dir,
         model_dir=model_dir,
+        meta_dir=meta_dir,
+        data_source=data_source,
+        model_source=model_source,
+        meta_source=meta_source,
+        diagnostics=tuple(diagnostics),
     )
 
 

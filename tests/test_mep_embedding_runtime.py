@@ -37,6 +37,34 @@ def _write_embedding_bundle(model_dir: Path) -> Path:
     return embedding_root
 
 
+def _write_multi_embedding_bundle(model_dir: Path) -> tuple[Path, Path]:
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "sysconfig.properties").write_text(
+        "\n".join(
+            [
+                "model.name=BAAI/bge-m3",
+                "embedding.dimensions=1024",
+                "embedding.max_token_size=8192",
+                "vllm.runner=pooling",
+                "vllm.port=0",
+                "vllm.startup_timeout_seconds=5",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    primary_root = model_dir / "primary_model"
+    primary_root.mkdir(parents=True, exist_ok=True)
+    (primary_root / "config.json").write_text("{}", encoding="utf-8")
+    (primary_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+    appendix_root = model_dir / "appendix_model"
+    appendix_root.mkdir(parents=True, exist_ok=True)
+    (appendix_root / "config.json").write_text("{}", encoding="utf-8")
+    (appendix_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    return primary_root, appendix_root
+
+
 def test_bootstrap_local_embedding_runtime_skips_when_external_api_is_configured(
     monkeypatch,
     tmp_path: Path,
@@ -63,6 +91,30 @@ def test_resolve_embedding_launch_config_reads_sysconfig(tmp_path: Path):
     assert config.dimensions == 1024
     assert config.max_token_size == 8192
     assert config.port > 0
+
+
+def test_resolve_embedding_launch_config_accepts_direct_model_dir_input(tmp_path: Path):
+    model_dir = tmp_path / "model"
+    embedding_root = _write_embedding_bundle(model_dir)
+
+    config = resolve_embedding_launch_config(embedding_root)
+
+    assert config.model_dir == model_dir.resolve()
+    assert config.model_path == embedding_root.resolve()
+
+
+def test_resolve_embedding_launch_config_supports_path_appendix(
+    monkeypatch,
+    tmp_path: Path,
+):
+    model_dir = tmp_path / "model"
+    _, appendix_root = _write_multi_embedding_bundle(model_dir)
+    monkeypatch.setenv("path_appendix", "appendix_model")
+
+    config = resolve_embedding_launch_config(model_dir)
+
+    assert config.model_dir == model_dir.resolve()
+    assert config.model_path == appendix_root.resolve()
 
 
 def test_build_vllm_command_candidates_supports_module_fallback(

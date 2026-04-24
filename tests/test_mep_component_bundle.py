@@ -4,12 +4,14 @@ import asyncio
 import json
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def test_root_component_files_exist():
     repo_root = Path(__file__).resolve().parents[1]
 
     assert (repo_root / "process.py").exists()
+    assert (repo_root / "init.py").exists()
     assert (repo_root / "config.json").exists()
     assert (repo_root / "package.json").exists()
 
@@ -38,6 +40,29 @@ def test_root_process_exports_customer_model():
     spec.loader.exec_module(module)
 
     assert module.CustomerModel.__name__ == "CustomerModel"
+
+
+def test_root_init_exports_platform_probe(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    init_path = repo_root / "init.py"
+
+    monkeypatch.setenv("MODEL_SFS", json.dumps({"sfsBasePath": "/mnt/sfs"}))
+    monkeypatch.setenv("MODEL_OBJECT_ID", "object-123")
+    monkeypatch.setenv("MODEL_RELATIVE_DIR", "model")
+    monkeypatch.setenv("path_appendix", "baai_bge_m3")
+
+    spec = importlib.util.spec_from_file_location("ragent_root_init_test", init_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.COMPONENT_DIR == repo_root
+    assert module.MODEL_SFS_BASE_DIR == "/mnt/sfs/object-123"
+    assert module.SFS_MODEL_DIR == "/mnt/sfs/object-123/model"
+    assert module.PATH_APPENDIX == "baai_bge_m3"
+    probe = module.build_runtime_probe()
+    assert probe["component_dir"] == str(repo_root)
+    assert probe["path_appendix"] == "baai_bge_m3"
 
 
 def test_example_mep_requests_exist():
@@ -175,6 +200,73 @@ def test_customer_model_calc_query_checks_existing_gen_json_without_loaded_runti
 
     assert response["recommendResult"]["code"] == "0"
     assert response["recommendResult"]["length"] == 0
+
+
+def test_customer_model_load_passes_model_root_without_legacy_suffixing(
+    monkeypatch,
+    tmp_path: Path,
+):
+    repo_root = Path(__file__).resolve().parents[1]
+    process_path = repo_root / "process.py"
+
+    spec = importlib.util.spec_from_file_location("ragent_root_process_load_test", process_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    resolved_calls: dict[str, object] = {}
+
+    class FakeLoopRunner:
+        def run(self, coro):
+            return asyncio.run(coro)
+
+        def close(self):
+            pass
+
+    class FakeRuntimeSession:
+        def __init__(self, project_dir):
+            resolved_calls["project_dir"] = project_dir
+
+        async def load(self):
+            resolved_calls["loaded"] = True
+
+        async def close(self):
+            resolved_calls["closed"] = True
+
+    bundle_paths = SimpleNamespace(
+        model_dir=(tmp_path / "runtime_root" / "model").resolve(),
+        model_source="model_root_model_dir",
+        data_dir=(tmp_path / "runtime_root" / "data").resolve(),
+        data_source="model_root_data_dir",
+        meta_dir=(tmp_path / "runtime_root" / "meta").resolve(),
+        meta_source="model_root_meta_dir",
+        diagnostics=(),
+    )
+
+    runtime_layout = SimpleNamespace(
+        data_dir=bundle_paths.data_dir,
+        source_project_dir=(tmp_path / "runtime_root" / "data" / "demo_kg").resolve(),
+        runtime_project_dir=(tmp_path / "runtime_root" / "runtime_copy").resolve(),
+        copied_to_runtime_dir=False,
+        runtime_temp_root=None,
+    )
+
+    def _fake_resolve_component_bundle_paths(process_file, **kwargs):
+        resolved_calls["kwargs"] = kwargs
+        return bundle_paths
+
+    monkeypatch.setattr(module, "AsyncLoopThread", FakeLoopRunner)
+    monkeypatch.setattr(module, "resolve_component_bundle_paths", _fake_resolve_component_bundle_paths)
+    monkeypatch.setattr(module, "bootstrap_local_embedding_runtime", lambda model_dir: None)
+    monkeypatch.setattr(module, "prepare_runtime_project_layout", lambda **kwargs: runtime_layout)
+    monkeypatch.setattr(module, "InferenceRuntimeSession", FakeRuntimeSession)
+
+    model_root = tmp_path / "runtime_root" / "model"
+    model = module.CustomerModel(model_root=model_root)
+    model.load()
+
+    assert resolved_calls["kwargs"]["model_root"] == model_root.resolve()
+    assert resolved_calls["loaded"] is True
 
 
 def test_customer_model_cleanup_removes_runtime_copy_only(

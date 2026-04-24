@@ -181,7 +181,24 @@ def _looks_like_embedding_model_dir(candidate: Path) -> bool:
     return candidate.is_dir() and all((candidate / marker).exists() for marker in _MODEL_DIR_MARKERS)
 
 
-def _resolve_model_path(model_dir: Path, properties: dict[str, str]) -> Path:
+def _normalize_model_dir_input(model_dir: Path) -> tuple[Path, Path | None]:
+    resolved_input_dir = model_dir.expanduser().resolve()
+    if (resolved_input_dir / "sysconfig.properties").exists():
+        return resolved_input_dir, None
+    if _looks_like_embedding_model_dir(resolved_input_dir):
+        parent_dir = resolved_input_dir.parent
+        if (parent_dir / "sysconfig.properties").exists():
+            return parent_dir.resolve(), resolved_input_dir
+        return resolved_input_dir, resolved_input_dir
+    return resolved_input_dir, None
+
+
+def _resolve_model_path(
+    model_dir: Path,
+    properties: dict[str, str],
+    *,
+    preferred_model_path: Path | None = None,
+) -> Path:
     configured_path = _resolve_property(
         properties,
         "RAGENT_MEP_EMBEDDING_MODEL_PATH",
@@ -201,6 +218,21 @@ def _resolve_model_path(model_dir: Path, properties: dict[str, str]) -> Path:
                 f"Configured embedding model path is invalid: {candidate}"
             )
         return candidate
+
+    if preferred_model_path is not None and _looks_like_embedding_model_dir(
+        preferred_model_path
+    ):
+        return preferred_model_path.resolve()
+
+    path_appendix = _normalize_optional_str(os.getenv("path_appendix"))
+    if path_appendix is not None:
+        appendix_candidate = Path(path_appendix).expanduser()
+        if not appendix_candidate.is_absolute():
+            appendix_candidate = (model_dir / appendix_candidate).resolve()
+        else:
+            appendix_candidate = appendix_candidate.resolve()
+        if _looks_like_embedding_model_dir(appendix_candidate):
+            return appendix_candidate
 
     if _looks_like_embedding_model_dir(model_dir):
         return model_dir
@@ -226,14 +258,21 @@ def _resolve_model_path(model_dir: Path, properties: dict[str, str]) -> Path:
 def resolve_embedding_launch_config(
     model_dir: str | os.PathLike[str],
 ) -> MepEmbeddingLaunchConfig:
-    resolved_model_dir = Path(model_dir).expanduser().resolve()
+    resolved_model_dir_input = Path(model_dir).expanduser().resolve()
+    resolved_model_dir, preferred_model_path = _normalize_model_dir_input(
+        resolved_model_dir_input
+    )
     if not resolved_model_dir.exists():
         raise FileNotFoundError(f"MEP model directory does not exist: {resolved_model_dir}")
     if not resolved_model_dir.is_dir():
         raise ValueError(f"MEP model path is not a directory: {resolved_model_dir}")
 
     properties = _read_properties_file(resolved_model_dir / "sysconfig.properties")
-    model_path = _resolve_model_path(resolved_model_dir, properties)
+    model_path = _resolve_model_path(
+        resolved_model_dir,
+        properties,
+        preferred_model_path=preferred_model_path,
+    )
     host = _resolve_property(
         properties,
         "RAGENT_MEP_EMBEDDING_HOST",
@@ -288,6 +327,16 @@ def resolve_embedding_launch_config(
             )
             or ""
         )
+    )
+
+    logger.info(
+        "Resolved embedding launch config. input_model_dir=%s bundle_model_dir=%s "
+        "model_path=%s path_appendix=%s sysconfig_present=%s",
+        resolved_model_dir_input,
+        resolved_model_dir,
+        model_path,
+        _normalize_optional_str(os.getenv("path_appendix")),
+        (resolved_model_dir / "sysconfig.properties").exists(),
     )
 
     return MepEmbeddingLaunchConfig(
