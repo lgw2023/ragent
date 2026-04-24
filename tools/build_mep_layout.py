@@ -96,6 +96,33 @@ def _default_archive_output(output: Path, archive_extension: str) -> Path:
     return output.with_name(output.name + archive_extension)
 
 
+def _path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def _resolve_archive_output_path(
+    *,
+    runtime_root: Path,
+    archive_extension: str,
+    archive_output: Path | None,
+) -> Path:
+    archive_path = (
+        archive_output.expanduser().resolve()
+        if archive_output is not None
+        else _default_archive_output(runtime_root, archive_extension)
+    )
+    if archive_path == runtime_root or _path_is_relative_to(archive_path, runtime_root):
+        raise ValueError(
+            "Archive output must be outside the runtime root to avoid archiving itself: "
+            f"{archive_path}"
+        )
+    return archive_path
+
+
 def _archive_members(root: Path) -> list[Path]:
     return sorted(
         root.rglob("*"),
@@ -131,10 +158,10 @@ def _write_archive(
         "",
         "",
     )
-    archive_path = (
-        archive_output.expanduser().resolve()
-        if archive_output is not None
-        else _default_archive_output(runtime_root, archive_extension)
+    archive_path = _resolve_archive_output_path(
+        runtime_root=runtime_root,
+        archive_extension=archive_extension,
+        archive_output=archive_output,
     )
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     if archive_path.exists() or archive_path.is_symlink():
@@ -165,6 +192,12 @@ def build_mep_layout(
     normalized_archive = _normalize_archive_format(archive_format)
     if normalized_archive is not None and not materialize:
         raise ValueError("Archive output requires materialize=True")
+    if normalized_archive is not None:
+        _resolve_archive_output_path(
+            runtime_root=output,
+            archive_extension=normalized_archive[1],
+            archive_output=archive_output,
+        )
 
     model_dir_root = (
         repo_root / "mep" / "model_packages" / model_package / "modelDir"

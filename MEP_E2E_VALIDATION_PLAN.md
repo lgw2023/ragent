@@ -657,6 +657,8 @@ python .mep_build/bge-m3/runtime/component/run_mep_local.py \
 python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-format zip
 ```
 
+如需指定 `--archive-output`，输出路径必须位于 `.mep_build/<model-package>/runtime/` 之外，避免归档过程把自身也写进交付包。
+
 验证点：
 
 - `CustomerModel.load()` 成功

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -93,6 +94,48 @@ def test_build_mep_layout_materializes_and_archives_zip(tmp_path: Path):
     assert "meta/type.mf" in names
 
 
+@pytest.mark.parametrize(
+    ("archive_format", "archive_name", "expected_result_format"),
+    [
+        ("tar", "runtime.tar", "tar"),
+        ("tar.gz", "runtime.tar.gz", "gztar"),
+    ],
+)
+def test_build_mep_layout_materializes_and_archives_tar_formats(
+    tmp_path: Path,
+    archive_format: str,
+    archive_name: str,
+    expected_result_format: str,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    output = tmp_path / "runtime"
+    archive_output = tmp_path / archive_name
+
+    result = build_mep_layout(
+        repo_root=repo_root,
+        model_package="demo",
+        output=output,
+        materialize=True,
+        archive_format=archive_format,
+        archive_output=archive_output,
+    )
+
+    assert result["layout_mode"] == "copy"
+    assert result["archive_format"] == expected_result_format
+    assert Path(result["archive_path"]) == archive_output.resolve()
+
+    with tarfile.open(archive_output, "r:*") as tf:
+        names = set(tf.getnames())
+    assert "component/process.py" in names
+    assert "component/mep_dependency_bootstrap.py" in names
+    assert "model/hf_model/config.json" in names
+    assert "data/config/embedding.properties" in names
+    assert "meta/type.mf" in names
+    assert not any(name.startswith("runtime/") for name in names)
+
+
 def test_build_mep_layout_archive_requires_materialize(tmp_path: Path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -104,4 +147,21 @@ def test_build_mep_layout_archive_requires_materialize(tmp_path: Path):
             model_package="demo",
             output=tmp_path / "runtime",
             archive_format="zip",
+        )
+
+
+def test_build_mep_layout_rejects_archive_output_inside_runtime_root(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    output = tmp_path / "runtime"
+
+    with pytest.raises(ValueError, match="outside the runtime root"):
+        build_mep_layout(
+            repo_root=repo_root,
+            model_package="demo",
+            output=output,
+            materialize=True,
+            archive_format="zip",
+            archive_output=output / "runtime.zip",
         )

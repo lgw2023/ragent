@@ -104,6 +104,8 @@ def bootstrap_mep_data_dependencies(current_dir: str | os.PathLike[str]) -> tupl
         os.environ["RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH"] = os.pathsep.join(
             added_paths
         )
+    else:
+        os.environ.pop("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", None)
     return tuple(added_paths)
 
 

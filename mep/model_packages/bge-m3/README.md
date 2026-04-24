@@ -36,6 +36,8 @@ python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
   --archive-format zip
 ```
 
+`--archive-output` 可用于指定归档位置，但路径必须位于生成的 runtime 根目录之外，避免归档文件被再次打入归档。
+
 也可以继续使用显式环境变量做局部调试：
 
 ```bash
