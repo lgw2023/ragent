@@ -340,6 +340,136 @@ def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Pat
     assert not any(name.startswith("model_package/") for name in model_names)
 
 
+def test_build_mep_upload_packages_archives_to_custom_output_dir(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    archive_output_dir = tmp_path / "archives"
+
+    result = build_mep_upload_packages(
+        repo_root=repo_root,
+        model_package="demo",
+        output=tmp_path / "upload",
+        archive_format="zip",
+        archive_output_dir=archive_output_dir,
+    )
+
+    assert Path(result["archive_output_dir"]) == archive_output_dir.resolve()
+    assert Path(result["component_archive_path"]).parent == archive_output_dir.resolve()
+    assert Path(result["model_archive_path"]).parent == archive_output_dir.resolve()
+    assert Path(result["component_archive_path"]).is_file()
+    assert Path(result["model_archive_path"]).is_file()
+    assert not (tmp_path / "upload" / "ragent_inference_mep-component.zip").exists()
+    assert not (tmp_path / "upload" / "demo-model.zip").exists()
+
+
+def test_build_mep_upload_packages_rejects_archive_output_dir_without_format(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+
+    with pytest.raises(ValueError, match="requires archive_format"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "upload",
+            archive_output_dir=tmp_path / "archives",
+        )
+
+
+def test_build_mep_upload_packages_rejects_archive_output_dir_file(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    archive_output_dir = tmp_path / "archives"
+    archive_output_dir.write_text("not a directory\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="directory path"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "upload",
+            archive_format="zip",
+            archive_output_dir=archive_output_dir,
+        )
+
+
+def test_build_mep_upload_packages_rejects_archive_output_inside_component_package(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    output = tmp_path / "upload"
+    output.mkdir()
+    marker = output / "marker.txt"
+    marker.write_text("keep\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside the component package"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=output,
+            archive_format="zip",
+            archive_output_dir=output / "component_package",
+        )
+
+    assert marker.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_build_mep_upload_packages_rejects_archive_output_inside_model_package(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    output = tmp_path / "upload"
+    output.mkdir()
+    marker = output / "marker.txt"
+    marker.write_text("keep\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside the model package"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=output,
+            archive_format="zip",
+            archive_output_dir=output / "model_package",
+        )
+
+    assert marker.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_build_mep_upload_packages_rejects_archive_output_inside_source_package(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    output = tmp_path / "upload"
+    output.mkdir()
+    marker = output / "marker.txt"
+    marker.write_text("keep\n", encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="Archive output directory must not be inside the source model package",
+    ):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=output,
+            archive_format="zip",
+            archive_output_dir=repo_root / "mep" / "model_packages" / "demo" / "archives",
+        )
+
+    assert marker.read_text(encoding="utf-8") == "keep\n"
+
+
 def test_build_mep_upload_packages_archives_tgz_alias(tmp_path: Path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

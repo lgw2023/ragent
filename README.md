@@ -94,6 +94,12 @@ To generate upload-ready archives with the same roots:
 python tools/build_mep_upload_packages.py --model-package bge-m3 --archive-format zip
 ```
 
+By default these archives are written under `.mep_upload/<model-package>/`.
+Use `--archive-output-dir <dir>` with `--archive-format` to place them
+elsewhere; the builder rejects archive paths inside `component_package/` or
+`model_package/` so the archives cannot include themselves. The same source
+path protections apply to a custom archive directory.
+
 Both MEP builders reject output paths that would overwrite the repository root,
 component source files/directories, or the source model package. The model
 package must include a non-empty `modelDir/meta/type.mf`.

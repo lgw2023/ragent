@@ -674,6 +674,8 @@ python tools/build_mep_upload_packages.py --model-package bge-m3
 
 可选追加 `--archive-format zip` 生成两个独立归档；组件归档根目录直接是组件文件，模型归档根目录直接是 `modelDir/`，不会额外套 `component_package/` 或 `model_package/`。
 
+上传归档默认写在 `.mep_upload/<model-package>/` 下；如需指定其他归档目录，可追加 `--archive-output-dir <dir>`，该参数必须和 `--archive-format` 一起使用。构建脚本会拒绝把归档写进 `component_package/` 或 `model_package/` 内部；自定义归档目录也不能覆盖仓库根、组件源码或源模型包。
+
 构建脚本会拒绝会覆盖仓库根、组件源码或源模型包的输出目录，并要求 `modelDir/meta/type.mf` 存在且非空。
 
 验证点：
