@@ -38,6 +38,31 @@ python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
 
 `--archive-output` 可用于指定归档位置，但路径必须位于生成的 runtime 根目录之外，并且必须是文件路径而不是已有目录，避免归档文件被再次打入归档。物化模式会解引用源目录内部软链，使本地归档内容自包含。
 
+准备 MEP 上传包时，使用独立的上传包构建脚本：
+
+```bash
+python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py --model-package bge-m3
+```
+
+输出为：
+
+```text
+/Volumes/SSD1/ragent/.mep_upload/bge-m3/
+  component_package/
+  model_package/
+    modelDir/
+```
+
+如果需要直接生成上传归档，可追加：
+
+```bash
+python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
+  --model-package bge-m3 \
+  --archive-format zip
+```
+
+模型包归档的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。组件包默认不携带 `run_mep_local.py`；确需包含本地调试入口时使用 `--include-local-runner`。
+
 也可以继续使用显式环境变量做局部调试：
 
 ```bash

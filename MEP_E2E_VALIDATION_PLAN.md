@@ -661,6 +661,19 @@ python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-
 
 物化模式会解引用 `model/`、`data/`、`meta/` 源目录内部的软链，以便本地归档内容自包含。`--archive-output` 必须是文件路径而不是已有目录；装配脚本也会拒绝 `model/` 顶层非目录项，避免把旧式组件配置重新打进模型目录。
 
+如需准备真正上传到 MEP 的组件包和模型包目录，使用上传包构建脚本，而不是本地 runtime layout：
+
+```bash
+python tools/build_mep_upload_packages.py --model-package bge-m3
+```
+
+输出位于 `.mep_upload/bge-m3/`：
+
+- `component_package/`：组件包根目录，默认不包含 `run_mep_local.py`
+- `model_package/modelDir/`：模型包根目录，压缩后第一层必须是 `modelDir/`
+
+可选追加 `--archive-format zip` 生成两个独立归档；组件归档根目录直接是组件文件，模型归档根目录直接是 `modelDir/`，不会额外套 `component_package/` 或 `model_package/`。
+
 验证点：
 
 - `CustomerModel.load()` 成功

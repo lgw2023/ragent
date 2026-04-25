@@ -441,7 +441,55 @@ python /Volumes/SSD1/ragent/run_mep_local.py \
   --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
 ```
 
-### 10.2 参照样例的目标容器布局
+### 10.2 MEP 上传包构建
+
+`tools/build_mep_layout.py` 用于本地 MEP 运行时仿真；真正准备平台上传目录时，使用独立的上传包构建脚本：
+
+```bash
+python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py --model-package bge-m3
+```
+
+默认输出：
+
+```text
+/Volumes/SSD1/ragent/.mep_upload/bge-m3/
+  component_package/
+    config.json
+    package.json
+    process.py
+    init.py
+    mep_dependency_bootstrap.py
+    pyproject.toml
+    setup.py
+    ragent/
+  model_package/
+    modelDir/
+      model/
+      data/
+      meta/
+```
+
+组件上传包默认不包含 `run_mep_local.py`，避免把本地调试入口带到平台；确需随包检查时可加：
+
+```bash
+python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
+  --model-package bge-m3 \
+  --include-local-runner
+```
+
+如果需要直接生成可上传归档：
+
+```bash
+python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
+  --model-package bge-m3 \
+  --archive-format zip
+```
+
+归档会分别写在 `.mep_upload/bge-m3/` 下：组件归档根目录直接是 `config.json`、`process.py`、`ragent/` 等文件；模型归档根目录直接是 `modelDir/`。手工压缩时也应保持同样结构，尤其模型包 zip 的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。
+
+上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝危险输出目录，并强校验 `modelDir/model` 顶层只能放 Hugging Face 模型目录。
+
+### 10.3 参照样例的目标容器布局
 
 后续代码对齐后，优先验证如下布局：
 
