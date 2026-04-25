@@ -12,9 +12,9 @@ try:
         ignore_by_name,
         ignore_generated,
         normalize_archive_format,
-        path_is_relative_to,
         reset_path,
         safe_archive_stem,
+        validate_output_path_does_not_overlap,
         validate_model_dir,
         write_archive,
     )
@@ -25,9 +25,9 @@ except ModuleNotFoundError:
         ignore_by_name,
         ignore_generated,
         normalize_archive_format,
-        path_is_relative_to,
         reset_path,
         safe_archive_stem,
+        validate_output_path_does_not_overlap,
         validate_model_dir,
         write_archive,
     )
@@ -88,22 +88,22 @@ def _validate_safe_output(
     source_model_package_dir: Path,
     output: Path,
 ) -> None:
-    if output == repo_root:
-        raise ValueError(f"Output directory must not be the repository root: {output}")
-    if output == repo_root.parent:
-        raise ValueError(
-            f"Output directory must not be the repository parent: {output}"
-        )
-    if path_is_relative_to(source_model_package_dir, output):
-        raise ValueError(
-            "Output directory must not contain the source model package directory: "
-            f"{output}"
-        )
-    if path_is_relative_to(output, source_model_package_dir):
-        raise ValueError(
-            "Output directory must not be inside the source model package directory: "
-            f"{output}"
-        )
+    protected_paths = [
+        ("source model package directory", source_model_package_dir),
+        ("component source directory ragent/", repo_root / "ragent"),
+    ]
+    protected_paths.extend(
+        (f"component source file {filename}", repo_root / filename)
+        for filename in REQUIRED_COMPONENT_FILES
+        + OPTIONAL_COMPONENT_FILES
+        + (LOCAL_RUNNER_FILE,)
+        if (repo_root / filename).exists()
+    )
+    validate_output_path_does_not_overlap(
+        output=output,
+        repo_root=repo_root,
+        protected_paths=protected_paths,
+    )
 
 
 def _copy_component_source(

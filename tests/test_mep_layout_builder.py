@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tarfile
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -188,6 +189,77 @@ def test_build_mep_layout_archive_requires_materialize(tmp_path: Path):
             output=tmp_path / "runtime",
             archive_format="zip",
         )
+
+
+def test_build_mep_layout_rejects_missing_component_source(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    (repo_root / "process.py").unlink()
+
+    with pytest.raises(FileNotFoundError, match="process.py"):
+        build_mep_layout(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "runtime",
+        )
+
+
+def test_build_mep_layout_allows_missing_local_runner(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    (repo_root / "run_mep_local.py").unlink()
+    output = tmp_path / "runtime"
+
+    build_mep_layout(
+        repo_root=repo_root,
+        model_package="demo",
+        output=output,
+    )
+
+    assert (output / "component" / "process.py").is_file()
+    assert not (output / "component" / "run_mep_local.py").exists()
+
+
+@pytest.mark.parametrize(
+    ("output_factory", "expected_match"),
+    [
+        (lambda repo_root: repo_root, "repository root"),
+        (lambda repo_root: repo_root.parent, "repository parent"),
+        (lambda repo_root: repo_root / "mep", "contain the source model package"),
+        (lambda repo_root: repo_root / "ragent", "component source directory"),
+        (lambda repo_root: repo_root / "process.py", "component source file"),
+        (
+            lambda repo_root: repo_root
+            / "mep"
+            / "model_packages"
+            / "demo"
+            / "nested",
+            "inside the source model package",
+        ),
+    ],
+)
+def test_build_mep_layout_rejects_dangerous_output(
+    tmp_path: Path,
+    output_factory: Callable[[Path], Path],
+    expected_match: str,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    marker = repo_root / "process.py"
+    original_process = marker.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match=expected_match):
+        build_mep_layout(
+            repo_root=repo_root,
+            model_package="demo",
+            output=output_factory(repo_root),
+        )
+
+    assert marker.read_text(encoding="utf-8") == original_process
+    assert (repo_root / "ragent" / "__init__.py").is_file()
 
 
 def test_build_mep_layout_rejects_archive_output_inside_runtime_root(tmp_path: Path):

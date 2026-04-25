@@ -4,6 +4,7 @@ import fnmatch
 import shutil
 import tarfile
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 
 
@@ -50,6 +51,31 @@ def reset_path(path: Path) -> None:
         return
     if path.is_dir():
         shutil.rmtree(path)
+
+
+def validate_output_path_does_not_overlap(
+    *,
+    output: Path,
+    repo_root: Path,
+    protected_paths: Iterable[tuple[str, Path]],
+) -> None:
+    if output == repo_root:
+        raise ValueError(f"Output directory must not be the repository root: {output}")
+    if output == repo_root.parent:
+        raise ValueError(
+            f"Output directory must not be the repository parent: {output}"
+        )
+
+    for label, protected_path in protected_paths:
+        protected_path = protected_path.expanduser().resolve()
+        if path_is_relative_to(protected_path, output):
+            raise ValueError(
+                f"Output directory must not contain the {label}: {output}"
+            )
+        if path_is_relative_to(output, protected_path):
+            raise ValueError(
+                f"Output directory must not be inside the {label}: {output}"
+            )
 
 
 def normalize_archive_format(archive_format: str | None) -> tuple[str, str] | None:
@@ -197,4 +223,9 @@ def validate_model_dir(
         if not source.is_dir():
             label = required_dir_label.format(name=name)
             raise FileNotFoundError(f"{label} not found: {source}")
+    type_mf = required_dirs["meta"] / "type.mf"
+    if not type_mf.is_file():
+        raise FileNotFoundError(f"MEP modelDir/meta/type.mf not found: {type_mf}")
+    if not type_mf.read_text(encoding="utf-8").strip():
+        raise ValueError(f"MEP modelDir/meta/type.mf must not be empty: {type_mf}")
     validate_model_root(required_dirs["model"], model_root_label=model_root_label)

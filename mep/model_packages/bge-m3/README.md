@@ -61,7 +61,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
   --archive-format zip
 ```
 
-模型包归档的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。组件包默认不携带 `run_mep_local.py`；确需包含本地调试入口时使用 `--include-local-runner`。
+模型包归档的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。`modelDir/meta/type.mf` 必须存在且非空。组件包默认不携带 `run_mep_local.py`；确需包含本地调试入口时使用 `--include-local-runner`。
 
 也可以继续使用显式环境变量做局部调试：
 
