@@ -487,7 +487,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 
 归档会分别写在 `.mep_upload/bge-m3/` 下：组件归档根目录直接是 `config.json`、`process.py`、`ragent/` 等文件；模型归档根目录直接是 `modelDir/`。手工压缩时也应保持同样结构，尤其模型包 zip 的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。
 
-上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝危险输出目录，并强校验 `modelDir/model` 顶层只能放 Hugging Face 模型目录。
+上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝会覆盖仓库根、组件源码或源模型包的危险输出目录，并强校验 `modelDir/meta/type.mf` 非空以及 `modelDir/model` 顶层只能放 Hugging Face 模型目录。
 
 ### 10.3 参照样例的目标容器布局
 

@@ -13,6 +13,7 @@ try:
         reset_path,
         resolve_archive_output_path,
         validate_model_dir,
+        validate_output_path_does_not_overlap,
         write_archive,
     )
 except ModuleNotFoundError:
@@ -23,20 +24,61 @@ except ModuleNotFoundError:
         reset_path,
         resolve_archive_output_path,
         validate_model_dir,
+        validate_output_path_does_not_overlap,
         write_archive,
     )
 
-COMPONENT_FILES = (
+REQUIRED_COMPONENT_FILES = (
     "process.py",
     "init.py",
     "config.json",
     "package.json",
+    "mep_dependency_bootstrap.py",
+)
+OPTIONAL_COMPONENT_FILES = (
     "pyproject.toml",
     "setup.py",
     "run_mep_local.py",
-    "mep_dependency_bootstrap.py",
 )
+COMPONENT_FILES = REQUIRED_COMPONENT_FILES + OPTIONAL_COMPONENT_FILES
 COMPONENT_DIRS = ("ragent",)
+
+
+def _validate_component_source(repo_root: Path) -> None:
+    missing: list[str] = []
+    for filename in REQUIRED_COMPONENT_FILES:
+        if not (repo_root / filename).is_file():
+            missing.append(filename)
+    for dirname in COMPONENT_DIRS:
+        if not (repo_root / dirname).is_dir():
+            missing.append(f"{dirname}/")
+    if missing:
+        missing_text = ", ".join(missing)
+        raise FileNotFoundError(
+            f"Missing required component source paths: {missing_text}"
+        )
+
+
+def _validate_safe_output(
+    *,
+    repo_root: Path,
+    source_model_package_dir: Path,
+    output: Path,
+) -> None:
+    protected_paths = [
+        ("source model package directory", source_model_package_dir),
+        ("component source directory ragent/", repo_root / "ragent"),
+    ]
+    protected_paths.extend(
+        (f"component source file {filename}", repo_root / filename)
+        for filename in COMPONENT_FILES
+        if (repo_root / filename).exists()
+    )
+    validate_output_path_does_not_overlap(
+        output=output,
+        repo_root=repo_root,
+        protected_paths=protected_paths,
+    )
 
 
 def _copy_component_source(repo_root: Path, component_dir: Path) -> None:
@@ -118,13 +160,18 @@ def build_mep_layout(
             archive_output=archive_output,
         )
 
-    model_dir_root = (
-        repo_root / "mep" / "model_packages" / model_package / "modelDir"
-    )
+    source_model_package_dir = repo_root / "mep" / "model_packages" / model_package
+    model_dir_root = source_model_package_dir / "modelDir"
+    _validate_component_source(repo_root)
     validate_model_dir(
         model_dir_root,
         required_dir_label="MEP {name}/ directory",
         model_root_label="MEP model/",
+    )
+    _validate_safe_output(
+        repo_root=repo_root,
+        source_model_package_dir=source_model_package_dir,
+        output=output,
     )
 
     required_dirs = {

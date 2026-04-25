@@ -225,6 +225,8 @@ def test_build_mep_upload_packages_rejects_model_root_top_level_files(
         (lambda repo_root: repo_root, "repository root"),
         (lambda repo_root: repo_root.parent, "repository parent"),
         (lambda repo_root: repo_root / "mep", "contain the source model package"),
+        (lambda repo_root: repo_root / "ragent", "component source directory"),
+        (lambda repo_root: repo_root / "config.json", "component source file"),
         (
             lambda repo_root: repo_root
             / "mep"
@@ -254,6 +256,53 @@ def test_build_mep_upload_packages_rejects_dangerous_output(
         )
 
     assert marker.read_text(encoding="utf-8") == original_config
+    assert (repo_root / "ragent" / "__init__.py").is_file()
+
+
+def test_build_mep_upload_packages_rejects_missing_type_mf(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    type_mf = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "demo"
+        / "modelDir"
+        / "meta"
+        / "type.mf"
+    )
+    type_mf.unlink()
+
+    with pytest.raises(FileNotFoundError, match="meta/type.mf"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "upload",
+        )
+
+
+def test_build_mep_upload_packages_rejects_empty_type_mf(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    type_mf = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "demo"
+        / "modelDir"
+        / "meta"
+        / "type.mf"
+    )
+    type_mf.write_text("  \n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="type.mf must not be empty"):
+        build_mep_upload_packages(
+            repo_root=repo_root,
+            model_package="demo",
+            output=tmp_path / "upload",
+        )
 
 
 def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Path):

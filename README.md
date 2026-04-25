@@ -94,6 +94,10 @@ To generate upload-ready archives with the same roots:
 python tools/build_mep_upload_packages.py --model-package bge-m3 --archive-format zip
 ```
 
+Both MEP builders reject output paths that would overwrite the repository root,
+component source files/directories, or the source model package. The model
+package must include a non-empty `modelDir/meta/type.mf`.
+
 The component only queries an existing KG snapshot. The model package standard
 is `modelDir/model/` for Hugging Face model directories only, plus
 `modelDir/data/` for component-readable read-only data such as embedding config,
