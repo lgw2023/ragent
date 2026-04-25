@@ -73,6 +73,27 @@ the runtime root so the archive cannot include itself. In `--materialize` mode,
 source symlinks inside `model/`, `data/`, or `meta/` are dereferenced so the
 assembled runtime is self-contained.
 
+For MEP platform upload, build the component package and model package upload
+directories instead:
+
+```bash
+python tools/build_mep_upload_packages.py --model-package bge-m3
+```
+
+This writes `.mep_upload/bge-m3/component_package/` and
+`.mep_upload/bge-m3/model_package/modelDir/`. The component package contains the
+MEP entry files and `ragent/`, and excludes local-only files such as
+`run_mep_local.py` by default. Add `--include-local-runner` only when a debug
+runner must be bundled. The model package upload directory always has
+`modelDir/` as its first real entry, so the model zip uploaded to MEP should
+also have `modelDir/` at the archive root.
+
+To generate upload-ready archives with the same roots:
+
+```bash
+python tools/build_mep_upload_packages.py --model-package bge-m3 --archive-format zip
+```
+
 The component only queries an existing KG snapshot. The model package standard
 is `modelDir/model/` for Hugging Face model directories only, plus
 `modelDir/data/` for component-readable read-only data such as embedding config,

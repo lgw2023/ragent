@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import tarfile
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -287,4 +288,33 @@ def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Pat
     assert "modelDir/model/hf_model/config.json" in model_names
     assert "modelDir/data/config/embedding.properties" in model_names
     assert "modelDir/meta/type.mf" in model_names
+    assert not any(name.startswith("model_package/") for name in model_names)
+
+
+def test_build_mep_upload_packages_archives_tgz_alias(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+
+    result = build_mep_upload_packages(
+        repo_root=repo_root,
+        model_package="demo",
+        output=tmp_path / "upload",
+        archive_format="tgz",
+    )
+
+    assert result["archive_format"] == "gztar"
+    component_archive = Path(result["component_archive_path"])
+    model_archive = Path(result["model_archive_path"])
+    assert component_archive.name == "ragent_inference_mep-component.tar.gz"
+    assert model_archive.name == "demo-model.tar.gz"
+
+    with tarfile.open(component_archive, "r:*") as tf:
+        component_names = set(tf.getnames())
+    assert "config.json" in component_names
+    assert "ragent/__init__.py" in component_names
+
+    with tarfile.open(model_archive, "r:*") as tf:
+        model_names = set(tf.getnames())
+    assert "modelDir/model/hf_model/config.json" in model_names
     assert not any(name.startswith("model_package/") for name in model_names)
