@@ -13,6 +13,7 @@ try:
         ignore_generated,
         normalize_archive_format,
         reset_path,
+        resolve_archive_output_path,
         safe_archive_stem,
         validate_output_path_does_not_overlap,
         validate_model_dir,
@@ -26,6 +27,7 @@ except ModuleNotFoundError:
         ignore_generated,
         normalize_archive_format,
         reset_path,
+        resolve_archive_output_path,
         safe_archive_stem,
         validate_output_path_does_not_overlap,
         validate_model_dir,
@@ -87,6 +89,7 @@ def _validate_safe_output(
     repo_root: Path,
     source_model_package_dir: Path,
     output: Path,
+    path_label: str = "Output directory",
 ) -> None:
     protected_paths = [
         ("source model package directory", source_model_package_dir),
@@ -103,6 +106,7 @@ def _validate_safe_output(
         output=output,
         repo_root=repo_root,
         protected_paths=protected_paths,
+        path_label=path_label,
     )
 
 
@@ -158,6 +162,37 @@ def _component_archive_stem(repo_root: Path) -> str:
     return f"{safe_archive_stem(package_name, fallback=fallback)}-component"
 
 
+def _resolve_archive_output_dir(
+    *,
+    output: Path,
+    archive_output_dir: Path | None,
+) -> Path:
+    if archive_output_dir is None:
+        return output
+    resolved = archive_output_dir.expanduser().resolve()
+    if resolved.exists() and not resolved.is_dir():
+        raise ValueError(
+            f"Archive output directory must be a directory path: {resolved}"
+        )
+    return resolved
+
+
+def _resolve_upload_archive_path(
+    *,
+    source_root: Path,
+    archive_output_dir: Path,
+    archive_stem: str,
+    archive_extension: str,
+    source_label: str,
+) -> Path:
+    return resolve_archive_output_path(
+        source_root=source_root,
+        archive_extension=archive_extension,
+        archive_output=archive_output_dir / f"{archive_stem}{archive_extension}",
+        source_label=source_label,
+    )
+
+
 def build_mep_upload_packages(
     *,
     repo_root: Path,
@@ -165,6 +200,7 @@ def build_mep_upload_packages(
     output: Path,
     include_local_runner: bool = False,
     archive_format: str | None = None,
+    archive_output_dir: Path | None = None,
 ) -> dict[str, str]:
     repo_root = repo_root.expanduser().resolve()
     output = output.expanduser().resolve()
@@ -173,6 +209,8 @@ def build_mep_upload_packages(
     ).resolve()
     source_model_dir_root = source_model_package_dir / "modelDir"
     normalized_archive = normalize_archive_format(archive_format)
+    if archive_output_dir is not None and normalized_archive is None:
+        raise ValueError("Archive output directory requires archive_format")
 
     _validate_component_source(
         repo_root,
@@ -185,12 +223,43 @@ def build_mep_upload_packages(
         output=output,
     )
 
+    component_dir = output / "component_package"
+    model_upload_dir = output / "model_package"
+    if normalized_archive is not None:
+        archive_name, archive_extension = normalized_archive
+        archive_output_root = _resolve_archive_output_dir(
+            output=output,
+            archive_output_dir=archive_output_dir,
+        )
+        if archive_output_dir is not None:
+            _validate_safe_output(
+                repo_root=repo_root,
+                source_model_package_dir=source_model_package_dir,
+                output=archive_output_root,
+                path_label="Archive output directory",
+            )
+        component_archive_path = _resolve_upload_archive_path(
+            source_root=component_dir,
+            archive_output_dir=archive_output_root,
+            archive_stem=_component_archive_stem(repo_root),
+            archive_extension=archive_extension,
+            source_label="component package",
+        )
+        model_archive_stem = (
+            f"{safe_archive_stem(model_package, fallback='model_package')}-model"
+        )
+        model_archive_path = _resolve_upload_archive_path(
+            source_root=model_upload_dir,
+            archive_output_dir=archive_output_root,
+            archive_stem=model_archive_stem,
+            archive_extension=archive_extension,
+            source_label="model package",
+        )
+
     if output.exists() or output.is_symlink():
         reset_path(output)
     output.mkdir(parents=True, exist_ok=True)
 
-    component_dir = output / "component_package"
-    model_upload_dir = output / "model_package"
     _copy_component_source(
         repo_root,
         component_dir,
@@ -207,15 +276,6 @@ def build_mep_upload_packages(
         "source_model_package_dir": str(source_model_package_dir),
     }
     if normalized_archive is not None:
-        archive_name, archive_extension = normalized_archive
-        component_archive_path = (
-            output / f"{_component_archive_stem(repo_root)}{archive_extension}"
-        )
-        model_archive_path = (
-            output
-            / f"{safe_archive_stem(model_package, fallback='model_package')}-model"
-            f"{archive_extension}"
-        )
         write_archive(
             component_dir,
             component_archive_path,
@@ -227,6 +287,7 @@ def build_mep_upload_packages(
             archive_format=archive_name,
         )
         result["archive_format"] = archive_name
+        result["archive_output_dir"] = str(archive_output_root)
         result["component_archive_path"] = str(component_archive_path)
         result["model_archive_path"] = str(model_archive_path)
     return result
@@ -262,7 +323,17 @@ def main() -> None:
         choices=sorted(ARCHIVE_FORMATS),
         help="Optionally archive component_package and model_package separately.",
     )
+    parser.add_argument(
+        "--archive-output-dir",
+        type=Path,
+        help=(
+            "Directory for upload archives. Defaults to --output. "
+            "Requires --archive-format."
+        ),
+    )
     args = parser.parse_args()
+    if args.archive_output_dir is not None and args.archive_format is None:
+        parser.error("--archive-output-dir requires --archive-format")
 
     repo_root = args.repo_root.expanduser().resolve()
     output = (
@@ -276,6 +347,7 @@ def main() -> None:
         output=output,
         include_local_runner=args.include_local_runner,
         archive_format=args.archive_format,
+        archive_output_dir=args.archive_output_dir,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

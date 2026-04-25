@@ -58,23 +58,24 @@ def validate_output_path_does_not_overlap(
     output: Path,
     repo_root: Path,
     protected_paths: Iterable[tuple[str, Path]],
+    path_label: str = "Output directory",
 ) -> None:
     if output == repo_root:
-        raise ValueError(f"Output directory must not be the repository root: {output}")
+        raise ValueError(f"{path_label} must not be the repository root: {output}")
     if output == repo_root.parent:
         raise ValueError(
-            f"Output directory must not be the repository parent: {output}"
+            f"{path_label} must not be the repository parent: {output}"
         )
 
     for label, protected_path in protected_paths:
         protected_path = protected_path.expanduser().resolve()
         if path_is_relative_to(protected_path, output):
             raise ValueError(
-                f"Output directory must not contain the {label}: {output}"
+                f"{path_label} must not contain the {label}: {output}"
             )
         if path_is_relative_to(output, protected_path):
             raise ValueError(
-                f"Output directory must not be inside the {label}: {output}"
+                f"{path_label} must not be inside the {label}: {output}"
             )
 
 
