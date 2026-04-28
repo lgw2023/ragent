@@ -31,9 +31,10 @@ vllm.port=8000
 vllm.max_model_len=8192
 vllm.extra_args=--dtype auto
 vllm.uninstall_packages=vllm,vllm-ascend
-vllm.install_requirements=triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0
+vllm.install_requirements=cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0
 vllm.install_no_deps=true
 vllm.install_force_reinstall=true
+vllm.install_all_wheelhouse_wheels=true
 vllm.env.ASCEND_RT_VISIBLE_DEVICES=0
 vllm.env.VLLM_LOGGING_LEVEL=DEBUG
 vllm.env.VLLM_PLUGINS=ascend
@@ -41,7 +42,7 @@ vllm.env.VLLM_PLUGINS=ascend
 
 `vllm.bind_host` 对齐验证脚本中的 vLLM `--host 0.0.0.0`；`vllm.host` 是组件调用 `/v1/embeddings` 时使用的本地回连地址。`vllm.api_key=EMPTY` 只用于满足 ragent 侧调用参数，只有配置为真实 key 时才会传给 vLLM `--api-key`。
 
-组件拉起 vLLM 前会先检查 `triton-ascend==3.2.0`、`vllm==0.13.0`、`vllm-ascend==0.13.0` 是否已经安装；版本不一致时会从模型包 `data/deps/wheelhouse/<platform-tag>/` 离线安装这些 wheel。
+组件拉起 vLLM 前会从模型包 `data/deps/wheelhouse/<platform-tag>/` 离线重装所有 wheel，以恢复验证环境中的二进制依赖组合；`cbor2==5.9.0`、`triton-ascend==3.2.0`、`vllm==0.13.0`、`vllm-ascend==0.13.0` 仍作为关键修复包校验项。这里保留 `vllm.install_no_deps=true`，因为依赖已经作为显式 wheel 一并安装，不能再让 pip resolver 把 Ascend 需要的 `torch==2.8.0` 解成 vLLM 元数据里的其他版本。
 
 组件启动 vLLM 子进程前会自动尝试加载 `/usr/local/Ascend/ascend-toolkit/set_env.sh` 和 `/usr/local/Ascend/nnal/atb/set_env.sh`。如目标镜像路径不同，可通过 `RAGENT_ASCEND_SET_ENV_SH` 或 `RAGENT_ASCEND_ENV_SHS` 覆盖。
 
@@ -61,7 +62,7 @@ modelDir/data/deps/site-packages/linux-arm64-py3.10/
 python /Volumes/SSD1/ragent/tools/export_mep_vllm_ascend_wheelhouse.py
 ```
 
-导出依据是 `MEP_platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt`。导出器会记录 wheel、手工补入的 `.tar.gz` source archive、失败项和本地 `file://` 条目。`@ file://...whl` 形式的条目中，`/tmp/ragent-mep-test` 前缀会默认从索引解析下载；这覆盖启动修复步骤需要的 `triton-ascend==3.2.0`。`/home/mep/...` 和 `/usr/local/Ascend/...` 这类镜像内置路径默认只记录不下载。若这些 wheel 已单独下载到某个目录，可追加 `--local-wheel-dir <dir>` 复制；若确实需要从索引解析全部本地 wheel，可追加 `--resolve-local-file-wheels`。
+导出依据是 `MEP_platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt`。导出器会额外补入 `cbor2==5.9.0`，并记录 wheel、手工补入的 `.tar.gz` source archive、失败项和本地 `file://` 条目。`@ file://...whl` 形式的条目中，`/tmp/ragent-mep-test` 前缀会默认从索引解析下载；这覆盖启动修复步骤需要的 `triton-ascend==3.2.0`。`/home/mep/...` 和 `/usr/local/Ascend/...` 这类镜像内置路径默认只记录不下载。若这些 wheel 已单独下载到某个目录，可追加 `--local-wheel-dir <dir>` 复制；若确实需要从索引解析全部本地 wheel，可追加 `--resolve-local-file-wheels`。
 
 本地模拟 MEP 组件时，推荐先生成平台形态运行时目录：
 

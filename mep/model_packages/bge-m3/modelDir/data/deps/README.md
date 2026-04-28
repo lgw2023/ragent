@@ -32,9 +32,11 @@ step. Other compiled packages should be unpacked or installed into a compatible
 `site-packages/<platform-tag>/` tree for the target image.
 
 The bge-m3 embedding config uses this wheelhouse to repair the validated vLLM
-stack before launch: `triton-ascend==3.2.0`, `vllm==0.13.0`, and
-`vllm-ascend==0.13.0` are installed offline when the image-provided versions do
-not already match.
+stack before launch. It reinstalls all wheel files from the matching
+platform-specific wheelhouse with `--no-deps`, so dependencies are restored as
+the exact exported wheels instead of being re-resolved. `cbor2==5.9.0`,
+`triton-ascend==3.2.0`, `vllm==0.13.0`, and `vllm-ascend==0.13.0` are still
+validated as required repair artifacts.
 
 For the validated Ascend 910B vLLM embedding image, export exact `cp310`
 `aarch64` wheels with:

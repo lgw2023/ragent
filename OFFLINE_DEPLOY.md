@@ -110,9 +110,8 @@ launching vLLM. The equivalent manual command sequence is:
 
 ```bash
 pip uninstall vllm vllm-ascend -y
-pip install /tmp/ragent-mep-test/triton_ascend-3.2.0-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
-pip install /tmp/ragent-mep-test/vllm-0.13.0-cp38-abi3-manylinux_2_31_aarch64.whl
-pip install vllm-ascend==0.13.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install --no-index --no-deps --force-reinstall \
+  /tmp/ragent-mep-test/mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10/*.whl
 ```
 
 The service command that was validated is:

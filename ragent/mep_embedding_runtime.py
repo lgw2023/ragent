@@ -77,6 +77,7 @@ class MepEmbeddingLaunchConfig:
     uninstall_packages: tuple[str, ...] = ()
     install_no_deps: bool = True
     install_force_reinstall: bool = True
+    install_all_wheelhouse_wheels: bool = False
     launch_mode: str = "auto"
     config_path: Path | None = None
     data_dir: Path | None = None
@@ -497,6 +498,11 @@ def resolve_embedding_launch_config(
         "RAGENT_MEP_VLLM_INSTALL_FORCE_REINSTALL",
         "vllm.install_force_reinstall",
     )
+    install_all_wheelhouse_wheels_value = _resolve_property(
+        properties,
+        "RAGENT_MEP_VLLM_INSTALL_ALL_WHEELHOUSE_WHEELS",
+        "vllm.install_all_wheelhouse_wheels",
+    )
 
     logger.info(
         "Resolved embedding launch config. input_model_dir=%s bundle_model_dir=%s "
@@ -561,6 +567,11 @@ def resolve_embedding_launch_config(
             _parse_optional_bool(install_force_reinstall_value)
             if install_force_reinstall_value is not None
             else True
+        ),
+        install_all_wheelhouse_wheels=(
+            _parse_optional_bool(install_all_wheelhouse_wheels_value)
+            if install_all_wheelhouse_wheels_value is not None
+            else False
         ),
         launch_mode=launch_mode,
         config_path=config_path,
@@ -887,6 +898,23 @@ def _validate_install_artifacts_exist(
         )
 
 
+def _iter_installable_wheelhouse_wheels(
+    wheelhouse_dirs: tuple[Path, ...],
+) -> tuple[Path, ...]:
+    wheels: list[Path] = []
+    seen: set[Path] = set()
+    for wheelhouse_dir in wheelhouse_dirs:
+        for wheel_path in sorted(wheelhouse_dir.glob("*.whl")):
+            if wheel_path.name.startswith("._"):
+                continue
+            resolved = wheel_path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            wheels.append(resolved)
+    return tuple(wheels)
+
+
 def _run_pip_command(command: list[str]) -> None:
     completed = subprocess.run(
         command,
@@ -904,12 +932,19 @@ def _run_pip_command(command: list[str]) -> None:
 
 
 def _ensure_vllm_runtime_dependencies(config: MepEmbeddingLaunchConfig) -> None:
-    if not config.install_requirements:
+    if not config.install_requirements and not config.install_all_wheelhouse_wheels:
         return
-    if _installed_requirements_satisfied(config.install_requirements):
+    if (
+        config.install_requirements
+        and not config.install_all_wheelhouse_wheels
+        and _installed_requirements_satisfied(config.install_requirements)
+    ):
         return
 
-    install_key = tuple(config.install_requirements)
+    install_key = (
+        "all-wheelhouse-wheels" if config.install_all_wheelhouse_wheels else "requirements",
+        *config.install_requirements,
+    )
     if install_key in _VLLM_DEPENDENCY_BOOTSTRAP_DONE:
         return
 
@@ -919,7 +954,19 @@ def _ensure_vllm_runtime_dependencies(config: MepEmbeddingLaunchConfig) -> None:
             "vLLM runtime install requirements are configured, but no matching "
             "data/deps/wheelhouse directory was found."
         )
-    _validate_install_artifacts_exist(config.install_requirements, wheelhouse_dirs)
+    if config.install_requirements:
+        _validate_install_artifacts_exist(config.install_requirements, wheelhouse_dirs)
+    install_targets: list[str]
+    if config.install_all_wheelhouse_wheels:
+        wheelhouse_wheels = _iter_installable_wheelhouse_wheels(wheelhouse_dirs)
+        if not wheelhouse_wheels:
+            raise FileNotFoundError(
+                "vLLM runtime is configured to install all wheelhouse wheels, "
+                "but no .whl files were found."
+            )
+        install_targets = [str(wheel_path) for wheel_path in wheelhouse_wheels]
+    else:
+        install_targets = list(config.install_requirements)
 
     if config.uninstall_packages:
         uninstall_command = [
@@ -942,11 +989,11 @@ def _ensure_vllm_runtime_dependencies(config: MepEmbeddingLaunchConfig) -> None:
     ]
     for wheelhouse_dir in wheelhouse_dirs:
         install_command.extend(["--find-links", str(wheelhouse_dir)])
-    if config.install_no_deps:
+    if config.install_no_deps or config.install_all_wheelhouse_wheels:
         install_command.append("--no-deps")
     if config.install_force_reinstall:
         install_command.append("--force-reinstall")
-    install_command.extend(config.install_requirements)
+    install_command.extend(install_targets)
     logger.info("Installing validated vLLM runtime packages: %s", " ".join(install_command))
     _run_pip_command(install_command)
     importlib.invalidate_caches()
