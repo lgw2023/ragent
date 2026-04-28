@@ -21,6 +21,9 @@ bootstrap_runtime_environment()
 # Before `litellm` is imported (see ragent.llm.openai): default to quiet SDK logs.
 # Override with e.g. LITELLM_LOG=DEBUG in the environment when diagnosing calls.
 os.environ.setdefault("LITELLM_LOG", "WARNING")
+# Keep MEP/offline startup deterministic: LiteLLM otherwise tries to fetch its
+# remote model cost map during import and falls back only after a network timeout.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 from functools import partial, wraps

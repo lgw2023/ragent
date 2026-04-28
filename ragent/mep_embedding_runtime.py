@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import platform
+import re
 import shlex
 import shutil
 import socket
@@ -15,6 +17,11 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
+try:
+    from importlib import metadata as importlib_metadata
+except ImportError:  # pragma: no cover - Python < 3.8 is not supported here.
+    import importlib_metadata  # type: ignore
 
 
 logger = logging.getLogger("ragent.mep_embedding_runtime")
@@ -30,6 +37,7 @@ _LOCAL_PROVIDER = "custom_openai"
 _DEFAULT_MODEL_NAME = "BAAI/bge-m3"
 _DEFAULT_API_KEY = "EMPTY"
 _DEFAULT_HOST = "127.0.0.1"
+_DEFAULT_BIND_HOST = _DEFAULT_HOST
 _DEFAULT_RUNNER = "pooling"
 _DEFAULT_STARTUP_TIMEOUT_SECONDS = 300.0
 _MODEL_DIR_MARKERS = ("config.json", "tokenizer.json")
@@ -37,6 +45,16 @@ _DATA_CONFIG_FILENAMES = (
     "embedding.properties",
     "sysconfig.properties",
 )
+_DEFAULT_ASCEND_ENV_SCRIPTS = (
+    "/usr/local/Ascend/ascend-toolkit/set_env.sh",
+    "/usr/local/Ascend/nnal/atb/set_env.sh",
+)
+_VLLM_SUBPROCESS_DEFAULT_ENV = {
+    "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+}
+_VLLM_ENV_PROPERTY_PREFIX = "vllm.env."
+_EXACT_REQUIREMENT_RE = re.compile(r"^([A-Za-z0-9_.-]+)==([^;\s]+)$")
+_VLLM_DEPENDENCY_BOOTSTRAP_DONE: set[tuple[str, ...]] = set()
 
 
 @dataclass(frozen=True)
@@ -45,6 +63,7 @@ class MepEmbeddingLaunchConfig:
     model_path: Path
     served_model_name: str
     host: str
+    bind_host: str
     port: int
     api_key: str
     runner: str
@@ -53,8 +72,14 @@ class MepEmbeddingLaunchConfig:
     max_token_size: int | None = None
     max_model_len: int | None = None
     extra_args: tuple[str, ...] = ()
+    subprocess_env: tuple[tuple[str, str], ...] = ()
+    install_requirements: tuple[str, ...] = ()
+    uninstall_packages: tuple[str, ...] = ()
+    install_no_deps: bool = True
+    install_force_reinstall: bool = True
     launch_mode: str = "auto"
     config_path: Path | None = None
+    data_dir: Path | None = None
 
     @property
     def base_url(self) -> str:
@@ -209,6 +234,34 @@ def _parse_optional_bool(value: Any) -> bool | None:
     raise ValueError(f"Invalid boolean value: {value!r}")
 
 
+def _resolve_subprocess_env(properties: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    resolved: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for key, value in properties.items():
+        if not key.startswith(_VLLM_ENV_PROPERTY_PREFIX):
+            continue
+        env_name = key[len(_VLLM_ENV_PROPERTY_PREFIX) :].strip()
+        if not env_name or env_name in seen:
+            continue
+        normalized_value = _normalize_optional_str(value)
+        if normalized_value is None:
+            continue
+        seen.add(env_name)
+        resolved.append((env_name, normalized_value))
+    return tuple(resolved)
+
+
+def _parse_string_list(value: Any) -> tuple[str, ...]:
+    normalized = _normalize_optional_str(value)
+    if normalized is None:
+        return ()
+    return tuple(
+        item
+        for item in shlex.split(normalized.replace(",", " "))
+        if item.strip()
+    )
+
+
 def _has_complete_external_embedding_config() -> bool:
     return all(_normalize_optional_str(os.getenv(key)) for key in _MANAGED_ENV_VARS[:3])
 
@@ -226,6 +279,11 @@ def _resolve_property(
         if property_value is not None:
             return property_value
     return None
+
+
+def _should_pass_vllm_api_key(api_key: str) -> bool:
+    normalized = api_key.strip()
+    return bool(normalized) and normalized.lower() not in {"empty", "none", "null"}
 
 
 def _find_available_port(host: str) -> int:
@@ -350,11 +408,31 @@ def resolve_embedding_launch_config(
         properties,
         preferred_model_path=preferred_model_path,
     )
-    host = _resolve_property(
+    legacy_host = _resolve_property(
         properties,
         "RAGENT_MEP_EMBEDDING_HOST",
         "vllm.host",
-    ) or _DEFAULT_HOST
+    )
+    host = (
+        _resolve_property(
+            properties,
+            "RAGENT_MEP_EMBEDDING_CLIENT_HOST",
+            "vllm.client_host",
+            "embedding.host",
+        )
+        or legacy_host
+        or _DEFAULT_HOST
+    )
+    bind_host = (
+        _resolve_property(
+            properties,
+            "RAGENT_MEP_VLLM_BIND_HOST",
+            "vllm.bind_host",
+            "vllm.listen_host",
+        )
+        or legacy_host
+        or _DEFAULT_BIND_HOST
+    )
     configured_port = _parse_optional_int(
         _resolve_property(
             properties,
@@ -362,7 +440,11 @@ def resolve_embedding_launch_config(
             "vllm.port",
         )
     )
-    port = configured_port if configured_port not in (None, 0) else _find_available_port(host)
+    port = (
+        configured_port
+        if configured_port not in (None, 0)
+        else _find_available_port(bind_host)
+    )
     startup_timeout_seconds = _parse_optional_float(
         _resolve_property(
             properties,
@@ -405,14 +487,28 @@ def resolve_embedding_launch_config(
             or ""
         )
     )
+    install_no_deps_value = _resolve_property(
+        properties,
+        "RAGENT_MEP_VLLM_INSTALL_NO_DEPS",
+        "vllm.install_no_deps",
+    )
+    install_force_reinstall_value = _resolve_property(
+        properties,
+        "RAGENT_MEP_VLLM_INSTALL_FORCE_REINSTALL",
+        "vllm.install_force_reinstall",
+    )
 
     logger.info(
         "Resolved embedding launch config. input_model_dir=%s bundle_model_dir=%s "
-        "data_dir=%s model_path=%s path_appendix=%s config_path=%s legacy_sysconfig_present=%s",
+        "data_dir=%s model_path=%s bind_host=%s client_host=%s port=%s "
+        "path_appendix=%s config_path=%s legacy_sysconfig_present=%s",
         resolved_model_dir_input,
         resolved_model_dir,
         resolved_data_dir,
         model_path,
+        bind_host,
+        host,
+        port,
         _normalize_optional_str(os.getenv("path_appendix")),
         config_path,
         (resolved_model_dir / "sysconfig.properties").exists(),
@@ -423,6 +519,7 @@ def resolve_embedding_launch_config(
         model_path=model_path,
         served_model_name=served_model_name,
         host=host,
+        bind_host=bind_host,
         port=port,
         api_key=api_key,
         runner=runner,
@@ -440,8 +537,34 @@ def resolve_embedding_launch_config(
             )
         ),
         extra_args=extra_args,
+        subprocess_env=_resolve_subprocess_env(properties),
+        install_requirements=_parse_string_list(
+            _resolve_property(
+                properties,
+                "RAGENT_MEP_VLLM_INSTALL_REQUIREMENTS",
+                "vllm.install_requirements",
+            )
+        ),
+        uninstall_packages=_parse_string_list(
+            _resolve_property(
+                properties,
+                "RAGENT_MEP_VLLM_UNINSTALL_PACKAGES",
+                "vllm.uninstall_packages",
+            )
+        ),
+        install_no_deps=(
+            _parse_optional_bool(install_no_deps_value)
+            if install_no_deps_value is not None
+            else True
+        ),
+        install_force_reinstall=(
+            _parse_optional_bool(install_force_reinstall_value)
+            if install_force_reinstall_value is not None
+            else True
+        ),
         launch_mode=launch_mode,
         config_path=config_path,
+        data_dir=resolved_data_dir,
     )
 
 
@@ -450,14 +573,14 @@ def build_vllm_command_candidates(
 ) -> list[tuple[str, ...]]:
     common_args = [
         "--host",
-        config.host,
+        config.bind_host,
         "--port",
         str(config.port),
-        "--api-key",
-        config.api_key,
         "--served-model-name",
         config.served_model_name,
     ]
+    if _should_pass_vllm_api_key(config.api_key):
+        common_args.extend(["--api-key", config.api_key])
     if config.max_model_len is not None:
         common_args.extend(["--max-model-len", str(config.max_model_len)])
     common_args.extend(config.extra_args)
@@ -494,12 +617,7 @@ def build_vllm_command_candidates(
             *common_args,
         ]
         if config.runner:
-            module_args.extend(
-                [
-                    "--task",
-                    "embed" if config.runner == "pooling" else config.runner,
-                ]
-            )
+            module_args.extend(["--runner", config.runner])
         candidates.append(tuple(module_args))
 
     if not candidates:
@@ -508,6 +626,331 @@ def build_vllm_command_candidates(
             "Expected either the `vllm` CLI on PATH or the Python `vllm` package."
         )
     return candidates
+
+
+def _split_env_script_list(value: str) -> tuple[str, ...]:
+    raw_parts: list[str] = []
+    for chunk in value.replace(",", os.pathsep).split(os.pathsep):
+        normalized = chunk.strip()
+        if normalized:
+            raw_parts.append(normalized)
+    return tuple(raw_parts)
+
+
+def _resolve_ascend_env_scripts() -> tuple[Path, ...]:
+    configured_single = _normalize_optional_str(os.getenv("RAGENT_ASCEND_SET_ENV_SH"))
+    configured_multi = _normalize_optional_str(os.getenv("RAGENT_ASCEND_ENV_SHS"))
+    if configured_single is not None:
+        raw_scripts = (configured_single,)
+    elif configured_multi is not None:
+        raw_scripts = _split_env_script_list(configured_multi)
+    else:
+        raw_scripts = _DEFAULT_ASCEND_ENV_SCRIPTS
+
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for raw_script in raw_scripts:
+        candidate = Path(raw_script).expanduser()
+        if not candidate.is_file():
+            continue
+        resolved_candidate = candidate.resolve()
+        if resolved_candidate in seen:
+            continue
+        resolved.append(resolved_candidate)
+        seen.add(resolved_candidate)
+    return tuple(resolved)
+
+
+def _load_env_after_sourcing_scripts(
+    script_paths: tuple[Path, ...],
+    base_env: dict[str, str],
+) -> dict[str, str]:
+    source_commands = "; ".join(
+        f"source {shlex.quote(str(script_path))} >/dev/null 2>&1 || true"
+        for script_path in script_paths
+    )
+    command = f"{source_commands}; env -0"
+    completed = subprocess.run(
+        ["bash", "-lc", command],
+        check=False,
+        env=base_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if completed.returncode != 0:
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        script_list = ", ".join(str(path) for path in script_paths)
+        raise RuntimeError(
+            f"failed to source Ascend environment scripts: {script_list}; {stderr}"
+        )
+
+    sourced_env: dict[str, str] = {}
+    for raw_item in completed.stdout.split(b"\0"):
+        if not raw_item or b"=" not in raw_item:
+            continue
+        key, value = raw_item.split(b"=", 1)
+        sourced_env[key.decode("utf-8", errors="surrogateescape")] = value.decode(
+            "utf-8",
+            errors="surrogateescape",
+        )
+    return sourced_env
+
+
+def _prepend_env_path(env: dict[str, str], key: str, raw_prefix: str | None) -> None:
+    if not raw_prefix:
+        return
+    existing_parts = [part for part in env.get(key, "").split(os.pathsep) if part]
+    prefix_parts = [part for part in raw_prefix.split(os.pathsep) if part]
+    if not prefix_parts:
+        return
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for part in (*prefix_parts, *existing_parts):
+        if part in seen:
+            continue
+        seen.add(part)
+        merged.append(part)
+    env[key] = os.pathsep.join(merged)
+
+
+def _prepend_bootstrapped_pythonpath(env: dict[str, str]) -> None:
+    _prepend_env_path(
+        env,
+        "PYTHONPATH",
+        os.getenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH"),
+    )
+
+
+def build_vllm_subprocess_env(
+    config: MepEmbeddingLaunchConfig | None = None,
+) -> dict[str, str]:
+    env = os.environ.copy()
+    for key, value in _VLLM_SUBPROCESS_DEFAULT_ENV.items():
+        env.setdefault(key, value)
+    _prepend_bootstrapped_pythonpath(env)
+
+    ascend_env_scripts = _resolve_ascend_env_scripts()
+    if ascend_env_scripts:
+        try:
+            sourced_env = _load_env_after_sourcing_scripts(ascend_env_scripts, env)
+        except Exception as exc:
+            logger.warning("Unable to load Ascend CANN environment: %s", exc)
+        else:
+            # Keep explicit runtime overrides from the platform or caller, but
+            # merge the CANN library/path additions that set_env.sh contributes.
+            for key, value in sourced_env.items():
+                if key in os.environ and key not in {
+                    "PATH",
+                    "LD_LIBRARY_PATH",
+                    "PYTHONPATH",
+                }:
+                    continue
+                env[key] = value
+    for key, value in _VLLM_SUBPROCESS_DEFAULT_ENV.items():
+        env.setdefault(key, value)
+    _prepend_bootstrapped_pythonpath(env)
+    if config is not None:
+        for key, value in config.subprocess_env:
+            env[key] = value
+    return env
+
+
+def _normalize_distribution_name(name: str) -> str:
+    return name.replace("_", "-").lower()
+
+
+def _requirement_name_and_version(requirement: str) -> tuple[str, str]:
+    match = _EXACT_REQUIREMENT_RE.match(requirement.strip())
+    if match is None:
+        raise ValueError(
+            "vLLM runtime install requirements must be exact pins, "
+            f"got: {requirement!r}"
+        )
+    return _normalize_distribution_name(match.group(1)), match.group(2)
+
+
+def _install_artifact_name_and_version(path: Path) -> tuple[str, str] | None:
+    if path.suffix == ".whl":
+        parts = path.name[:-4].split("-")
+        if len(parts) < 2:
+            return None
+        return _normalize_distribution_name(parts[0]), parts[1]
+
+    if path.name.endswith(".tar.gz"):
+        stem = path.name[:-7]
+    elif path.suffix == ".zip":
+        stem = path.name[:-4]
+    else:
+        return None
+
+    if "-" not in stem:
+        return None
+    name, version = stem.rsplit("-", 1)
+    if not name or not version:
+        return None
+    return _normalize_distribution_name(name), version
+
+
+def _distribution_is_loaded_from_wheel(dist: importlib_metadata.Distribution) -> bool:
+    try:
+        location = Path(str(dist.locate_file("")))
+    except Exception:
+        return False
+    return any(part.endswith(".whl") for part in location.parts) or location.name.endswith(
+        ".whl"
+    )
+
+
+def _installed_requirements_satisfied(requirements: tuple[str, ...]) -> bool:
+    for requirement in requirements:
+        name, expected_version = _requirement_name_and_version(requirement)
+        try:
+            distribution = importlib_metadata.distribution(name)
+        except importlib_metadata.PackageNotFoundError:
+            return False
+        if _distribution_is_loaded_from_wheel(distribution):
+            return False
+        installed_version = distribution.version
+        if installed_version != expected_version:
+            return False
+    return True
+
+
+def _iter_runtime_platform_tags() -> tuple[str, ...]:
+    try:
+        from mep_dependency_bootstrap import iter_platform_tags
+    except Exception:
+        os_name = platform.system().strip().lower()
+        if os_name.startswith("linux"):
+            os_name = "linux"
+        elif os_name.startswith("darwin"):
+            os_name = "darwin"
+        arch = platform.machine().strip().lower()
+        if arch in {"x86_64", "amd64"}:
+            arch = "amd64"
+        elif arch in {"aarch64", "arm64"}:
+            arch = "arm64"
+        return (f"{os_name or 'unknown'}-{arch or 'unknown'}-py{sys.version_info.major}.{sys.version_info.minor}",)
+    return tuple(iter_platform_tags())
+
+
+def _iter_vllm_wheelhouse_dirs(config: MepEmbeddingLaunchConfig) -> tuple[Path, ...]:
+    env_value = _normalize_optional_str(os.getenv("RAGENT_MEP_WHEELHOUSE_DIRS"))
+    if env_value is not None:
+        dirs = [
+            Path(raw_path).expanduser().resolve()
+            for raw_path in env_value.split(os.pathsep)
+            if raw_path.strip()
+        ]
+        return tuple(path for path in dirs if path.is_dir())
+
+    if config.data_dir is None:
+        return ()
+
+    wheelhouse_root = config.data_dir / "deps" / "wheelhouse"
+    if not wheelhouse_root.is_dir():
+        return ()
+
+    resolved_dirs: list[Path] = []
+    seen: set[Path] = set()
+    for tag in _iter_runtime_platform_tags():
+        candidate = (wheelhouse_root / tag).resolve()
+        if candidate.is_dir() and candidate not in seen:
+            seen.add(candidate)
+            resolved_dirs.append(candidate)
+    legacy_dir = wheelhouse_root.resolve()
+    if legacy_dir not in seen:
+        resolved_dirs.append(legacy_dir)
+    return tuple(resolved_dirs)
+
+
+def _validate_install_artifacts_exist(
+    requirements: tuple[str, ...],
+    wheelhouse_dirs: tuple[Path, ...],
+) -> None:
+    available = {
+        parsed
+        for wheelhouse_dir in wheelhouse_dirs
+        for artifact_path in wheelhouse_dir.iterdir()
+        if (parsed := _install_artifact_name_and_version(artifact_path)) is not None
+    }
+    missing: list[str] = []
+    for requirement in requirements:
+        if _requirement_name_and_version(requirement) not in available:
+            missing.append(requirement)
+    if missing:
+        raise FileNotFoundError(
+            "Configured vLLM runtime install requirements are missing "
+            "installable artifacts from "
+            f"wheelhouse: {', '.join(missing)}"
+        )
+
+
+def _run_pip_command(command: list[str]) -> None:
+    completed = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if completed.returncode != 0:
+        output = completed.stdout.strip()
+        raise RuntimeError(
+            f"pip command failed with exit_code={completed.returncode}: "
+            f"{' '.join(command)}\n{output}"
+        )
+
+
+def _ensure_vllm_runtime_dependencies(config: MepEmbeddingLaunchConfig) -> None:
+    if not config.install_requirements:
+        return
+    if _installed_requirements_satisfied(config.install_requirements):
+        return
+
+    install_key = tuple(config.install_requirements)
+    if install_key in _VLLM_DEPENDENCY_BOOTSTRAP_DONE:
+        return
+
+    wheelhouse_dirs = _iter_vllm_wheelhouse_dirs(config)
+    if not wheelhouse_dirs:
+        raise FileNotFoundError(
+            "vLLM runtime install requirements are configured, but no matching "
+            "data/deps/wheelhouse directory was found."
+        )
+    _validate_install_artifacts_exist(config.install_requirements, wheelhouse_dirs)
+
+    if config.uninstall_packages:
+        uninstall_command = [
+            sys.executable,
+            "-m",
+            "pip",
+            "uninstall",
+            *config.uninstall_packages,
+            "-y",
+        ]
+        logger.info("Uninstalling image-provided vLLM packages: %s", " ".join(uninstall_command))
+        _run_pip_command(uninstall_command)
+
+    install_command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-index",
+    ]
+    for wheelhouse_dir in wheelhouse_dirs:
+        install_command.extend(["--find-links", str(wheelhouse_dir)])
+    if config.install_no_deps:
+        install_command.append("--no-deps")
+    if config.install_force_reinstall:
+        install_command.append("--force-reinstall")
+    install_command.extend(config.install_requirements)
+    logger.info("Installing validated vLLM runtime packages: %s", " ".join(install_command))
+    _run_pip_command(install_command)
+    importlib.invalidate_caches()
+    _VLLM_DEPENDENCY_BOOTSTRAP_DONE.add(install_key)
 
 
 def _read_log_tail(path: Path, max_chars: int = 4000) -> str:
@@ -565,7 +1008,7 @@ def _launch_candidate(
             cwd=str(config.model_dir),
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            env=os.environ.copy(),
+            env=build_vllm_subprocess_env(config),
         )
 
     started_at = time.monotonic()
@@ -636,6 +1079,7 @@ def bootstrap_local_embedding_runtime(
         return None
 
     config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+    _ensure_vllm_runtime_dependencies(config)
     launch_errors: list[str] = []
     for command in build_vllm_command_candidates(config):
         logger.info(
@@ -672,5 +1116,6 @@ __all__ = [
     "MepEmbeddingLaunchConfig",
     "bootstrap_local_embedding_runtime",
     "build_vllm_command_candidates",
+    "build_vllm_subprocess_env",
     "resolve_embedding_launch_config",
 ]

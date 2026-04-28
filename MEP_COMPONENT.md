@@ -235,17 +235,51 @@ EMBEDDING_MODEL_KEY
 
 如果没有完整外部 embedding 配置，`CustomerModel.load()` 会优先读取 `data/config/embedding.properties`，再通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 拉起本地 OpenAI-compatible embedding 服务。旧的 `model/sysconfig.properties` 仍作为兼容兜底，但新模型包不再把组件配置文件放入 `model/`。
 
-当前代码支持的 vLLM 启动候选仍是：
+当前 bge-m3 模型包已按实测 Ascend 910B vLLM 镜像固定为模块入口启动：
 
 ```bash
-vllm serve <model_path> ...
+python -m vllm.entrypoints.openai.api_server \
+  --model <model_path> \
+  --runner pooling \
+  --served-model-name BAAI-bge-m3 \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --max-model-len 8192 \
+  --dtype auto
 ```
 
-或：
+对应配置位于 `mep/model_packages/bge-m3/modelDir/data/config/embedding.properties`：
 
-```bash
-python -m vllm.entrypoints.openai.api_server --model <model_path> ...
+```text
+vllm.runner=pooling
+vllm.launch_mode=module
+vllm.served_model_name=BAAI-bge-m3
+vllm.bind_host=0.0.0.0
+vllm.host=127.0.0.1
+vllm.port=8000
+vllm.max_model_len=8192
+vllm.extra_args=--dtype auto
+vllm.uninstall_packages=vllm,vllm-ascend
+vllm.install_requirements=triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0
+vllm.install_no_deps=true
+vllm.install_force_reinstall=true
+vllm.env.ASCEND_RT_VISIBLE_DEVICES=0
+vllm.env.VLLM_LOGGING_LEVEL=DEBUG
+vllm.env.VLLM_PLUGINS=ascend
 ```
+
+其中 `vllm.bind_host` 用于传给 vLLM 的 `--host`，`vllm.host` 是组件侧回连本地 OpenAI-compatible API 的地址。`vllm.api_key=EMPTY` 只用于满足 ragent 侧 OpenAI-compatible 调用参数；只有配置为真实 key 时才会传给 vLLM `--api-key`。
+
+在构造 vLLM 启动命令前，组件会先检查这三个精确版本是否已安装；如果镜像内是旧版本，则从 `data/deps/wheelhouse/<platform-tag>/` 离线执行一次 `pip uninstall/install`，对齐验证脚本里的修复顺序。
+
+`ragent.mep_embedding_runtime` 仍保留 `auto | cli | module` 三种启动模式用于兼容，但模型包默认走上面这条已验证路径。子进程启动前会自动尝试加载：
+
+```text
+/usr/local/Ascend/ascend-toolkit/set_env.sh
+/usr/local/Ascend/nnal/atb/set_env.sh
+```
+
+如目标镜像路径不同，可用 `RAGENT_ASCEND_SET_ENV_SH` 指定单个脚本，或用 `RAGENT_ASCEND_ENV_SHS` 指定多个脚本。
 
 ### 5.5 本地子进程能力
 
@@ -262,12 +296,36 @@ python -m vllm.entrypoints.openai.api_server --model <model_path> ...
 
 ```text
 data/deps/pythonpath/
+data/deps/pythonpath/<platform-tag>/
 data/deps/site-packages/
+data/deps/site-packages/<platform-tag>/
 data/deps/python/
+data/deps/python/<platform-tag>/
+data/deps/wheelhouse/<platform-tag>/*.whl
+data/deps/wheelhouse/<platform-tag>/*.tar.gz
 data/deps/wheelhouse/*.whl
 ```
 
-这用于承载目标 vLLM 镜像中没有的轻量 Python 依赖。纯 Python wheel 可以直接放入 `wheelhouse/`；带 native 扩展的依赖应在和目标镜像兼容的环境中预先安装或展开到 `site-packages/`。运行时不会默认向只读 `data/` 写入任何文件。
+这用于承载目标 vLLM 镜像中没有的轻量 Python 依赖。`<platform-tag>` 形如 `linux-arm64-py3.10`；目标 Ascend 910B MEP 镜像当前是 `linux-arm64-py3.10`。纯 Python wheel 可以直接放入 `wheelhouse/<platform-tag>/` 并进入 import 路径；带 native 扩展的依赖应通过配置驱动的离线 `pip install` 修复步骤安装，或在兼容环境中预先展开到 `site-packages/<platform-tag>/`。运行时不会默认向只读 `data/` 写入任何文件。
+
+组件启动时会优先加载匹配平台标签的依赖目录，再兼容旧的扁平目录。对于 wheelhouse，只有纯 Python wheel 会被直接加入 import 路径；带 `.so` / `.pyd` 等 native 扩展的 wheel 以及 `.tar.gz` source archive 不做 zipimport，必须通过离线 `pip install` 修复步骤或预展开的 `site-packages/<platform-tag>/` 使用。纯 Python wheel 只有在目标镜像中已安装且版本完全一致时才会跳过；确需强制加入纯 Python wheel 时设置 `RAGENT_MEP_FORCE_WHEELHOUSE=1`。
+
+已验证镜像本身的 vLLM 版本组合需要先修正，详见：
+
+```text
+MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh
+MEP_platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt
+```
+
+关键安装顺序是先卸载镜像内旧包，再安装：
+
+```text
+triton_ascend-3.2.0-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
+vllm-0.13.0-cp38-abi3-manylinux_2_31_aarch64.whl
+vllm-ascend==0.13.0
+```
+
+`tools/export_mep_vllm_ascend_wheelhouse.py` 可从已验证 freeze 导出 `linux-arm64-py3.10` wheelhouse，并生成 `manifest.json`、`downloaded-wheels.txt`、`source-archives.txt`、`downloaded-artifacts.txt`、`failed-requirements.txt`、`local-file-requirements.txt`。`@ file://...whl` 中 `/tmp/ragent-mep-test` 前缀会默认按标准 wheel 从索引解析下载，这覆盖验证脚本里的 `triton-ascend==3.2.0`；`/home/mep/...` 和 `/usr/local/Ascend/...` 这类镜像内置路径默认只记录不下载。如果这些 wheel 已另存到某个目录，可通过 `--local-wheel-dir <dir>` 复制进 wheelhouse；如果确实需要从索引解析所有 `file://` wheel，再显式传 `--resolve-local-file-wheels`。若手工补入 `.tar.gz` sdist，导出 manifest 会把它记录为 source archive；运行时不会直接 import 这类 archive，只会交给配置驱动的离线 `pip install` 使用。
 
 这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 只负责在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `data/deps` 中的依赖影响后续导入。
 

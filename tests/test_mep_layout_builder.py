@@ -37,6 +37,10 @@ def _write_fake_repo(repo_root: Path) -> None:
         "model.relative_path=hf_model\n",
         encoding="utf-8",
     )
+    wheelhouse = model_dir / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
+    wheelhouse.mkdir(parents=True)
+    (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake wheel")
+    (wheelhouse / "demo_sdist-1.0.0.tar.gz").write_bytes(b"fake sdist")
     (model_dir / "meta").mkdir()
     (model_dir / "meta" / "type.mf").write_text("model\n", encoding="utf-8")
 
@@ -62,6 +66,7 @@ def test_build_mep_layout_creates_platform_shaped_runtime(tmp_path: Path):
     assert (output / "meta").is_symlink()
     assert (output / "model" / "baai_bge_m3" / "config.json").exists()
     assert (output / "data" / "config" / "embedding.properties").exists()
+    assert (output / "data" / "deps" / "README.md").exists()
     assert (output / "data" / "kg" / "sample_kg").is_dir()
 
 
@@ -93,6 +98,8 @@ def test_build_mep_layout_materializes_and_archives_zip(tmp_path: Path):
     assert "component/mep_dependency_bootstrap.py" in names
     assert "model/hf_model/config.json" in names
     assert "data/config/embedding.properties" in names
+    assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_dep-1.0.0-py3-none-any.whl" in names
+    assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_sdist-1.0.0.tar.gz" in names
     assert "meta/type.mf" in names
 
 
@@ -173,6 +180,8 @@ def test_build_mep_layout_materializes_and_archives_tar_formats(
     assert "component/mep_dependency_bootstrap.py" in names
     assert "model/hf_model/config.json" in names
     assert "data/config/embedding.properties" in names
+    assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_dep-1.0.0-py3-none-any.whl" in names
+    assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_sdist-1.0.0.tar.gz" in names
     assert "meta/type.mf" in names
     assert not any(name.startswith("runtime/") for name in names)
 

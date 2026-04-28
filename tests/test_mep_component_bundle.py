@@ -5,6 +5,8 @@ import json
 import importlib.util
 import os
 import sys
+import zipfile
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -76,6 +78,111 @@ def test_mep_data_dependency_bootstrap_clears_stale_record_when_no_paths(
     assert "RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH" not in os.environ
 
 
+def test_mep_data_dependency_bootstrap_uses_platform_wheelhouse(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    selected_wheelhouse = (
+        runtime_root / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
+    )
+    other_wheelhouse = (
+        runtime_root / "data" / "deps" / "wheelhouse" / "linux-amd64-py3.10"
+    )
+    selected_wheelhouse.mkdir(parents=True)
+    other_wheelhouse.mkdir(parents=True)
+    selected_wheel = (
+        selected_wheelhouse / "definitely_missing_pkg-1.0.0-py3-none-any.whl"
+    )
+    selected_wheel.write_bytes(b"not a real wheel")
+    other_wheel = other_wheelhouse / "other_missing_pkg-1.0.0-py3-none-any.whl"
+    other_wheel.write_bytes(b"not a real wheel")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "linux-arm64-py3.10")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert str(selected_wheel.resolve()) in added_paths
+    assert str(other_wheel.resolve()) not in added_paths
+    assert sys.path[0] == str(selected_wheel.resolve())
+
+
+def test_mep_data_dependency_bootstrap_skips_already_installed_wheels(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    wheelhouse = runtime_root / "data" / "deps" / "wheelhouse" / "test-platform"
+    wheelhouse.mkdir(parents=True)
+    installed_pip_version = importlib_metadata.version("pip")
+    installed_wheel = wheelhouse / f"pip-{installed_pip_version}-py3-none-any.whl"
+    installed_wheel.write_bytes(b"not a real wheel")
+    mismatched_wheel = wheelhouse / "pip-999.0.0-py3-none-any.whl"
+    mismatched_wheel.write_bytes(b"not a real wheel")
+    missing_wheel = wheelhouse / "not_installed_by_default-1.0.0-py3-none-any.whl"
+    missing_wheel.write_bytes(b"not a real wheel")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert str(missing_wheel.resolve()) in added_paths
+    assert str(mismatched_wheel.resolve()) in added_paths
+    assert str(installed_wheel.resolve()) not in added_paths
+
+
+def test_mep_data_dependency_bootstrap_skips_native_wheel_zipimport(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    wheelhouse = runtime_root / "data" / "deps" / "wheelhouse" / "test-platform"
+    wheelhouse.mkdir(parents=True)
+    pure_wheel = wheelhouse / "pure_pkg-1.0.0-py3-none-any.whl"
+    with zipfile.ZipFile(pure_wheel, "w") as wheel:
+        wheel.writestr("pure_pkg/__init__.py", "")
+    native_wheel = wheelhouse / "native_pkg-1.0.0-cp310-cp310-linux_aarch64.whl"
+    with zipfile.ZipFile(native_wheel, "w") as wheel:
+        wheel.writestr("native_pkg/native_extension.so", b"fake")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_ALLOW_NATIVE_WHEEL_ZIPIMPORT", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert str(pure_wheel.resolve()) in added_paths
+    assert str(native_wheel.resolve()) not in added_paths
+
+
 def test_package_json_uses_non_placeholder_scope():
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -85,6 +192,44 @@ def test_package_json_uses_non_placeholder_scope():
     assert package["scope"] != "replace-me"
     assert package["type"] == "aiexplore"
     assert package["name"] == "ragent_inference_mep"
+
+
+def test_bge_m3_embedding_properties_match_validated_vllm_ascend_runtime():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_path = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "bge-m3"
+        / "modelDir"
+        / "data"
+        / "config"
+        / "embedding.properties"
+    )
+    properties = {}
+    for line in config_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        properties[key] = value
+
+    assert properties["vllm.launch_mode"] == "module"
+    assert properties["vllm.runner"] == "pooling"
+    assert properties["vllm.served_model_name"] == "BAAI-bge-m3"
+    assert properties["vllm.bind_host"] == "0.0.0.0"
+    assert properties["vllm.host"] == "127.0.0.1"
+    assert properties["vllm.port"] == "8000"
+    assert properties["vllm.max_model_len"] == "8192"
+    assert properties["vllm.extra_args"] == "--dtype auto"
+    assert properties["vllm.uninstall_packages"] == "vllm,vllm-ascend"
+    assert (
+        properties["vllm.install_requirements"]
+        == "triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0"
+    )
+    assert properties["vllm.env.ASCEND_RT_VISIBLE_DEVICES"] == "0"
+    assert properties["vllm.env.VLLM_LOGGING_LEVEL"] == "DEBUG"
+    assert properties["vllm.env.VLLM_PLUGINS"] == "ascend"
 
 
 def test_root_process_exports_customer_model():
