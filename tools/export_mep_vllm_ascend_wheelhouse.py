@@ -46,7 +46,7 @@ DEFAULT_PLATFORMS = (
     "manylinux2014_aarch64",
 )
 DEFAULT_ABIS = ("cp310", "abi3")
-DEFAULT_EXTRA_REQUIREMENTS: tuple[str, ...] = ()
+DEFAULT_EXTRA_REQUIREMENTS: tuple[str, ...] = ("cbor2==5.9.0",)
 DEFAULT_RESOLVABLE_LOCAL_FILE_PREFIXES = ("/tmp/ragent-mep-test",)
 PINNED_REQUIREMENT_RE = re.compile(r"^[A-Za-z0-9_.-]+(?:\[[^]]+\])?==[^#;\s]+$")
 

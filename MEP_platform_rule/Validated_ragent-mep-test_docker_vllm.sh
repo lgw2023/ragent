@@ -136,7 +136,7 @@ docker run -d \
   /bin/bash -lc "while true; do sleep 3600; done" >/dev/null
 
 step "Run test steps inside the container"
-docker exec \
+docker exec -i \
   -e CONTAINER_TEST_DIR="$CONTAINER_TEST_DIR" \
   -e RUNTIME_DIR="$RUNTIME_DIR" \
   -e MODEL_PACKAGE="$MODEL_PACKAGE" \
@@ -173,7 +173,9 @@ source_if_exists() {
   local path="$1"
   if [ -f "$path" ]; then
     # shellcheck disable=SC1090
+    set +u
     source "$path"
+    set -u
   else
     echo "warning: Ascend env script not found: $path"
   fi
@@ -270,15 +272,29 @@ MODEL_PATH="$(resolve_model_path)"
 echo "resolved model path: $MODEL_PATH"
 
 step "Install validated vLLM repair wheels from the offline bundle"
+CBOR2_WHEEL="$(single_match_glob "$RUNTIME_DIR/data/deps/wheelhouse/*/cbor2-*.whl" "cbor2 repair wheel")"
+WHEELHOUSE_DIR="$(dirname "$CBOR2_WHEEL")"
 TRITON_WHEEL="$(single_match_glob "$CONTAINER_TEST_DIR/triton_ascend-3.2.0*.whl" "triton-ascend repair wheel")"
 VLLM_WHEEL="$(single_match_glob "$CONTAINER_TEST_DIR/vllm-0.13.0*.whl" "vllm repair wheel")"
 VLLM_ASCEND_WHEEL="$(single_match_glob "$CONTAINER_TEST_DIR/vllm_ascend-0.13.0*.whl" "vllm-ascend repair wheel")"
+WHEELHOUSE_WHEELS=()
+while IFS= read -r wheel_path; do
+  WHEELHOUSE_WHEELS+=("$wheel_path")
+done < <(find "$WHEELHOUSE_DIR" -maxdepth 1 -type f -name '*.whl' ! -name '._*' | sort)
+if [ "${#WHEELHOUSE_WHEELS[@]}" -eq 0 ]; then
+  echo "no wheel files found under $WHEELHOUSE_DIR" >&2
+  exit 1
+fi
+echo "using wheelhouse: $WHEELHOUSE_DIR"
+echo "wheelhouse wheel count: ${#WHEELHOUSE_WHEELS[@]}"
+echo "required repair wheels:"
+echo "  $(basename "$CBOR2_WHEEL")"
+echo "  $(basename "$TRITON_WHEEL")"
+echo "  $(basename "$VLLM_WHEEL")"
+echo "  $(basename "$VLLM_ASCEND_WHEEL")"
 
 python3 -m pip uninstall vllm vllm-ascend -y || true
-python3 -m pip install --no-index --no-deps --force-reinstall \
-  "$TRITON_WHEEL" \
-  "$VLLM_WHEEL" \
-  "$VLLM_ASCEND_WHEEL"
+python3 -m pip install --no-index --no-deps --force-reinstall "${WHEELHOUSE_WHEELS[@]}"
 
 step "Load Ascend runtime environment"
 source_if_exists /usr/local/Ascend/ascend-toolkit/set_env.sh

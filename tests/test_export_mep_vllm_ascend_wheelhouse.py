@@ -6,6 +6,10 @@ from pathlib import Path
 from tools import export_mep_vllm_ascend_wheelhouse as exporter
 
 
+def test_default_extra_requirements_include_cbor2():
+    assert "cbor2==5.9.0" in exporter.DEFAULT_EXTRA_REQUIREMENTS
+
+
 def test_export_wheelhouse_resolves_only_validated_tmp_local_wheels(
     monkeypatch,
     tmp_path: Path,

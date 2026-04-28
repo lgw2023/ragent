@@ -260,9 +260,10 @@ vllm.port=8000
 vllm.max_model_len=8192
 vllm.extra_args=--dtype auto
 vllm.uninstall_packages=vllm,vllm-ascend
-vllm.install_requirements=triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0
+vllm.install_requirements=cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0
 vllm.install_no_deps=true
 vllm.install_force_reinstall=true
+vllm.install_all_wheelhouse_wheels=true
 vllm.env.ASCEND_RT_VISIBLE_DEVICES=0
 vllm.env.VLLM_LOGGING_LEVEL=DEBUG
 vllm.env.VLLM_PLUGINS=ascend
@@ -317,15 +318,16 @@ MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh
 MEP_platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt
 ```
 
-关键安装顺序是先卸载镜像内旧包，再安装：
+关键安装方式是先卸载镜像内旧包，再从匹配平台的 wheelhouse 精确重装所有 wheel。这里使用 `--no-deps` 不是跳过依赖，而是因为依赖已经作为显式 wheel 一并安装，不能让 pip resolver 把 Ascend 验证组合重新解成不兼容版本。关键修复包包括：
 
 ```text
+cbor2-5.9.0-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
 triton_ascend-3.2.0-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
 vllm-0.13.0-cp38-abi3-manylinux_2_31_aarch64.whl
 vllm-ascend==0.13.0
 ```
 
-`tools/export_mep_vllm_ascend_wheelhouse.py` 可从已验证 freeze 导出 `linux-arm64-py3.10` wheelhouse，并生成 `manifest.json`、`downloaded-wheels.txt`、`source-archives.txt`、`downloaded-artifacts.txt`、`failed-requirements.txt`、`local-file-requirements.txt`。`@ file://...whl` 中 `/tmp/ragent-mep-test` 前缀会默认按标准 wheel 从索引解析下载，这覆盖验证脚本里的 `triton-ascend==3.2.0`；`/home/mep/...` 和 `/usr/local/Ascend/...` 这类镜像内置路径默认只记录不下载。如果这些 wheel 已另存到某个目录，可通过 `--local-wheel-dir <dir>` 复制进 wheelhouse；如果确实需要从索引解析所有 `file://` wheel，再显式传 `--resolve-local-file-wheels`。若手工补入 `.tar.gz` sdist，导出 manifest 会把它记录为 source archive；运行时不会直接 import 这类 archive，只会交给配置驱动的离线 `pip install` 使用。
+`tools/export_mep_vllm_ascend_wheelhouse.py` 可从已验证 freeze 导出 `linux-arm64-py3.10` wheelhouse，并额外补入 `cbor2==5.9.0`。它会生成 `manifest.json`、`downloaded-wheels.txt`、`source-archives.txt`、`downloaded-artifacts.txt`、`failed-requirements.txt`、`local-file-requirements.txt`。`@ file://...whl` 中 `/tmp/ragent-mep-test` 前缀会默认按标准 wheel 从索引解析下载，这覆盖验证脚本里的 `triton-ascend==3.2.0`；`/home/mep/...` 和 `/usr/local/Ascend/...` 这类镜像内置路径默认只记录不下载。如果这些 wheel 已另存到某个目录，可通过 `--local-wheel-dir <dir>` 复制进 wheelhouse；如果确实需要从索引解析所有 `file://` wheel，再显式传 `--resolve-local-file-wheels`。若手工补入 `.tar.gz` sdist，导出 manifest 会把它记录为 source archive；运行时不会直接 import 这类 archive，只会交给配置驱动的离线 `pip install` 使用。
 
 这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 只负责在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `data/deps` 中的依赖影响后续导入。
 

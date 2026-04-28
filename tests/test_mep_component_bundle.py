@@ -225,8 +225,9 @@ def test_bge_m3_embedding_properties_match_validated_vllm_ascend_runtime():
     assert properties["vllm.uninstall_packages"] == "vllm,vllm-ascend"
     assert (
         properties["vllm.install_requirements"]
-        == "triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0"
+        == "cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0"
     )
+    assert properties["vllm.install_all_wheelhouse_wheels"] == "true"
     assert properties["vllm.env.ASCEND_RT_VISIBLE_DEVICES"] == "0"
     assert properties["vllm.env.VLLM_LOGGING_LEVEL"] == "DEBUG"
     assert properties["vllm.env.VLLM_PLUGINS"] == "ascend"

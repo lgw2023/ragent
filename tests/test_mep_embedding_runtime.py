@@ -458,7 +458,7 @@ def test_ensure_vllm_runtime_dependencies_installs_from_platform_wheelhouse(
         "\n".join(
             [
                 "model.relative_path=baai_bge_m3",
-                "vllm.install_requirements=triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0",
+                "vllm.install_requirements=cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0",
                 "vllm.uninstall_packages=vllm,vllm-ascend",
                 "vllm.install_no_deps=true",
                 "vllm.install_force_reinstall=true",
@@ -470,6 +470,7 @@ def test_ensure_vllm_runtime_dependencies_installs_from_platform_wheelhouse(
     wheelhouse = data_dir / "deps" / "wheelhouse" / "linux-arm64-py3.10"
     wheelhouse.mkdir(parents=True)
     for wheel_name in (
+        "cbor2-5.9.0-cp310-cp310-manylinux_2_28_aarch64.whl",
         "triton_ascend-3.2.0-cp310-cp310-manylinux_2_28_aarch64.whl",
         "vllm-0.13.0-cp38-abi3-manylinux_2_31_aarch64.whl",
         "vllm_ascend-0.13.0-cp310-cp310-manylinux_2_24_aarch64.whl",
@@ -478,6 +479,7 @@ def test_ensure_vllm_runtime_dependencies_installs_from_platform_wheelhouse(
     monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "linux-arm64-py3.10")
 
     installed_versions = {
+        "cbor2": "5.8.0",
         "triton-ascend": "3.1.0",
         "vllm": "0.13.0rc0+h5",
         "vllm-ascend": "0.13.0rc0+h6",
@@ -513,10 +515,76 @@ def test_ensure_vllm_runtime_dependencies_installs_from_platform_wheelhouse(
     assert "--no-deps" in commands[1]
     assert "--force-reinstall" in commands[1]
     assert str(wheelhouse) in commands[1]
-    assert commands[1][-3:] == [
+    assert commands[1][-4:] == [
+        "cbor2==5.9.0",
         "triton-ascend==3.2.0",
         "vllm==0.13.0",
         "vllm-ascend==0.13.0",
+    ]
+
+
+def test_ensure_vllm_runtime_dependencies_can_reinstall_all_wheelhouse_wheels(
+    monkeypatch,
+    tmp_path: Path,
+):
+    model_dir = tmp_path / "model"
+    embedding_root = model_dir / "baai_bge_m3"
+    embedding_root.mkdir(parents=True, exist_ok=True)
+    (embedding_root / "config.json").write_text("{}", encoding="utf-8")
+    (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    config_dir = data_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "embedding.properties").write_text(
+        "\n".join(
+            [
+                "model.relative_path=baai_bge_m3",
+                "vllm.install_requirements=cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0",
+                "vllm.install_all_wheelhouse_wheels=true",
+                "vllm.install_no_deps=false",
+                "vllm.uninstall_packages=vllm,vllm-ascend",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    wheelhouse = data_dir / "deps" / "wheelhouse" / "linux-arm64-py3.10"
+    wheelhouse.mkdir(parents=True)
+    for wheel_name in (
+        "cbor2-5.9.0-py3-none-any.whl",
+        "torch-2.8.0-cp310-cp310-manylinux_2_28_aarch64.whl",
+        "triton_ascend-3.2.0-cp310-cp310-manylinux_2_28_aarch64.whl",
+        "vllm-0.13.0-cp38-abi3-manylinux_2_31_aarch64.whl",
+        "vllm_ascend-0.13.0-cp310-cp310-manylinux_2_24_aarch64.whl",
+    ):
+        (wheelhouse / wheel_name).write_bytes(b"fake wheel")
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "linux-arm64-py3.10")
+
+    commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(list(command))
+        return subprocess.CompletedProcess(command, 0, stdout="ok")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+
+    mep_embedding_runtime._ensure_vllm_runtime_dependencies(config)
+
+    assert config.install_all_wheelhouse_wheels is True
+    assert commands[0][-3:] == ["vllm", "vllm-ascend", "-y"]
+    assert commands[1][:4] == [sys.executable, "-m", "pip", "install"]
+    assert "--no-index" in commands[1]
+    assert "--no-deps" in commands[1]
+    assert str(wheelhouse) in commands[1]
+    installed_wheels = [arg for arg in commands[1] if arg.endswith(".whl")]
+    assert installed_wheels == [
+        str(wheelhouse / "cbor2-5.9.0-py3-none-any.whl"),
+        str(wheelhouse / "torch-2.8.0-cp310-cp310-manylinux_2_28_aarch64.whl"),
+        str(wheelhouse / "triton_ascend-3.2.0-cp310-cp310-manylinux_2_28_aarch64.whl"),
+        str(wheelhouse / "vllm-0.13.0-cp38-abi3-manylinux_2_31_aarch64.whl"),
+        str(wheelhouse / "vllm_ascend-0.13.0-cp310-cp310-manylinux_2_24_aarch64.whl"),
     ]
 
 
