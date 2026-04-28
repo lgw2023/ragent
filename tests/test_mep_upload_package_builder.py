@@ -56,6 +56,10 @@ def _write_fake_repo(repo_root: Path) -> None:
         "model.relative_path=hf_model\n",
         encoding="utf-8",
     )
+    wheelhouse = model_dir / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
+    wheelhouse.mkdir(parents=True)
+    (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake wheel")
+    (wheelhouse / "demo_sdist-1.0.0.tar.gz").write_bytes(b"fake sdist")
     (model_dir / "meta").mkdir()
     (model_dir / "meta" / "type.mf").write_text("model\n", encoding="utf-8")
 
@@ -105,6 +109,24 @@ def test_build_mep_upload_packages_creates_upload_directories(tmp_path: Path):
     assert [path.name for path in model_package_dir.iterdir()] == ["modelDir"]
     assert (model_package_dir / "modelDir" / "model" / "hf_model").is_dir()
     assert (model_package_dir / "modelDir" / "data" / "config").is_dir()
+    assert (
+        model_package_dir
+        / "modelDir"
+        / "data"
+        / "deps"
+        / "wheelhouse"
+        / "linux-arm64-py3.10"
+        / "demo_dep-1.0.0-py3-none-any.whl"
+    ).is_file()
+    assert (
+        model_package_dir
+        / "modelDir"
+        / "data"
+        / "deps"
+        / "wheelhouse"
+        / "linux-arm64-py3.10"
+        / "demo_sdist-1.0.0.tar.gz"
+    ).is_file()
     assert (model_package_dir / "modelDir" / "meta" / "type.mf").is_file()
     assert not (model_package_dir / "modelDir" / "model").is_symlink()
 
@@ -336,6 +358,14 @@ def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Pat
     assert "modelDir/" in model_names
     assert "modelDir/model/hf_model/config.json" in model_names
     assert "modelDir/data/config/embedding.properties" in model_names
+    assert (
+        "modelDir/data/deps/wheelhouse/linux-arm64-py3.10/"
+        "demo_dep-1.0.0-py3-none-any.whl"
+    ) in model_names
+    assert (
+        "modelDir/data/deps/wheelhouse/linux-arm64-py3.10/"
+        "demo_sdist-1.0.0.tar.gz"
+    ) in model_names
     assert "modelDir/meta/type.mf" in model_names
     assert not any(name.startswith("model_package/") for name in model_names)
 
@@ -496,4 +526,8 @@ def test_build_mep_upload_packages_archives_tgz_alias(tmp_path: Path):
     with tarfile.open(model_archive, "r:*") as tf:
         model_names = set(tf.getnames())
     assert "modelDir/model/hf_model/config.json" in model_names
+    assert (
+        "modelDir/data/deps/wheelhouse/linux-arm64-py3.10/"
+        "demo_sdist-1.0.0.tar.gz"
+    ) in model_names
     assert not any(name.startswith("model_package/") for name in model_names)

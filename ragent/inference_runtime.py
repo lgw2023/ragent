@@ -876,6 +876,39 @@ def _parse_positive_int_env(name: str) -> int | None:
     return value
 
 
+def _parse_optional_bool_env_value(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _has_complete_rerank_config() -> bool:
+    return all(
+        (os.getenv(name) or "").strip()
+        for name in (
+            "RERANK_MODEL_KEY",
+            "RERANK_MODEL_URL",
+            "RERANK_MODEL",
+        )
+    )
+
+
+def _should_run_startup_rerank_check() -> bool:
+    enable_rerank = _parse_optional_bool_env_value(os.getenv("ENABLE_RERANK"))
+    if enable_rerank is False:
+        return False
+    return _has_complete_rerank_config()
+
+
 def _resolve_startup_check_timeout_seconds(
     *fallback_env_vars: str,
     default: int = 30,
@@ -1002,16 +1035,22 @@ async def verify_env_models_before_startup() -> None:
         {"shape": embed_shape, "first_vector_head8": first_vec_preview},
     )
 
-    _print_healthcheck("Rerank 请求示例", rerank_example)
-    rerank_result = await asyncio.wait_for(
-        rerank_from_env(
-            query=rerank_example["query"],
-            documents=rerank_example["documents"],
-            top_k=rerank_example["top_k"],
-        ),
-        timeout=rerank_timeout_sec,
-    )
-    _print_healthcheck("Rerank 真实返回", rerank_result)
+    if _should_run_startup_rerank_check():
+        _print_healthcheck("Rerank 请求示例", rerank_example)
+        rerank_result = await asyncio.wait_for(
+            rerank_from_env(
+                query=rerank_example["query"],
+                documents=rerank_example["documents"],
+                top_k=rerank_example["top_k"],
+            ),
+            timeout=rerank_timeout_sec,
+        )
+        _print_healthcheck("Rerank 真实返回", rerank_result)
+    else:
+        _print_healthcheck(
+            "Rerank 检查跳过",
+            "未启用 rerank 或未配置完整 RERANK_MODEL_KEY/RERANK_MODEL_URL/RERANK_MODEL",
+        )
 
     image_key = os.getenv("IMAGE_MODEL_KEY")
     image_model = os.getenv("IMAGE_MODEL")

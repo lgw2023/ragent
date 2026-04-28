@@ -13,6 +13,20 @@ For a server that cannot download models or Python packages, ship three things:
 2. Project-local MinerU models under `vendor/mineru-models/`.
 3. Offline Python wheels under `vendor/wheelhouse/<platform>/`.
 
+For MEP upload packages, dependencies needed by the component should also be
+inside the model package `data/` payload so they are available when the MEP
+server has no network access:
+
+```text
+mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10/
+mep/model_packages/bge-m3/modelDir/data/deps/site-packages/linux-arm64-py3.10/
+```
+
+Use `wheelhouse/<platform>/` for universal pure-Python wheels and for native
+wheels that are installed by a configured offline repair step. Use
+`site-packages/<platform>/` for native packages preinstalled or unpacked in an
+environment compatible with the target image.
+
 ## Prepare On This Machine
 
 Copy the currently configured MinerU model directories into the project:
@@ -49,6 +63,74 @@ This writes wheels to a platform-specific directory such as:
 ```text
 vendor/wheelhouse/linux-amd64-py3.12/
 vendor/wheelhouse/linux-arm64-py3.12/
+```
+
+For the current MEP Ascend 910B target, build or copy target-compatible
+dependencies into the model package data directory:
+
+```bash
+mkdir -p mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10
+```
+
+The component bootstrap directly imports only pure-Python wheels. Native wheels
+such as vLLM and source archives such as `.tar.gz` are not zipimported; install
+them through the configured offline repair step or unpack/install them into
+`site-packages/<platform>/`. A
+pure-Python wheel is skipped only when the same distribution and exact version
+are already installed in the target image. Set `RAGENT_MEP_FORCE_WHEELHOUSE=1`
+to keep pure-Python wheels in the bootstrap path even when versions match.
+
+For the validated vLLM Ascend embedding runtime, use the freeze captured from
+the working container:
+
+```bash
+python3 tools/export_mep_vllm_ascend_wheelhouse.py \
+  --freeze-file MEP_platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt \
+  --output mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10
+```
+
+The target tags are Python `cp310` on `aarch64` / `linux-arm64`. The exporter
+writes the exact downloaded wheel filenames, any present `.tar.gz` source
+archives, and a `manifest.json`. `@ file://` freeze entries under
+`/tmp/ragent-mep-test` are resolved from the configured package indexes by default; this covers the validated
+`triton-ascend==3.2.0` wheel used by the startup repair step. Other `file://`
+entries from `/home/mep/...` or `/usr/local/Ascend/...` are recorded in
+`local-file-requirements.txt` and treated as image-provided by default. If these
+wheels are available outside the image, pass `--local-wheel-dir <dir>` to copy
+them into the wheelhouse. If you explicitly need to resolve every `file://`
+wheel from an index, pass `--resolve-local-file-wheels`. Source archives are
+recorded in `source-archives.txt` and included in `downloaded-artifacts.txt`;
+they are only useful when a configured offline `pip install` requirement needs
+them and the target image has the build tooling required by that sdist.
+
+The validated image setup also needs the vLLM stack repaired before starting
+the embedding server. The bge-m3 MEP model package now encodes this repair in
+`data/config/embedding.properties` and runs it from the offline wheelhouse before
+launching vLLM. The equivalent manual command sequence is:
+
+```bash
+pip uninstall vllm vllm-ascend -y
+pip install /tmp/ragent-mep-test/triton_ascend-3.2.0-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl
+pip install /tmp/ragent-mep-test/vllm-0.13.0-cp38-abi3-manylinux_2_31_aarch64.whl
+pip install vllm-ascend==0.13.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+The service command that was validated is:
+
+```bash
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+source /usr/local/Ascend/nnal/atb/set_env.sh
+export ASCEND_RT_VISIBLE_DEVICES=0
+export VLLM_LOGGING_LEVEL=DEBUG
+export VLLM_PLUGINS=ascend
+python3 -m vllm.entrypoints.openai.api_server \
+  --model /tmp/ragent-mep-runtime/model/baai_bge_m3 \
+  --runner pooling \
+  --served-model-name BAAI-bge-m3 \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --max-model-len 8192 \
+  --dtype auto
 ```
 
 If PyTorch/CUDA wheels are needed, make sure the build host can download the

@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import site
 import sys
+import zipfile
 from pathlib import Path
 from typing import Iterator
+
+try:
+    from importlib import metadata as importlib_metadata
+except ImportError:  # pragma: no cover - Python < 3.8 is not supported here.
+    import importlib_metadata  # type: ignore
+
+
+_NATIVE_WHEEL_SUFFIXES = (".so", ".pyd", ".dll", ".dylib")
 
 
 def _maybe_json_loads(value: str):
@@ -52,6 +62,124 @@ def iter_mep_data_dir_candidates(current_dir: Path) -> Iterator[Path]:
     yield (current_dir / "data").resolve()
 
 
+def _normalize_os_name(system: str | None = None) -> str:
+    normalized = (system or platform.system()).strip().lower()
+    if normalized.startswith("linux"):
+        return "linux"
+    if normalized.startswith("darwin"):
+        return "darwin"
+    return normalized or "unknown"
+
+
+def _normalize_arch_name(machine: str | None = None) -> str:
+    normalized = (machine or platform.machine()).strip().lower()
+    if normalized in {"x86_64", "amd64"}:
+        return "amd64"
+    if normalized in {"aarch64", "arm64"}:
+        return "arm64"
+    return normalized or "unknown"
+
+
+def _python_tag() -> str:
+    return f"py{sys.version_info.major}.{sys.version_info.minor}"
+
+
+def current_platform_tag() -> str:
+    return f"{_normalize_os_name()}-{_normalize_arch_name()}-{_python_tag()}"
+
+
+def iter_platform_tags() -> Iterator[str]:
+    explicit_tag = (os.getenv("RAGENT_MEP_PLATFORM_TAG") or "").strip()
+    if explicit_tag:
+        yield explicit_tag
+
+    os_name = _normalize_os_name()
+    normalized_arch = _normalize_arch_name()
+    raw_arch = (platform.machine() or "").strip().lower()
+    py_tag = _python_tag()
+    candidates = [f"{os_name}-{normalized_arch}-{py_tag}"]
+    if raw_arch and raw_arch != normalized_arch:
+        candidates.append(f"{os_name}-{raw_arch}-{py_tag}")
+
+    seen: set[str] = {explicit_tag} if explicit_tag else set()
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            yield candidate
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _wheel_has_native_extensions(wheel_path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(wheel_path) as wheel:
+            return any(
+                name.lower().endswith(_NATIVE_WHEEL_SUFFIXES)
+                for name in wheel.namelist()
+            )
+    except zipfile.BadZipFile:
+        return False
+
+
+def _distribution_and_version_from_wheel(wheel_path: Path) -> tuple[str, str] | None:
+    wheel_name = wheel_path.name
+    if not wheel_name.endswith(".whl") or "-" not in wheel_name:
+        return None
+    parts = wheel_name[:-4].split("-")
+    if len(parts) < 2:
+        return None
+    distribution = parts[0].replace("_", "-").lower()
+    version = parts[1]
+    if not distribution or not version:
+        return None
+    return distribution, version
+
+
+def _wheel_should_be_added(wheel_path: Path) -> bool:
+    if _wheel_has_native_extensions(wheel_path) and not _env_flag_enabled(
+        "RAGENT_MEP_ALLOW_NATIVE_WHEEL_ZIPIMPORT"
+    ):
+        return False
+
+    if _env_flag_enabled("RAGENT_MEP_FORCE_WHEELHOUSE"):
+        return True
+
+    parsed = _distribution_and_version_from_wheel(wheel_path)
+    if parsed is None:
+        return True
+    distribution, wheel_version = parsed
+    try:
+        installed_version = importlib_metadata.version(distribution)
+    except importlib_metadata.PackageNotFoundError:
+        return True
+    return installed_version != wheel_version
+
+
+def _iter_existing_platform_dirs(root: Path) -> Iterator[Path]:
+    for tag in iter_platform_tags():
+        candidate = root / tag
+        if candidate.is_dir():
+            yield candidate
+
+
+def _iter_wheelhouse_dirs(deps_dir: Path) -> Iterator[Path]:
+    wheelhouse_root = deps_dir / "wheelhouse"
+    if not wheelhouse_root.is_dir():
+        return
+
+    yielded: set[Path] = set()
+    for candidate in _iter_existing_platform_dirs(wheelhouse_root):
+        resolved = candidate.resolve()
+        yielded.add(resolved)
+        yield resolved
+
+    legacy_flat_dir = wheelhouse_root.resolve()
+    if legacy_flat_dir not in yielded:
+        yield legacy_flat_dir
+
+
 def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
     deps_dir = data_dir / "deps"
     extra_pythonpath = os.getenv("RAGENT_MEP_EXTRA_PYTHONPATH") or ""
@@ -64,11 +192,15 @@ def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
         "site-packages",
         "python",
     ):
-        yield (deps_dir / relative_dir).resolve()
+        root = deps_dir / relative_dir
+        for platform_dir in _iter_existing_platform_dirs(root):
+            yield platform_dir.resolve()
+        yield root.resolve()
 
-    wheelhouse_dir = deps_dir / "wheelhouse"
-    if wheelhouse_dir.is_dir():
-        yield from sorted(wheelhouse_dir.glob("*.whl"))
+    for wheelhouse_dir in _iter_wheelhouse_dirs(deps_dir):
+        for wheel_path in sorted(wheelhouse_dir.glob("*.whl")):
+            if _wheel_should_be_added(wheel_path):
+                yield wheel_path.resolve()
 
 
 def _prepend_import_path(path: Path) -> bool:
@@ -111,6 +243,8 @@ def bootstrap_mep_data_dependencies(current_dir: str | os.PathLike[str]) -> tupl
 
 __all__ = [
     "bootstrap_mep_data_dependencies",
+    "current_platform_tag",
     "iter_mep_data_dir_candidates",
     "iter_mep_dependency_paths",
+    "iter_platform_tags",
 ]
