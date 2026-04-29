@@ -655,7 +655,7 @@ def priority_limit_async_func_call(
                         try:
                             # Execute function
                             coro = call_context.run(func, *args, **kwargs)
-                            task = asyncio.create_task(coro, context=call_context)
+                            task = call_context.run(asyncio.create_task, coro)
                             result = await task
                             # If future is not done, set the result
                             if not future.done():

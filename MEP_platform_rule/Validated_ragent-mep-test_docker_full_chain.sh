@@ -170,6 +170,7 @@ for name in \
   RAG_KEYWORD_FALLBACK_THRESHOLD \
   RAG_KEYWORD_FALLBACK_MAX_KEYWORDS \
   RAG_KEYWORD_FALLBACK_LABELS \
+  COSINE_THRESHOLD \
   TOP_K \
   CHUNK_TOP_K \
   MAX_ENTITY_TOKENS \
@@ -243,77 +244,17 @@ complete_rerank_config() {
 }
 
 requests_require_llm() {
-  python3 - "$CONTAINER_TEST_DIR" "$MEP_REQUESTS" <<'PY'
-from pathlib import Path
-import json
-import sys
-
-container_test_dir = Path(sys.argv[1]).resolve()
-request_items = [
-    item.strip()
-    for item in sys.argv[2].split(",")
-    if item.strip()
-]
-
-for request_item in request_items:
-    request_path = Path(request_item)
-    if not request_path.is_absolute():
-        request_path = container_test_dir / "example" / "mep_requests" / request_item
-    payload = json.loads(request_path.read_text(encoding="utf-8"))
-    data = payload.get("data") or {}
-    if not isinstance(data, dict):
-        print("true")
-        raise SystemExit(0)
-
-    def is_true(value):
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return False
-
-    if not (is_true(data.get("retrieval_only")) or is_true(data.get("only_need_context"))):
-        print("true")
-        raise SystemExit(0)
-
-print("false")
-PY
+  python3 "$CONTAINER_TEST_DIR/tools/validate_mep_full_chain_result.py" \
+    request-requires-llm \
+    "$CONTAINER_TEST_DIR" \
+    "$MEP_REQUESTS"
 }
 
 requests_have_retrieval_only() {
-  python3 - "$CONTAINER_TEST_DIR" "$MEP_REQUESTS" <<'PY'
-from pathlib import Path
-import json
-import sys
-
-container_test_dir = Path(sys.argv[1]).resolve()
-request_items = [
-    item.strip()
-    for item in sys.argv[2].split(",")
-    if item.strip()
-]
-
-def is_true(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
-
-for request_item in request_items:
-    request_path = Path(request_item)
-    if not request_path.is_absolute():
-        request_path = container_test_dir / "example" / "mep_requests" / request_item
-    payload = json.loads(request_path.read_text(encoding="utf-8"))
-    data = payload.get("data") or {}
-    if isinstance(data, dict) and (
-        is_true(data.get("retrieval_only")) or is_true(data.get("only_need_context"))
-    ):
-        print("true")
-        raise SystemExit(0)
-
-print("false")
-PY
+  python3 "$CONTAINER_TEST_DIR/tools/validate_mep_full_chain_result.py" \
+    request-has-retrieval-only \
+    "$CONTAINER_TEST_DIR" \
+    "$MEP_REQUESTS"
 }
 
 resolve_keyword_wheelhouse_dir() {
@@ -518,6 +459,7 @@ run_component_request() {
 cd "$CONTAINER_TEST_DIR"
 prepare_runtime_if_needed
 mkdir -p "$MEP_LOG_DIR" "$MEP_OUTPUT_DIR"
+export COSINE_THRESHOLD="${COSINE_THRESHOLD:--1}"
 
 step "Inspect runtime layout"
 test -d "$RUNTIME_DIR/component" || die "missing component dir: $RUNTIME_DIR/component"
@@ -578,7 +520,11 @@ if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
   export EMBEDDING_MODEL_KEY="${MEP_EMBEDDING_MODEL_KEY:-EMPTY}"
   export EMBEDDING_MODEL_URL="${MEP_EMBEDDING_MODEL_URL:-http://127.0.0.1:${VLLM_PORT}/v1}"
   export EMBEDDING_PROVIDER="${MEP_EMBEDDING_PROVIDER:-custom_openai}"
-  export EMBEDDING_DIMENSIONS="${MEP_EMBEDDING_DIMENSIONS:-1024}"
+  if [ -n "${MEP_EMBEDDING_DIMENSIONS:-}" ]; then
+    export EMBEDDING_DIMENSIONS="$MEP_EMBEDDING_DIMENSIONS"
+  else
+    unset EMBEDDING_DIMENSIONS EMBEDDING_DIM
+  fi
   echo "embedding runtime: reuse $EMBEDDING_MODEL_URL"
 else
   unset EMBEDDING_MODEL EMBEDDING_MODEL_KEY EMBEDDING_MODEL_URL EMBEDDING_PROVIDER

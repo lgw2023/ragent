@@ -8,6 +8,7 @@ from tools import export_mep_vllm_ascend_wheelhouse as exporter
 
 def test_default_extra_requirements_include_mep_runtime_gaps():
     assert {
+        "ascii-colors==0.11.21",
         "cbor2==5.9.0",
         "configparser==7.2.0",
         "dotenv==0.9.9",
@@ -16,6 +17,7 @@ def test_default_extra_requirements_include_mep_runtime_gaps():
         "pipmaster==1.1.2",
         "pyuca==1.2",
         "tenacity==9.1.4",
+        "wcwidth==0.6.0",
     }.issubset(set(exporter.DEFAULT_EXTRA_REQUIREMENTS))
 
 
