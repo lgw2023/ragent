@@ -484,6 +484,12 @@ def _build_one_hop_trace(
         "mode": mode,
         "high_level_keywords": debug_payload.get("high_level_keywords", []),
         "low_level_keywords": debug_payload.get("low_level_keywords", []),
+        "keyword_source": debug_payload.get("keyword_source"),
+        "keyword_strategy": debug_payload.get("keyword_strategy"),
+        "keyword_fallback_reason": debug_payload.get("keyword_fallback_reason"),
+        "keyword_model": debug_payload.get("keyword_model"),
+        "keyword_model_device": debug_payload.get("keyword_model_device"),
+        "keyword_model_error": debug_payload.get("keyword_model_error"),
         "graph_entity_hits": [],
         "graph_relation_hits": [],
         "vector_candidates": [],
@@ -596,6 +602,12 @@ def _build_retrieval_result_from_trace(trace: dict[str, Any] | None) -> dict[str
     return {
         "high_level_keywords": list(trace.get("high_level_keywords") or []),
         "low_level_keywords": list(trace.get("low_level_keywords") or []),
+        "keyword_source": trace.get("keyword_source"),
+        "keyword_strategy": trace.get("keyword_strategy"),
+        "keyword_fallback_reason": trace.get("keyword_fallback_reason"),
+        "keyword_model": trace.get("keyword_model"),
+        "keyword_model_device": trace.get("keyword_model_device"),
+        "keyword_model_error": trace.get("keyword_model_error"),
         "graph_entity_hits": list(trace.get("graph_entity_hits") or []),
         "graph_relation_hits": list(trace.get("graph_relation_hits") or []),
         "vector_candidates": list(trace.get("vector_candidates") or []),
@@ -632,6 +644,7 @@ async def _run_one_hop_with_rag(
     query_param = QueryParam(mode=mode)
     context_only = retrieval_only or only_need_context
     query_param.only_need_context = context_only
+    query_param.allow_llm_keyword_extraction = not context_only
     if enable_rerank is not None:
         query_param.enable_rerank = enable_rerank
     if response_type:
@@ -653,11 +666,6 @@ async def _run_one_hop_with_rag(
         query_param.history_turns = history_turns
     global_config = await rag._build_runtime_global_config()
     normalized_query = query.strip()
-    if context_only and not (query_param.hl_keywords or query_param.ll_keywords):
-        # Retrieval-only must be able to run without an LLM for keyword extraction.
-        # Use the raw query as both graph retrieval signals unless the caller supplied keywords.
-        query_param.hl_keywords = [normalized_query]
-        query_param.ll_keywords = [normalized_query]
     include_debug = include_trace or context_only
 
     if mode == "hybrid":

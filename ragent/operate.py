@@ -12,6 +12,7 @@ import numpy as np
 from typing import Any, AsyncIterator, Callable
 from collections import Counter, defaultdict
 from ragent.rerank import rerank_from_env
+from . import keyword_extraction
 from .llm.openai import openai_embed
 from .utils import (
     logger,
@@ -293,6 +294,80 @@ def _resolve_rerank_identifier(global_config: dict[str, Any]) -> Any:
     return rerank_identifier or None
 
 
+def _llm_keyword_extraction_allowed(query_param: QueryParam) -> bool:
+    return bool(
+        getattr(query_param, "allow_llm_keyword_extraction", True)
+        and not getattr(query_param, "only_need_context", False)
+    )
+
+
+def _resolve_keyword_fingerprint_metadata(
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+) -> dict[str, Any]:
+    keyword_source = getattr(query_param, "keyword_source", None)
+    keyword_strategy = getattr(query_param, "keyword_strategy", None)
+    keyword_model = getattr(query_param, "keyword_model", None)
+    keyword_model_device = getattr(query_param, "keyword_model_device", None)
+
+    if not keyword_source or not keyword_strategy:
+        if query_param.hl_keywords or query_param.ll_keywords:
+            keyword_source = keyword_extraction.KEYWORD_SOURCE_REQUEST
+            keyword_strategy = keyword_extraction.KEYWORD_STRATEGY_REQUEST
+        elif _llm_keyword_extraction_allowed(query_param):
+            keyword_source = keyword_extraction.KEYWORD_SOURCE_LLM
+            keyword_strategy = keyword_extraction.KEYWORD_STRATEGY_LLM
+        else:
+            keyword_source = keyword_extraction.KEYWORD_SOURCE_GLINER_FALLBACK
+            keyword_strategy = keyword_extraction.KEYWORD_STRATEGY_TOKEN_CLASSIFICATION
+            keyword_model = keyword_extraction.get_gliner_keyword_model_name(
+                global_config
+            )
+            keyword_model_device = keyword_extraction.get_gliner_keyword_device(
+                global_config
+            )
+
+    metadata = {
+        "keyword_source": keyword_source,
+        "keyword_strategy": keyword_strategy,
+        "keyword_fallback_reason": getattr(
+            query_param, "keyword_fallback_reason", None
+        ),
+        "keyword_model": keyword_model,
+        "keyword_model_device": keyword_model_device,
+        "keyword_model_error": getattr(query_param, "keyword_model_error", None),
+    }
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
+async def _resolve_no_llm_keywords_for_retrieval_cache(
+    query: str,
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+    hashing_kv: BaseKVStorage | None,
+) -> None:
+    keyword_extraction.prepare_keyword_metadata_for_cache(
+        query_param,
+        global_config,
+        allow_llm_keyword_extraction=_llm_keyword_extraction_allowed(query_param),
+    )
+    if (
+        not _llm_keyword_extraction_allowed(query_param)
+        and not getattr(query_param, "keyword_resolution_done", False)
+    ):
+        await get_keywords_from_query(query, query_param, global_config, hashing_kv)
+
+
+def _resolve_query_llm_func(
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+) -> Callable[..., Any]:
+    if query_param.model_func:
+        return query_param.model_func
+    use_model_func = global_config["llm_model_func"]
+    return partial(use_model_func, _priority=5)
+
+
 def _has_complete_rerank_env_config() -> bool:
     return all(
         (os.getenv(name) or "").strip()
@@ -379,6 +454,9 @@ def _build_query_request_fingerprint_payload(
                 "language": addon_params.get("language"),
                 "example_number": addon_params.get("example_number"),
                 "model": query_model_identifier,
+                "keyword_metadata": _resolve_keyword_fingerprint_metadata(
+                    query_param, global_config
+                ),
             }
         )
         return payload
@@ -393,6 +471,9 @@ def _build_query_request_fingerprint_payload(
                 "user_prompt": query_param.user_prompt,
                 "hl_keywords": list(query_param.hl_keywords or []),
                 "ll_keywords": list(query_param.ll_keywords or []),
+                "keyword_metadata": _resolve_keyword_fingerprint_metadata(
+                    query_param, global_config
+                ),
                 "ids": list(query_param.ids or []),
                 "top_k": query_param.top_k,
                 "chunk_top_k": query_param.chunk_top_k,
@@ -3437,6 +3518,7 @@ async def _build_graph_retrieval_debug_data(
     return {
         "high_level_keywords": hl_keywords,
         "low_level_keywords": ll_keywords,
+        **keyword_extraction.keyword_metadata_from_query_param(query_param),
         "graph_entities": graph_entities,
         "graph_relations": graph_relations,
         **context_debug,
@@ -3586,12 +3668,12 @@ async def graph_query(
     _validate_query_request_flags(query_param)
     stage_timings: list[dict[str, Any]] = []
     query_total_started_at = time.perf_counter()
-    if query_param.model_func:
-        use_model_func = query_param.model_func
-    else:
-        use_model_func = global_config["llm_model_func"]
-        # Apply higher priority (5) to query relation LLM function
-        use_model_func = partial(use_model_func, _priority=5)
+    await _resolve_no_llm_keywords_for_retrieval_cache(
+        query,
+        query_param,
+        global_config,
+        hashing_kv,
+    )
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
     corpus_revision = _coerce_non_negative_int(
         global_config.get("corpus_revision"),
@@ -3839,6 +3921,7 @@ async def graph_query(
             return prompt_text, referenced_file_paths, debug_payload
         return prompt_text
 
+    use_model_func = _resolve_query_llm_func(query_param, global_config)
     tokenizer: Tokenizer = global_config["tokenizer"]
     prompt_text = prompt_payload["prompt_text"]
     len_of_prompts = len(tokenizer.encode(query + prompt_text))
@@ -3956,14 +4039,15 @@ async def graph_query(
 async def get_keywords_from_query(
     query: str,
     query_param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
 ) -> tuple[list[str], list[str]]:
     """
     Retrieves high-level and low-level keywords for RAG operations.
 
     This function checks if keywords are already provided in query parameters,
-    and if not, extracts them from the query text using LLM.
+    and if not, resolves them with either no-LLM token classification fallback
+    or LLM extraction depending on QueryParam.
 
     Args:
         query: The user's query text
@@ -3974,13 +4058,47 @@ async def get_keywords_from_query(
     Returns:
         A tuple containing (high_level_keywords, low_level_keywords)
     """
+    if getattr(query_param, "keyword_resolution_done", False):
+        return query_param.hl_keywords, query_param.ll_keywords
+
     # Check if pre-defined keywords are already provided
     if query_param.hl_keywords or query_param.ll_keywords:
+        keyword_extraction.apply_keyword_resolution(
+            query_param,
+            keyword_extraction.build_request_keyword_resolution(
+                query_param.hl_keywords,
+                query_param.ll_keywords,
+            ),
+        )
+        return query_param.hl_keywords, query_param.ll_keywords
+
+    llm_keyword_allowed = _llm_keyword_extraction_allowed(query_param)
+    keyword_extraction.prepare_keyword_metadata_for_cache(
+        query_param,
+        global_config,
+        allow_llm_keyword_extraction=llm_keyword_allowed,
+    )
+
+    if not llm_keyword_allowed:
+        fallback_reason = (
+            "explicit keywords missing and LLM keyword extraction disabled; "
+            "using no-LLM token classification fallback"
+        )
+        resolution = await keyword_extraction.extract_keywords_with_gliner(
+            query,
+            global_config,
+            fallback_reason=fallback_reason,
+        )
+        keyword_extraction.apply_keyword_resolution(query_param, resolution)
         return query_param.hl_keywords, query_param.ll_keywords
 
     # Extract keywords using extract_keywords_only function which already supports conversation history
     hl_keywords, ll_keywords = await extract_keywords_only(
         query, query_param, global_config, hashing_kv
+    )
+    keyword_extraction.apply_keyword_resolution(
+        query_param,
+        keyword_extraction.build_llm_keyword_resolution(hl_keywords, ll_keywords),
     )
     return hl_keywords, ll_keywords
 
@@ -3988,7 +4106,7 @@ async def get_keywords_from_query(
 async def extract_keywords_only(
     text: str,
     param: QueryParam,
-    global_config: dict[str, str],
+    global_config: dict[str, Any],
     hashing_kv: BaseKVStorage | None = None,
 ) -> tuple[list[str], list[str]]:
     """
@@ -5577,6 +5695,7 @@ async def _build_hybrid_retrieval_debug_data(
     return {
         "high_level_keywords": hl_keywords,
         "low_level_keywords": ll_keywords,
+        **keyword_extraction.keyword_metadata_from_query_param(query_param),
         "ll_keywords_str": ll_keywords_str,
         "hl_keywords_str": hl_keywords_str,
         "graph_entities": graph_entities,
@@ -5702,12 +5821,12 @@ async def hybrid_query(
     _validate_query_request_flags(query_param)
     stage_timings: list[dict[str, Any]] = []
     query_total_started_at = time.perf_counter()
-    if query_param.model_func:
-        use_model_func = query_param.model_func
-    else:
-        use_model_func = global_config["llm_model_func"]
-        # Apply higher priority (5) to query relation LLM function
-        use_model_func = partial(use_model_func, _priority=5)
+    await _resolve_no_llm_keywords_for_retrieval_cache(
+        query,
+        query_param,
+        global_config,
+        hashing_kv,
+    )
     answer_prompt_mode = _resolve_answer_prompt_mode(query_param, global_config)
     corpus_revision = _coerce_non_negative_int(
         global_config.get("corpus_revision"),
@@ -5926,6 +6045,7 @@ async def hybrid_query(
             return prompt_text, referenced_file_paths, debug_payload
         return prompt_text
 
+    use_model_func = _resolve_query_llm_func(query_param, global_config)
     prompt_text = prompt_payload["prompt_text"]
     len_of_prompts = len(tokenizer.encode(query + prompt_text))
     logger.debug(

@@ -88,6 +88,30 @@ class QueryParam:
     ll_keywords: list[str] = field(default_factory=list)
     """List of low-level keywords to refine retrieval focus."""
 
+    allow_llm_keyword_extraction: bool = True
+    """If False, query-time keyword extraction must not call the LLM."""
+
+    keyword_source: str | None = None
+    """Resolved keyword source, such as request, gliner_fallback, or llm."""
+
+    keyword_strategy: str | None = None
+    """Resolved keyword extraction strategy used for cache and trace metadata."""
+
+    keyword_fallback_reason: str | None = None
+    """Human-readable reason when keyword extraction used or attempted a fallback."""
+
+    keyword_model: str | None = None
+    """Keyword extractor model identifier when a model-backed strategy is used."""
+
+    keyword_model_device: str | None = None
+    """Device used by the keyword extractor model."""
+
+    keyword_model_error: str | None = None
+    """Diagnostic error captured when a keyword fallback extractor is unavailable."""
+
+    keyword_resolution_done: bool = False
+    """True once keywords and keyword metadata have been resolved for this query."""
+
     conversation_history: list[dict[str, str]] = field(default_factory=list)
     """Stores past conversation history to maintain context.
     Format: [{"role": "user/assistant", "content": "message"}].
