@@ -219,6 +219,64 @@ def test_gliner_loader_uses_local_words_splitter_without_model_kwargs(
     keyword_extraction._MODEL_CACHE.clear()
 
 
+def test_ensure_gliner_keyword_model_ready_warms_cached_model(
+    monkeypatch,
+    tmp_path: Path,
+):
+    captured = {}
+    model_dir = tmp_path / "data" / "models" / "keyword_extraction" / "gliner"
+    model_dir.mkdir(parents=True)
+
+    class FakeProcessor:
+        pass
+
+    class FakeModel:
+        def __init__(self):
+            self.data_processor = FakeProcessor()
+
+        def to(self, device):
+            captured["device"] = device
+            return self
+
+        def eval(self):
+            captured["eval"] = True
+
+        def predict_entities(self, text, labels, threshold):
+            captured["warmup_text"] = text
+            captured["labels"] = labels
+            captured["threshold"] = threshold
+            return [{"text": "文档", "label": "document"}]
+
+    class FakeGLiNER:
+        @classmethod
+        def from_pretrained(cls, model_name, **kwargs):
+            captured["model_name"] = model_name
+            captured["kwargs"] = kwargs
+            return FakeModel()
+
+    monkeypatch.setitem(sys.modules, "gliner", SimpleNamespace(GLiNER=FakeGLiNER))
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_MODEL", str(model_dir))
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_DEVICE", "cpu")
+    keyword_extraction._MODEL_CACHE.clear()
+
+    info = asyncio.run(keyword_extraction.ensure_gliner_keyword_model_ready())
+
+    assert info["keyword_model"] == str(model_dir)
+    assert info["keyword_model_device"] == "cpu"
+    assert info["warmup_entity_count"] == 1
+    assert captured["kwargs"] == {}
+    assert captured["device"] == "cpu"
+    assert captured["eval"] is True
+    assert captured["warmup_text"] == keyword_extraction.DEFAULT_GLINER_WARMUP_TEXT
+    assert "topic" in captured["labels"]
+    assert (
+        keyword_extraction._MODEL_CACHE[
+            (str(model_dir), "cpu")
+        ].data_processor.words_splitter
+    )
+    keyword_extraction._MODEL_CACHE.clear()
+
+
 def test_chinese_no_space_fallback_keyword_candidates_are_not_empty():
     assert keyword_extraction._fallback_keyword_candidates("文档的主要主题是什么？") == [
         "文档的主要主题",

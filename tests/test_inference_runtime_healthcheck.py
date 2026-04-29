@@ -90,6 +90,119 @@ def test_retrieval_only_startup_model_check_skips_llm_and_incomplete_rerank(monk
     assert calls == {"llm": 0, "embed": 1, "rerank": 0}
 
 
+def _patch_initialize_rag_runtime(monkeypatch, calls: dict[str, object]) -> None:
+    async def fake_ensure_startup_model_check_once(*, require_llm, enable_rerank):
+        calls["startup_require_llm"] = require_llm
+        calls["startup_enable_rerank"] = enable_rerank
+
+    class FakeRagent:
+        def __init__(self, **kwargs):
+            calls["rag_kwargs"] = kwargs
+
+        async def initialize_storages(self):
+            calls["storage_initialized"] = True
+
+    async def fake_initialize_pipeline_status():
+        calls["pipeline_status_initialized"] = True
+
+    monkeypatch.setattr(
+        inference_runtime,
+        "ensure_startup_model_check_once",
+        fake_ensure_startup_model_check_once,
+    )
+    monkeypatch.setattr(inference_runtime, "Ragent", FakeRagent)
+    monkeypatch.setattr(
+        inference_runtime,
+        "initialize_pipeline_status",
+        fake_initialize_pipeline_status,
+    )
+
+
+def test_initialize_rag_preloads_gliner_in_mep_without_llm(monkeypatch, tmp_path):
+    calls: dict[str, object] = {"preload_calls": 0}
+    _patch_initialize_rag_runtime(monkeypatch, calls)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    for name in ("LLM_MODEL", "LLM_MODEL_KEY", "LLM_MODEL_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    monkeypatch.setattr(
+        inference_runtime.keyword_extraction,
+        "get_gliner_keyword_model_name",
+        lambda: "/models/gliner",
+    )
+    monkeypatch.setattr(
+        inference_runtime.keyword_extraction,
+        "get_gliner_keyword_device",
+        lambda: "cpu",
+    )
+
+    async def fake_ensure_gliner_keyword_model_ready():
+        calls["preload_calls"] = int(calls["preload_calls"]) + 1
+        return {
+            "keyword_model": "/models/gliner",
+            "keyword_model_device": "cpu",
+            "warmup_entity_count": 2,
+        }
+
+    monkeypatch.setattr(
+        inference_runtime.keyword_extraction,
+        "ensure_gliner_keyword_model_ready",
+        fake_ensure_gliner_keyword_model_ready,
+    )
+
+    stage_timings: list[dict] = []
+    asyncio.run(
+        inference_runtime.initialize_rag(
+            str(tmp_path),
+            stage_timings=stage_timings,
+            require_llm=False,
+        )
+    )
+
+    assert calls["startup_require_llm"] is False
+    assert calls["preload_calls"] == 1
+    assert calls["storage_initialized"] is True
+    assert calls["pipeline_status_initialized"] is True
+    assert calls["rag_kwargs"]["llm_model_name"] == "retrieval-only-no-llm"
+    assert any(item["stage"] == "keyword_fallback_preload" for item in stage_timings)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+
+
+def test_initialize_rag_skips_gliner_preload_when_llm_config_is_complete(
+    monkeypatch,
+    tmp_path,
+):
+    calls: dict[str, object] = {}
+    _patch_initialize_rag_runtime(monkeypatch, calls)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    monkeypatch.setenv("LLM_MODEL", "qwen")
+    monkeypatch.setenv("LLM_MODEL_KEY", "key")
+    monkeypatch.setenv("LLM_MODEL_URL", "http://127.0.0.1:8000/v1")
+
+    async def fail_preload():
+        raise AssertionError("GLiNER preload should be skipped with complete LLM config")
+
+    monkeypatch.setattr(
+        inference_runtime.keyword_extraction,
+        "ensure_gliner_keyword_model_ready",
+        fail_preload,
+    )
+
+    stage_timings: list[dict] = []
+    asyncio.run(
+        inference_runtime.initialize_rag(
+            str(tmp_path),
+            stage_timings=stage_timings,
+            require_llm=False,
+        )
+    )
+
+    assert calls["rag_kwargs"]["llm_model_name"] == "qwen"
+    assert not any(item["stage"] == "keyword_fallback_preload" for item in stage_timings)
+
+
 def test_execute_retrieval_only_skips_llm_check_and_returns_retrieval_payload(
     monkeypatch,
 ):

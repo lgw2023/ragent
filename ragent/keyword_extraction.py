@@ -17,6 +17,7 @@ DEFAULT_GLINER_KEYWORD_MODEL = "knowledgator/gliner-x-small"
 DEFAULT_GLINER_KEYWORD_DEVICE = "cpu"
 DEFAULT_GLINER_KEYWORD_THRESHOLD = 0.35
 DEFAULT_GLINER_MAX_KEYWORDS = 12
+DEFAULT_GLINER_WARMUP_TEXT = "文档的主要主题是什么？"
 
 KEYWORD_SOURCE_REQUEST = "request"
 KEYWORD_SOURCE_LLM = "llm"
@@ -420,6 +421,59 @@ def _predict_gliner_entities(
     if not isinstance(entities, list):
         return []
     return [item for item in entities if isinstance(item, dict)]
+
+
+def _warmup_gliner_model(
+    *,
+    model_name: str,
+    device: str,
+    labels: list[str],
+    threshold: float,
+    warmup_text: str | None,
+) -> int:
+    model = _load_gliner_model(model_name, device)
+    if not warmup_text:
+        return 0
+    predict_entities = getattr(model, "predict_entities", None)
+    if not callable(predict_entities):
+        return 0
+    entities = predict_entities(warmup_text, labels, threshold=threshold)
+    return len(entities) if isinstance(entities, list) else 0
+
+
+async def ensure_gliner_keyword_model_ready(
+    global_config: dict[str, Any] | None = None,
+    *,
+    warmup_text: str | None = None,
+) -> dict[str, Any]:
+    model_name = get_gliner_keyword_model_name(global_config)
+    device = get_gliner_keyword_device(global_config)
+    if not keyword_fallback_enabled(global_config):
+        raise KeywordExtractorUnavailable("GLiNER keyword fallback is disabled")
+
+    resolved_warmup_text = (
+        os.getenv("RAG_KEYWORD_FALLBACK_WARMUP_TEXT")
+        if warmup_text is None
+        else warmup_text
+    )
+    if resolved_warmup_text is None:
+        resolved_warmup_text = DEFAULT_GLINER_WARMUP_TEXT
+    resolved_warmup_text = str(resolved_warmup_text).strip()
+
+    entity_count = await asyncio.to_thread(
+        _warmup_gliner_model,
+        model_name=model_name,
+        device=device,
+        labels=_gliner_labels(global_config),
+        threshold=_gliner_threshold(global_config),
+        warmup_text=resolved_warmup_text,
+    )
+    return {
+        "keyword_model": model_name,
+        "keyword_model_device": device,
+        "warmup_text": resolved_warmup_text,
+        "warmup_entity_count": entity_count,
+    }
 
 
 def _fallback_keyword_candidates(text: str) -> list[str]:
