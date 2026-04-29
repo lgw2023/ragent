@@ -10,6 +10,7 @@ Supported local bootstrap paths:
 - `pythonpath/`
 - `site-packages/`
 - `python/`
+- `keyword_wheelhouse/<platform-tag>/*.whl`
 - `wheelhouse/<platform-tag>/*.whl`
 - `wheelhouse/<platform-tag>/*.tar.gz`
 - `wheelhouse/*.whl` for legacy flat pure-Python wheels
@@ -25,6 +26,12 @@ source archives such as `.tar.gz` are left for an offline `pip install` repair s
 the same distribution and exact version are already installed in the target
 image. Set `RAGENT_MEP_FORCE_WHEELHOUSE=1` to force pure-Python wheels into the
 bootstrap path.
+
+`keyword_wheelhouse/<platform-tag>/` is reserved for no-LLM keyword fallback
+dependencies such as GLiNER, Stanza, and ONNX Runtime. Keeping this separate
+prevents keyword extraction packages from changing the validated Ascend vLLM
+repair wheelhouse. The full-chain validation installs this wheelhouse with
+`--no-index --no-deps` before running retrieval-only requests.
 
 Use `wheelhouse/<platform-tag>/` for universal pure-Python wheels and for native
 wheel/source archive artifacts that are installed by a configured offline repair
@@ -43,6 +50,12 @@ For the validated Ascend 910B vLLM embedding image, export exact `cp310`
 
 ```bash
 python tools/export_mep_vllm_ascend_wheelhouse.py
+```
+
+Export the GLiNER keyword fallback model snapshot and keyword wheelhouse with:
+
+```bash
+python tools/export_mep_keyword_fallback_assets.py
 ```
 
 The exporter writes `manifest.json`, `downloaded-wheels.txt`,

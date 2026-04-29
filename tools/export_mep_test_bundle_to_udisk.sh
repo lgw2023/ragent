@@ -108,12 +108,18 @@ MODEL_PACKAGE_SRC="$PROJECT_ROOT/mep/model_packages/$MODEL_PACKAGE"
 MODEL_PACKAGE_DEST="$DEST/mep/model_packages/$MODEL_PACKAGE"
 WHEELHOUSE_SRC="$MODEL_PACKAGE_SRC/modelDir/data/deps/wheelhouse/$PLATFORM_TAG"
 WHEELHOUSE_DEST="$MODEL_PACKAGE_DEST/modelDir/data/deps/wheelhouse/$PLATFORM_TAG"
+KEYWORD_MODEL_SRC="$MODEL_PACKAGE_SRC/modelDir/data/models/keyword_extraction/knowledgator-gliner-x-small"
+KEYWORD_MODEL_DEST="$MODEL_PACKAGE_DEST/modelDir/data/models/keyword_extraction/knowledgator-gliner-x-small"
+KEYWORD_WHEELHOUSE_SRC="$MODEL_PACKAGE_SRC/modelDir/data/deps/keyword_wheelhouse/$PLATFORM_TAG"
+KEYWORD_WHEELHOUSE_DEST="$MODEL_PACKAGE_DEST/modelDir/data/deps/keyword_wheelhouse/$PLATFORM_TAG"
 
 safe_prepare_dest
 
 require_dir "$PROJECT_ROOT/ragent"
 require_dir "$MODEL_PACKAGE_SRC"
 require_dir "$WHEELHOUSE_SRC"
+require_dir "$KEYWORD_MODEL_SRC"
+require_dir "$KEYWORD_WHEELHOUSE_SRC"
 
 echo "Exporting offline MEP test bundle"
 echo "  source: $PROJECT_ROOT"
@@ -143,8 +149,10 @@ for path in \
   build_mep_layout.py \
   build_mep_upload_packages.py \
   mep_package_utils.py \
+  export_mep_keyword_fallback_assets.py \
   export_mep_test_bundle_to_udisk.sh \
-  export_mep_vllm_ascend_wheelhouse.py
+  export_mep_vllm_ascend_wheelhouse.py \
+  validate_mep_full_chain_result.py
 do
   if [ -f "$PROJECT_ROOT/tools/$path" ]; then
     rsync_file "$PROJECT_ROOT/tools/$path" "$DEST/tools"
@@ -206,13 +214,24 @@ done
 
 find "$DEST" -name '._*' -delete
 
-"$PYTHON_BIN" - "$WHEELHOUSE_SRC" "$WHEELHOUSE_DEST" "$DEST" <<'PY'
+"$PYTHON_BIN" - \
+  "$WHEELHOUSE_SRC" \
+  "$WHEELHOUSE_DEST" \
+  "$DEST" \
+  "$KEYWORD_MODEL_SRC" \
+  "$KEYWORD_MODEL_DEST" \
+  "$KEYWORD_WHEELHOUSE_SRC" \
+  "$KEYWORD_WHEELHOUSE_DEST" <<'PY'
 from pathlib import Path
 import sys
 
 wheelhouse_src = Path(sys.argv[1])
 wheelhouse_dest = Path(sys.argv[2])
 dest = Path(sys.argv[3])
+keyword_model_src = Path(sys.argv[4])
+keyword_model_dest = Path(sys.argv[5])
+keyword_wheelhouse_src = Path(sys.argv[6])
+keyword_wheelhouse_dest = Path(sys.argv[7])
 
 
 def visible_files(root: Path) -> dict[str, int]:
@@ -257,7 +276,47 @@ for prefix in required_root_wheels:
     if root_files[name] != source_size:
         raise SystemExit(f"root repair wheel size mismatch: {name}")
 
+for required_name in ("gliner_config.json", "tokenizer_config.json"):
+    source_file = keyword_model_src / required_name
+    dest_file = keyword_model_dest / required_name
+    if not source_file.is_file():
+        raise SystemExit(f"keyword model source missing required file: {source_file}")
+    if not dest_file.is_file():
+        raise SystemExit(f"keyword model dest missing required file: {dest_file}")
+if not (
+    (keyword_model_dest / "model.safetensors").is_file()
+    or (keyword_model_dest / "pytorch_model.bin").is_file()
+):
+    raise SystemExit(f"keyword model missing weights under {keyword_model_dest}")
+
+keyword_src_files = visible_files(keyword_wheelhouse_src)
+keyword_dest_files = visible_files(keyword_wheelhouse_dest)
+keyword_missing = sorted(set(keyword_src_files) - set(keyword_dest_files))
+keyword_extra = sorted(set(keyword_dest_files) - set(keyword_src_files))
+keyword_size_mismatch = sorted(
+    name
+    for name in set(keyword_src_files) & set(keyword_dest_files)
+    if keyword_src_files[name] != keyword_dest_files[name]
+)
+if keyword_missing or keyword_extra or keyword_size_mismatch:
+    raise SystemExit(
+        "keyword wheelhouse verification failed\n"
+        f"missing={keyword_missing[:20]}\n"
+        f"extra={keyword_extra[:20]}\n"
+        f"size_mismatch={keyword_size_mismatch[:20]}"
+    )
+for prefix in ("gliner-", "stanza-", "onnxruntime-", "langdetect-"):
+    matches = [
+        name
+        for name in keyword_dest_files
+        if name.startswith(prefix) and name.endswith(".whl")
+    ]
+    if not matches:
+        raise SystemExit(f"keyword wheelhouse missing required wheel prefix: {prefix}")
+
 print(f"verified wheelhouse files: {len(src_files)}")
+print(f"verified keyword wheelhouse files: {len(keyword_src_files)}")
+print(f"verified keyword model: {keyword_model_dest}")
 print("verified root repair wheels:")
 for prefix in required_root_wheels:
     name = next(

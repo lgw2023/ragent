@@ -16,6 +16,9 @@ except ImportError:  # pragma: no cover - Python < 3.8 is not supported here.
 
 
 _NATIVE_WHEEL_SUFFIXES = (".so", ".pyd", ".dll", ".dylib")
+_KEYWORD_FALLBACK_MODEL_RELATIVE_DIR = (
+    "models/keyword_extraction/knowledgator-gliner-x-small"
+)
 
 
 def _maybe_json_loads(value: str):
@@ -164,8 +167,11 @@ def _iter_existing_platform_dirs(root: Path) -> Iterator[Path]:
             yield candidate
 
 
-def _iter_wheelhouse_dirs(deps_dir: Path) -> Iterator[Path]:
-    wheelhouse_root = deps_dir / "wheelhouse"
+def _iter_wheelhouse_dirs(
+    deps_dir: Path,
+    root_name: str = "wheelhouse",
+) -> Iterator[Path]:
+    wheelhouse_root = deps_dir / root_name
     if not wheelhouse_root.is_dir():
         return
 
@@ -197,10 +203,25 @@ def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
             yield platform_dir.resolve()
         yield root.resolve()
 
+    for wheelhouse_dir in _iter_wheelhouse_dirs(deps_dir, "keyword_wheelhouse"):
+        for wheel_path in sorted(wheelhouse_dir.glob("*.whl")):
+            if _wheel_should_be_added(wheel_path):
+                yield wheel_path.resolve()
+
     for wheelhouse_dir in _iter_wheelhouse_dirs(deps_dir):
         for wheel_path in sorted(wheelhouse_dir.glob("*.whl")):
             if _wheel_should_be_added(wheel_path):
                 yield wheel_path.resolve()
+
+
+def _configure_keyword_fallback_model(data_dir: Path) -> None:
+    model_dir = (data_dir / _KEYWORD_FALLBACK_MODEL_RELATIVE_DIR).resolve()
+    if not model_dir.is_dir():
+        return
+    if not (os.getenv("RAG_KEYWORD_FALLBACK_MODEL") or "").strip():
+        os.environ["RAG_KEYWORD_FALLBACK_MODEL"] = str(model_dir)
+    if not (os.getenv("RAG_KEYWORD_FALLBACK_DEVICE") or "").strip():
+        os.environ["RAG_KEYWORD_FALLBACK_DEVICE"] = "cpu"
 
 
 def _prepend_import_path(path: Path) -> bool:
@@ -226,6 +247,7 @@ def bootstrap_mep_data_dependencies(current_dir: str | os.PathLike[str]) -> tupl
         seen_data_dirs.add(data_dir)
         if not data_dir.is_dir():
             continue
+        _configure_keyword_fallback_model(data_dir)
         for dependency_path in iter_mep_dependency_paths(data_dir):
             if dependency_path in seen_dependency_paths:
                 continue
