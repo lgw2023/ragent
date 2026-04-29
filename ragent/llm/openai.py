@@ -113,6 +113,9 @@ _PLACEHOLDER_REQUEST_URLS = {
     "https://api.openai.com/v1/",
 }
 
+_BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "on"}
+_BOOLEAN_FALSE_VALUES = {"0", "false", "no", "off"}
+
 
 def _iter_exception_chain(exc: BaseException | None):
     seen: set[int] = set()
@@ -587,6 +590,69 @@ def _supports_openai_param(
     except Exception:
         return False
     return bool(supported and param_name in supported)
+
+
+def _parse_optional_env_bool(*names: str) -> bool | None:
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized in _BOOLEAN_TRUE_VALUES:
+            return True
+        if normalized in _BOOLEAN_FALSE_VALUES:
+            return False
+        logger.warning("Invalid boolean env value for %s=%s. Ignore override.", name, value)
+        return None
+    return None
+
+
+def _is_bge_m3_embedding_model(model: str | None) -> bool:
+    normalized = (model or "").strip().lower().replace("_", "-").replace("/", "-")
+    return normalized in {"bge-m3", "baai-bge-m3"} or normalized.endswith("-bge-m3")
+
+
+def _resolve_openai_http_embedding_dimensions(
+    *,
+    dimensions: str | None,
+    provider: str | None,
+    model: str,
+) -> int | None:
+    if not dimensions:
+        return None
+    try:
+        resolved_dimensions = int(dimensions)
+    except ValueError:
+        logger.warning(
+            "Invalid EMBEDDING_DIMENSIONS value: %s. Ignore dimensions override.",
+            dimensions,
+        )
+        return None
+
+    send_dimensions = _parse_optional_env_bool(
+        "EMBEDDING_SEND_DIMENSIONS",
+        "EMBEDDING_REQUEST_DIMENSIONS",
+    )
+    if send_dimensions is False:
+        logger.info(
+            "Skip EMBEDDING_DIMENSIONS for provider=%s model=%s because EMBEDDING_SEND_DIMENSIONS=0.",
+            provider or "openai-compatible",
+            model,
+        )
+        return None
+    if send_dimensions is True:
+        return resolved_dimensions
+
+    if provider in {None, "custom_openai"} and _is_bge_m3_embedding_model(model):
+        logger.info(
+            "Skip EMBEDDING_DIMENSIONS for provider=%s model=%s because BGE-M3 does not support OpenAI dimensions/matryoshka requests. Set EMBEDDING_SEND_DIMENSIONS=1 to force.",
+            provider or "openai-compatible",
+            model,
+        )
+        return None
+    return resolved_dimensions
 
 
 def _normalize_response_format(
@@ -1331,15 +1397,11 @@ async def openai_embed(
     }
 
     if use_openai_compatible_http:
-        resolved_dimensions: int | None = None
-        if dimensions:
-            try:
-                resolved_dimensions = int(dimensions)
-            except ValueError:
-                logger.warning(
-                    "Invalid EMBEDDING_DIMENSIONS value: %s. Ignore dimensions override.",
-                    dimensions,
-                )
+        resolved_dimensions = _resolve_openai_http_embedding_dimensions(
+            dimensions=dimensions,
+            provider=resolved_provider,
+            model=embedding_model,
+        )
 
         timeout = _resolve_timeout(client_configs)
         extra_headers = client_configs.get("extra_headers")

@@ -78,6 +78,21 @@ def _copy_visible_files(source_dir: Path, dest_dir: Path) -> list[str]:
     return copied
 
 
+def _remove_existing_wheels(output_dir: Path) -> None:
+    if not output_dir.is_dir():
+        return
+    for existing in output_dir.glob("*.whl"):
+        if existing.is_file():
+            existing.unlink()
+
+
+def _distribution_name_from_wheel(wheel_name: str) -> str | None:
+    if not wheel_name.endswith(".whl") or "-" not in wheel_name:
+        return None
+    distribution = wheel_name.split("-", 1)[0].replace("_", "-").lower()
+    return distribution or None
+
+
 def download_keyword_wheels(
     *,
     output_dir: Path,
@@ -129,6 +144,7 @@ def download_keyword_wheels(
                     *pure_wheel_requirements,
                 ]
             )
+        _remove_existing_wheels(output_dir)
         copied = _copy_visible_files(tmp_dir, output_dir)
 
     manifest = {
@@ -209,6 +225,23 @@ def validate_keyword_fallback_assets(
             "keyword wheelhouse is missing required wheels: "
             + ", ".join(missing_wheels)
         )
+    wheels_by_distribution: dict[str, list[str]] = {}
+    for wheel_name in wheels:
+        distribution = _distribution_name_from_wheel(wheel_name)
+        if distribution is not None:
+            wheels_by_distribution.setdefault(distribution, []).append(wheel_name)
+    required_distributions = ("gliner", "stanza", "onnxruntime", "langdetect")
+    duplicate_required_wheels = {
+        distribution: names
+        for distribution, names in wheels_by_distribution.items()
+        if distribution in required_distributions and len(names) != 1
+    }
+    if duplicate_required_wheels:
+        details = "; ".join(
+            f"{distribution}={names}"
+            for distribution, names in sorted(duplicate_required_wheels.items())
+        )
+        raise ValueError(f"keyword wheelhouse has duplicate required wheels: {details}")
     return {
         "model_dir": str(model_dir),
         "wheelhouse_dir": str(wheelhouse_dir),

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from dataclasses import dataclass
+import importlib
 import os
 import re
 import string
@@ -70,6 +72,23 @@ _DEFAULT_GLINER_LABELS = (
 _MODEL_CACHE: dict[tuple[str, str], Any] = {}
 _MODEL_CACHE_LOCK = threading.Lock()
 _PUNCT_TRANSLATION = str.maketrans({char: " " for char in string.punctuation})
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_LOCAL_WORD_TOKEN_RE = re.compile(
+    r"[\u4e00-\u9fff]|[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*|[^\s]"
+)
+_CJK_QUERY_SPLIT_RE = re.compile(
+    r"(?:是什么|有哪些|如何|怎么|怎样|为什么|多少|是否|请|帮我|一下|吗|呢|？|\?)"
+)
+_CJK_CONNECTOR_RE = re.compile(r"(?:以及|或者|的|和|与|及|或|在|中|为|是|对)")
+
+
+class _LocalRegexWordsSplitter:
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        pass
+
+    def __call__(self, text: str):
+        for match in _LOCAL_WORD_TOKEN_RE.finditer(text):
+            yield match.group(), match.start(), match.end()
 
 
 @dataclass(frozen=True)
@@ -295,6 +314,35 @@ def _gliner_labels(global_config: dict[str, Any] | None = None) -> list[str]:
     return list(_DEFAULT_GLINER_LABELS)
 
 
+@contextmanager
+def _patched_gliner_words_splitter():
+    patched_modules: list[tuple[Any, Any]] = []
+    for module_name in ("gliner.data_processing.processor", "gliner.model"):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        if not hasattr(module, "WordsSplitter"):
+            continue
+        patched_modules.append((module, getattr(module, "WordsSplitter")))
+        setattr(module, "WordsSplitter", _LocalRegexWordsSplitter)
+
+    try:
+        yield
+    finally:
+        for module, original_words_splitter in reversed(patched_modules):
+            setattr(module, "WordsSplitter", original_words_splitter)
+
+
+def _install_local_words_splitter(model: Any) -> None:
+    data_processor = getattr(model, "data_processor", None)
+    if data_processor is not None:
+        try:
+            data_processor.words_splitter = _LocalRegexWordsSplitter()
+        except Exception:
+            logger.debug("Unable to install local GLiNER words splitter", exc_info=True)
+
+
 def _load_gliner_model(model_name: str, device: str) -> Any:
     cache_key = (model_name, device)
     with _MODEL_CACHE_LOCK:
@@ -309,10 +357,13 @@ def _load_gliner_model(model_name: str, device: str) -> Any:
             ) from exc
 
         try:
-            model = GLiNER.from_pretrained(model_name)
+            with _patched_gliner_words_splitter():
+                model = GLiNER.from_pretrained(model_name)
+            _install_local_words_splitter(model)
             to_device = getattr(model, "to", None)
             if callable(to_device):
                 model = to_device(device)
+                _install_local_words_splitter(model)
             eval_model = getattr(model, "eval", None)
             if callable(eval_model):
                 eval_model()
@@ -372,8 +423,20 @@ def _predict_gliner_entities(
 
 
 def _fallback_keyword_candidates(text: str) -> list[str]:
-    if not re.search(r"\s", text) and re.search(r"[\u4e00-\u9fff]", text):
-        return []
+    if not re.search(r"\s", text) and _CJK_RE.search(text):
+        normalized = text.translate(_PUNCT_TRANSLATION)
+        normalized = re.sub(r"[，。！？；：、（）【】《》“”‘’]", " ", normalized)
+        normalized = re.sub(r"\s+", "", normalized)
+        candidates: list[str] = []
+        for phrase in _CJK_QUERY_SPLIT_RE.split(normalized):
+            phrase = phrase.strip()
+            if not phrase:
+                continue
+            parts = [part for part in _CJK_CONNECTOR_RE.split(phrase) if part]
+            if len(phrase) <= 16:
+                candidates.append(phrase)
+            candidates.extend(part for part in parts if 1 < len(part) <= 16)
+        return candidates
     candidate_text = text.translate(_PUNCT_TRANSLATION)
     candidate_text = re.sub(r"[，。！？；：、（）【】《》“”‘’]", " ", candidate_text)
     return [item for item in re.split(r"\s+", candidate_text) if item.strip()]

@@ -1,1 +1,16 @@
-{}
+{
+  "chunk-sample-theme": {
+    "content": "文档的主要主题是健康饮食与营养建议。内容强调均衡摄入谷物、蔬菜、水果、蛋白质和水，并提醒读者根据个人身体状况调整饮食习惯。",
+    "full_doc_id": "sample-doc",
+    "file_path": "sample.json",
+    "tokens": 64,
+    "chunk_order_index": 0,
+    "page_numbers": [
+      1
+    ],
+    "page_number_start": 1,
+    "source_ref": "sample.json#page=1",
+    "create_time": 0,
+    "update_time": 0
+  }
+}

@@ -24,8 +24,16 @@ from .shared_storage import (
 @dataclass
 class NetworkXStorage(BaseGraphStorage):
     @staticmethod
-    def load_nx_graph(file_name) -> nx.Graph:
+    def load_nx_graph(file_name) -> nx.Graph | None:
         if os.path.exists(file_name):
+            with open(file_name, "rb") as graph_file:
+                marker = graph_file.read(64).strip()
+            if marker in {b"", b"{}"}:
+                logger.warning(
+                    "GraphML file %s is empty or a legacy JSON placeholder; using an empty graph.",
+                    file_name,
+                )
+                return nx.Graph()
             return nx.read_graphml(file_name)
         return None
 

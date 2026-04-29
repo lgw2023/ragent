@@ -176,6 +176,57 @@ def test_retrieval_only_uses_real_gliner_loader_without_llm(monkeypatch, tmp_pat
     keyword_extraction._MODEL_CACHE.clear()
 
 
+def test_gliner_loader_uses_local_words_splitter_without_model_kwargs(
+    monkeypatch,
+    tmp_path: Path,
+):
+    captured = {}
+    model_dir = tmp_path / "data" / "models" / "keyword_extraction" / "gliner"
+    model_dir.mkdir(parents=True)
+
+    class FakeProcessor:
+        pass
+
+    class FakeModel:
+        def __init__(self):
+            self.data_processor = FakeProcessor()
+
+        def to(self, device):
+            return self
+
+        def eval(self):
+            return None
+
+    class FakeGLiNER:
+        @classmethod
+        def from_pretrained(cls, model_name, **kwargs):
+            captured["model_name"] = model_name
+            captured["kwargs"] = kwargs
+            return FakeModel()
+
+    monkeypatch.setitem(sys.modules, "gliner", SimpleNamespace(GLiNER=FakeGLiNER))
+    keyword_extraction._MODEL_CACHE.clear()
+
+    keyword_extraction._load_gliner_model(str(model_dir), "cpu")
+
+    assert captured["kwargs"] == {}
+    words_splitter = keyword_extraction._MODEL_CACHE[
+        (str(model_dir), "cpu")
+    ].data_processor.words_splitter
+    tokens = [token for token, _start, _end in words_splitter("文档的主要主题是什么？")]
+    assert captured["model_name"] == str(model_dir)
+    assert tokens[:2] == ["文", "档"]
+    keyword_extraction._MODEL_CACHE.clear()
+
+
+def test_chinese_no_space_fallback_keyword_candidates_are_not_empty():
+    assert keyword_extraction._fallback_keyword_candidates("文档的主要主题是什么？") == [
+        "文档的主要主题",
+        "文档",
+        "主要主题",
+    ]
+
+
 def test_explicit_keywords_take_priority_over_gliner_and_llm(monkeypatch):
     llm = _FailingLLM()
 
