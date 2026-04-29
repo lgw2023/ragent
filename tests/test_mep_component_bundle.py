@@ -55,6 +55,85 @@ def test_mep_data_dependency_bootstrap_uses_runtime_sibling_data_dir(
     )
 
 
+def test_mep_data_dependency_bootstrap_configures_keyword_fallback_assets(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    keyword_model_dir = (
+        runtime_root
+        / "data"
+        / "models"
+        / "keyword_extraction"
+        / "knowledgator-gliner-x-small"
+    )
+    keyword_model_dir.mkdir(parents=True)
+    (keyword_model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (keyword_model_dir / "pytorch_model.bin").write_bytes(b"fake")
+    keyword_wheelhouse = (
+        runtime_root / "data" / "deps" / "keyword_wheelhouse" / "test-platform"
+    )
+    keyword_wheelhouse.mkdir(parents=True)
+    keyword_wheel = keyword_wheelhouse / "gliner-0.2.26-py3-none-any.whl"
+    with zipfile.ZipFile(keyword_wheel, "w") as wheel:
+        wheel.writestr("gliner/__init__.py", "")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_MODEL", raising=False)
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_DEVICE", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert os.environ["RAG_KEYWORD_FALLBACK_MODEL"] == str(
+        keyword_model_dir.resolve()
+    )
+    assert os.environ["RAG_KEYWORD_FALLBACK_DEVICE"] == "cpu"
+    assert str(keyword_wheel.resolve()) in added_paths
+    assert sys.path[0] == str(keyword_wheel.resolve())
+
+
+def test_mep_data_dependency_bootstrap_preserves_explicit_keyword_model_env(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    keyword_model_dir = (
+        runtime_root
+        / "data"
+        / "models"
+        / "keyword_extraction"
+        / "knowledgator-gliner-x-small"
+    )
+    keyword_model_dir.mkdir(parents=True)
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_MODEL", "/custom/gliner")
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_DEVICE", "npu")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    bootstrap_mep_data_dependencies(component_dir)
+
+    assert os.environ["RAG_KEYWORD_FALLBACK_MODEL"] == "/custom/gliner"
+    assert os.environ["RAG_KEYWORD_FALLBACK_DEVICE"] == "npu"
+
+
 def test_mep_data_dependency_bootstrap_clears_stale_record_when_no_paths(
     monkeypatch,
     tmp_path: Path,
@@ -287,15 +366,19 @@ def test_offline_full_chain_validation_script_is_exported():
         / "Validated_ragent-mep-test_docker_full_chain.sh"
     )
     export_script = repo_root / "tools" / "export_mep_test_bundle_to_udisk.sh"
+    validator_script = repo_root / "tools" / "validate_mep_full_chain_result.py"
 
     assert script_path.exists()
     script_text = script_path.read_text(encoding="utf-8")
     export_text = export_script.read_text(encoding="utf-8")
+    validator_text = validator_script.read_text(encoding="utf-8")
 
     assert "Validated_ragent-mep-test_docker_full_chain.sh" in export_text
+    assert "validate_mep_full_chain_result.py" in export_text
     assert 'MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"' in script_text
     assert "requests_require_llm()" in script_text
-    assert "retrieval-only payload is missing retrieval_result" in script_text
+    assert "validate_mep_full_chain_result.py" in script_text
+    assert "retrieval-only payload is missing retrieval_result" in validator_text
 
 
 def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(

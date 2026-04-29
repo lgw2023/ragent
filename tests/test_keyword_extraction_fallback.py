@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 from ragent import inference_runtime
 from ragent import keyword_extraction
@@ -112,6 +115,65 @@ def test_gliner_unavailable_does_not_fall_back_to_llm(monkeypatch):
     assert param.keyword_source == "gliner_fallback"
     assert "GLiNER fallback unavailable" in param.keyword_fallback_reason
     assert param.keyword_model_error == "missing package"
+
+
+def test_retrieval_only_uses_real_gliner_loader_without_llm(monkeypatch, tmp_path: Path):
+    captured = {}
+    model_dir = tmp_path / "data" / "models" / "keyword_extraction" / "gliner"
+    model_dir.mkdir(parents=True)
+
+    class FakeModel:
+        def to(self, device):
+            captured["device"] = device
+            return self
+
+        def eval(self):
+            captured["eval"] = True
+
+        def predict_entities(self, text, labels, threshold):
+            captured["text"] = text
+            captured["labels"] = labels
+            captured["threshold"] = threshold
+            return [
+                {"text": "餐后血糖控制", "label": "topic", "start": 0, "score": 0.91},
+                {"text": "糖尿病患者", "label": "person", "start": 2, "score": 0.84},
+            ]
+
+    class FakeGLiNER:
+        @classmethod
+        def from_pretrained(cls, model_name):
+            captured["model_name"] = model_name
+            return FakeModel()
+
+    monkeypatch.setitem(sys.modules, "gliner", SimpleNamespace(GLiNER=FakeGLiNER))
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_MODEL", str(model_dir))
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_DEVICE", "cpu")
+    keyword_extraction._MODEL_CACHE.clear()
+
+    llm = _FailingLLM()
+    param = QueryParam(mode="hybrid", only_need_context=True)
+    hl_keywords, ll_keywords = asyncio.run(
+        operate.get_keywords_from_query(
+            "糖尿病患者如何控制餐后血糖？",
+            param,
+            _global_config(llm),
+        )
+    )
+
+    assert hl_keywords == ["餐后血糖控制"]
+    assert ll_keywords == ["糖尿病患者"]
+    assert llm.calls == []
+    assert captured["model_name"] == str(model_dir)
+    assert captured["device"] == "cpu"
+    assert captured["eval"] is True
+    assert captured["text"] == "糖尿病患者如何控制餐后血糖？"
+    assert "topic" in captured["labels"]
+    assert param.keyword_source == "gliner_fallback"
+    assert param.keyword_strategy == "token_classification_fallback"
+    assert param.keyword_model == str(model_dir)
+    assert param.keyword_model_device == "cpu"
+    assert param.keyword_model_error is None
+    keyword_extraction._MODEL_CACHE.clear()
 
 
 def test_explicit_keywords_take_priority_over_gliner_and_llm(monkeypatch):

@@ -164,6 +164,12 @@ for name in \
   IMAGE_MODEL_TIMEOUT \
   RAG_ANSWER_PROMPT_MODE \
   RAG_RESPONSE_LANGUAGE \
+  RAG_KEYWORD_FALLBACK_ENABLED \
+  RAG_KEYWORD_FALLBACK_MODEL \
+  RAG_KEYWORD_FALLBACK_DEVICE \
+  RAG_KEYWORD_FALLBACK_THRESHOLD \
+  RAG_KEYWORD_FALLBACK_MAX_KEYWORDS \
+  RAG_KEYWORD_FALLBACK_LABELS \
   TOP_K \
   CHUNK_TOP_K \
   MAX_ENTITY_TOKENS \
@@ -274,6 +280,116 @@ print("false")
 PY
 }
 
+requests_have_retrieval_only() {
+  python3 - "$CONTAINER_TEST_DIR" "$MEP_REQUESTS" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+container_test_dir = Path(sys.argv[1]).resolve()
+request_items = [
+    item.strip()
+    for item in sys.argv[2].split(",")
+    if item.strip()
+]
+
+def is_true(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+for request_item in request_items:
+    request_path = Path(request_item)
+    if not request_path.is_absolute():
+        request_path = container_test_dir / "example" / "mep_requests" / request_item
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    data = payload.get("data") or {}
+    if isinstance(data, dict) and (
+        is_true(data.get("retrieval_only")) or is_true(data.get("only_need_context"))
+    ):
+        print("true")
+        raise SystemExit(0)
+
+print("false")
+PY
+}
+
+resolve_keyword_wheelhouse_dir() {
+  local root="$1"
+  python3 - "$root" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1]).resolve()
+if not root.is_dir():
+    raise SystemExit(0)
+
+try:
+    from mep_dependency_bootstrap import iter_platform_tags
+    tags = list(iter_platform_tags())
+except Exception:
+    tags = []
+
+seen = set()
+for tag in tags:
+    candidate = (root / tag).resolve()
+    if candidate.is_dir() and candidate not in seen:
+        print(candidate)
+        raise SystemExit(0)
+    seen.add(candidate)
+
+if any(root.glob("*.whl")):
+    print(root)
+PY
+}
+
+install_keyword_fallback_dependencies() {
+  local required="$1"
+  local model_dir="$RUNTIME_DIR/data/models/keyword_extraction/knowledgator-gliner-x-small"
+  local wheelhouse_root="$RUNTIME_DIR/data/deps/keyword_wheelhouse"
+  local wheelhouse_dir
+  wheelhouse_dir="$(resolve_keyword_wheelhouse_dir "$wheelhouse_root")"
+
+  if [ "$required" = "true" ]; then
+    [ -d "$model_dir" ] || die "missing GLiNER keyword model directory: $model_dir"
+    [ -f "$model_dir/gliner_config.json" ] || die "missing GLiNER keyword model gliner_config.json: $model_dir"
+    if [ ! -f "$model_dir/model.safetensors" ] && [ ! -f "$model_dir/pytorch_model.bin" ]; then
+      die "missing GLiNER keyword model weights under $model_dir"
+    fi
+    [ -n "$wheelhouse_dir" ] || die "missing keyword wheelhouse under $wheelhouse_root"
+  elif [ -z "$wheelhouse_dir" ]; then
+    return 0
+  fi
+
+  local wheels=()
+  while IFS= read -r wheel_path; do
+    wheels+=("$wheel_path")
+  done < <(find "$wheelhouse_dir" -maxdepth 1 -type f -name '*.whl' ! -name '._*' | sort)
+  if [ "${#wheels[@]}" -eq 0 ]; then
+    [ "$required" = "true" ] && die "keyword wheelhouse has no wheels: $wheelhouse_dir"
+    return 0
+  fi
+
+  echo "install keyword fallback wheelhouse: $wheelhouse_dir"
+  echo "keyword wheel count: ${#wheels[@]}"
+  python3 -m pip install --no-index --no-deps --force-reinstall "${wheels[@]}"
+
+  python3 - "$model_dir" <<'PY'
+from pathlib import Path
+import sys
+
+model_dir = Path(sys.argv[1]).resolve()
+import gliner  # noqa: F401
+import onnxruntime  # noqa: F401
+import stanza  # noqa: F401
+
+if not model_dir.is_dir():
+    raise SystemExit(f"missing GLiNER keyword model directory: {model_dir}")
+PY
+}
+
 prepare_runtime_if_needed() {
   if [ -d "$RUNTIME_DIR/component" ] && [ -d "$RUNTIME_DIR/data" ] && [ -d "$RUNTIME_DIR/model" ]; then
     return 0
@@ -338,77 +454,9 @@ PY
 validate_result() {
   local stdout_path="$1"
   local request_work="$2"
-  python3 - "$stdout_path" "$request_work" <<'PY'
-from pathlib import Path
-import json
-import sys
-
-stdout_path = Path(sys.argv[1]).resolve()
-request_work = Path(sys.argv[2]).resolve()
-
-result = json.loads(stdout_path.read_text(encoding="utf-8"))
-request = json.loads(request_work.read_text(encoding="utf-8"))
-recommend = result.get("recommendResult")
-if not isinstance(recommend, dict):
-    raise SystemExit(f"missing recommendResult in {stdout_path}")
-code = str(recommend.get("code"))
-if code != "0":
-    raise SystemExit(f"recommendResult.code={code}, des={recommend.get('des')!r}")
-
-data = request.get("data") or {}
-
-def is_true(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
-
-retrieval_only = is_true(data.get("retrieval_only")) or is_true(data.get("only_need_context"))
-retrieval_result = None
-file_info = data.get("fileInfo")
-generate_path = data.get("generatePath")
-if not generate_path and isinstance(file_info, list) and file_info and isinstance(file_info[0], dict):
-    generate_path = file_info[0].get("generatePath")
-
-answer = None
-gen_json_path = None
-if isinstance(generate_path, str) and generate_path.strip():
-    gen_json_path = Path(generate_path).expanduser().resolve() / "gen.json"
-    if not gen_json_path.is_file():
-        raise SystemExit(f"expected generated result file is missing: {gen_json_path}")
-    generated = json.loads(gen_json_path.read_text(encoding="utf-8"))
-    if str(generated.get("code")) != "0":
-        raise SystemExit(f"generated payload code is not 0: {generated}")
-    answer = str(generated.get("answer") or "").strip()
-    if retrieval_only:
-        retrieval_result = generated.get("retrieval_result")
-else:
-    content = recommend.get("content") or []
-    if content and isinstance(content[0], dict):
-        answer = str(content[0].get("answer") or "").strip()
-        if retrieval_only:
-            retrieval_result = content[0].get("retrieval_result")
-
-if retrieval_only:
-    if not isinstance(retrieval_result, dict):
-        raise SystemExit("retrieval-only payload is missing retrieval_result")
-    final_context_text = str(retrieval_result.get("final_context_text") or "").strip()
-    final_context_chunks = retrieval_result.get("final_context_chunks") or []
-    if not final_context_text and not final_context_chunks:
-        raise SystemExit("retrieval-only payload has no final context")
-elif not answer:
-    raise SystemExit("MEP chain returned code=0 but answer is empty")
-
-summary = {
-    "recommendResult.code": code,
-    "recommendResult.length": recommend.get("length"),
-    "retrieval_only": retrieval_only,
-    "answer_preview": answer[:160],
-    "gen_json": str(gen_json_path) if gen_json_path else None,
-}
-print(json.dumps(summary, ensure_ascii=False, indent=2))
-PY
+  python3 "$CONTAINER_TEST_DIR/tools/validate_mep_full_chain_result.py" \
+    "$stdout_path" \
+    "$request_work"
 }
 
 run_component_request() {
@@ -484,6 +532,7 @@ if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
 fi
 
 REQUESTS_REQUIRE_LLM="$(requests_require_llm)"
+REQUESTS_HAVE_RETRIEVAL_ONLY="$(requests_have_retrieval_only)"
 if [ "$REQUESTS_REQUIRE_LLM" = "true" ]; then
   require_env LLM_MODEL_KEY LLM_MODEL_URL LLM_MODEL
 else
@@ -521,6 +570,8 @@ echo "effective rerank: $EFFECTIVE_RERANK"
 if [ "$rerank_config_complete" != "true" ]; then
   echo "warning: rerank env is incomplete; validation will run with rerank disabled"
 fi
+
+install_keyword_fallback_dependencies "$REQUESTS_HAVE_RETRIEVAL_ONLY"
 
 if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
   export EMBEDDING_MODEL="${MEP_EMBEDDING_MODEL:-BAAI-bge-m3}"
