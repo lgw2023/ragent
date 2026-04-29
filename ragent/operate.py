@@ -293,6 +293,29 @@ def _resolve_rerank_identifier(global_config: dict[str, Any]) -> Any:
     return rerank_identifier or None
 
 
+def _has_complete_rerank_env_config() -> bool:
+    return all(
+        (os.getenv(name) or "").strip()
+        for name in (
+            "RERANK_MODEL_KEY",
+            "RERANK_MODEL_URL",
+            "RERANK_MODEL",
+        )
+    )
+
+
+def _missing_rerank_env_names() -> list[str]:
+    return [
+        name
+        for name in (
+            "RERANK_MODEL_KEY",
+            "RERANK_MODEL_URL",
+            "RERANK_MODEL",
+        )
+        if not (os.getenv(name) or "").strip()
+    ]
+
+
 def _has_unstable_rerank_callable(global_config: dict[str, Any]) -> bool:
     rerank_model_func = global_config.get("rerank_model_func")
     return callable(rerank_model_func) and resolve_callable_cache_id(rerank_model_func) is None
@@ -2035,6 +2058,12 @@ async def apply_rerank_if_enabled(
 
     documents = [str(doc.get("content", "")) for doc in retrieved_docs]
     if not any(documents):
+        return retrieved_docs
+    if not _has_complete_rerank_env_config():
+        logger.warning(
+            "Rerank skipped because RERANK_* config is incomplete: missing %s",
+            ", ".join(_missing_rerank_env_names()),
+        )
         return retrieved_docs
 
     try:
@@ -5471,15 +5500,46 @@ async def _build_hybrid_retrieval_debug_data(
     )
 
     rerank_results = []
+    rerank_used = False
+    rerank_skip_reason = None
+    rerank_model = os.getenv("RERANK_MODEL")
     stage_started_at = time.perf_counter()
     with model_usage_stage("rerank", "Rerank 重排"):
         if results_text and query_param.enable_rerank:
-            rerank_results = await rerank_from_env(
-                query=query,
-                documents=results_text,
-                top_k=len(results_text),
-            )
+            if _has_complete_rerank_env_config():
+                try:
+                    rerank_results = await rerank_from_env(
+                        query=query,
+                        documents=results_text,
+                        top_k=len(results_text),
+                    )
+                    rerank_used = bool(rerank_results)
+                    if not rerank_results:
+                        rerank_skip_reason = "rerank returned no candidates"
+                        rerank_results = [
+                            {"index": index} for index in range(len(results_text))
+                        ]
+                except Exception as exc:
+                    rerank_skip_reason = f"rerank failed: {exc}"
+                    logger.warning(
+                        "Rerank failed, fallback to merged candidate order: %s",
+                        exc,
+                    )
+                    rerank_results = [
+                        {"index": index} for index in range(len(results_text))
+                    ]
+            else:
+                rerank_skip_reason = (
+                    "missing required RERANK_* config: "
+                    + ", ".join(_missing_rerank_env_names())
+                )
+                logger.warning(
+                    "Rerank skipped, fallback to merged candidate order: %s",
+                    rerank_skip_reason,
+                )
+                rerank_results = [{"index": index} for index in range(len(results_text))]
         elif results_text:
+            rerank_skip_reason = "enable_rerank=false"
             rerank_results = [{"index": index} for index in range(len(results_text))]
     _record_stage_timing(
         stage_timings,
@@ -5530,6 +5590,9 @@ async def _build_hybrid_retrieval_debug_data(
         "graph_file_paths": graph_file_path_map,
         "graph_metadata_map": graph_metadata_map,
         "merged_candidates": merged_candidates,
+        "rerank_used": rerank_used,
+        "rerank_model": rerank_model,
+        "rerank_skip_reason": rerank_skip_reason,
         "rerank_results": rerank_results,
         "selected_candidate_indexes": selected_candidate_indexes,
         "results_text": results_text,

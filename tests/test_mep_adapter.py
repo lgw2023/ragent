@@ -81,6 +81,31 @@ def test_normalize_mep_request_chat_history_passthrough(tmp_path: Path):
     assert normalized.result_filename == "gen.json"
 
 
+def test_normalize_mep_request_retrieval_only_aliases_enable_trace(tmp_path: Path):
+    req_data = {
+        "data": {
+            "taskId": "retrieval-001",
+            "query_type": "onehop",
+            "query": "文档的主要主题是什么？",
+            "mode": "hybrid",
+            "only_need_context": "true",
+            "enable_rerank": "false",
+            "high_level_keywords": ["指南"],
+            "low_level_keywords": "饮食,营养",
+            "generatePath": str(tmp_path / "output"),
+        }
+    }
+
+    normalized = normalize_mep_request(req_data)
+
+    assert normalized.inference_request.retrieval_only is True
+    assert normalized.inference_request.only_need_context is True
+    assert normalized.inference_request.include_trace is True
+    assert normalized.inference_request.enable_rerank is False
+    assert normalized.inference_request.high_level_keywords == ["指南"]
+    assert normalized.inference_request.low_level_keywords == ["饮食", "营养"]
+
+
 def test_normalize_mep_request_reads_process_spec_fallback(tmp_path: Path):
     req_data = {
         "data": {
@@ -684,6 +709,55 @@ def test_build_result_payload_contains_stable_fields(monkeypatch, tmp_path: Path
     assert payload["trace"] is None
     assert payload["runtime"]["copied_to_runtime_dir"] is False
     assert payload["runtime"]["runtime_project_dir"] == str(layout.runtime_project_dir)
+
+
+def test_build_result_payload_includes_retrieval_only_result(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "local")
+    monkeypatch.delenv("RAGENT_ENV", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_USE_SOURCE_SNAPSHOT", raising=False)
+
+    req_data = normalize_mep_request(
+        {
+            "data": {
+                "taskId": "retrieval-001",
+                "query_type": "onehop",
+                "query": "文档的主要主题是什么？",
+                "mode": "hybrid",
+                "retrieval_only": True,
+            }
+        }
+    )
+    snapshot_dir = tmp_path / "data"
+    _write_snapshot(snapshot_dir)
+    layout = prepare_runtime_project_layout(data_dir=snapshot_dir)
+    retrieval_result = {
+        "rerank_used": False,
+        "rerank_skip_reason": "enable_rerank=false",
+        "final_context_text": "上下文",
+        "final_context_chunks": [{"content": "上下文", "file_path": "doc.md"}],
+    }
+    result = {
+        "answer": "",
+        "retrieval_only": True,
+        "only_need_context": True,
+        "retrieval_result": retrieval_result,
+        "referenced_file_paths": ["doc.md"],
+        "image_list": ["doc.md"],
+        "query_type": "onehop",
+        "mode": "hybrid",
+    }
+
+    payload = build_result_payload(
+        request=req_data,
+        result=result,
+        runtime_layout=layout,
+    )
+
+    assert payload["retrieval_only"] is True
+    assert payload["only_need_context"] is True
+    assert payload["answer"] == ""
+    assert payload["retrieval_result"] == retrieval_result
+    assert payload["referenced_file_paths"] == ["doc.md"]
 
 
 def test_maybe_write_result_payload_writes_valid_gen_json(tmp_path: Path):

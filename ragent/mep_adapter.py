@@ -119,6 +119,21 @@ def _parse_optional_bool(value: Any, *, field_name: str) -> bool | None:
     raise ValueError(f"Invalid boolean value for {field_name}: {value!r}")
 
 
+def _parse_string_list(value: Any, *, field_name: str) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple)):
+        result: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                result.append(text)
+        return result
+    raise ValueError(f"Invalid list value for {field_name}: {value!r}")
+
+
 def _first_present(mapping: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in mapping:
@@ -762,6 +777,27 @@ def normalize_mep_request(req_data: Any) -> NormalizedMepRequest:
         ),
         field_name="include_trace",
     )
+    retrieval_only = _parse_optional_bool(
+        _first_with_fallback(
+            data,
+            process_spec,
+            source_json,
+            "retrieval_only",
+            "retrievalOnly",
+        ),
+        field_name="retrieval_only",
+    )
+    only_need_context = _parse_optional_bool(
+        _first_with_fallback(
+            data,
+            process_spec,
+            source_json,
+            "only_need_context",
+            "onlyNeedContext",
+        ),
+        field_name="only_need_context",
+    )
+    retrieval_only_enabled = bool(retrieval_only) or bool(only_need_context)
 
     inference_request = InferenceRequest(
         query_type=raw_query_type,  # type: ignore[arg-type]
@@ -796,7 +832,33 @@ def normalize_mep_request(req_data: Any) -> NormalizedMepRequest:
             "response_type",
             "responseType",
         ),
-        include_trace=bool(include_trace),
+        include_trace=bool(include_trace) or retrieval_only_enabled,
+        retrieval_only=retrieval_only_enabled,
+        only_need_context=bool(only_need_context) or retrieval_only_enabled,
+        high_level_keywords=_parse_string_list(
+            _first_with_fallback(
+                data,
+                process_spec,
+                source_json,
+                "high_level_keywords",
+                "highLevelKeywords",
+                "hl_keywords",
+                "hlKeywords",
+            ),
+            field_name="high_level_keywords",
+        ),
+        low_level_keywords=_parse_string_list(
+            _first_with_fallback(
+                data,
+                process_spec,
+                source_json,
+                "low_level_keywords",
+                "lowLevelKeywords",
+                "ll_keywords",
+                "llKeywords",
+            ),
+            field_name="low_level_keywords",
+        ),
     )
 
     generate_path_value = _first_present(data, "generatePath")
@@ -843,6 +905,13 @@ def build_result_payload(
     runtime_layout: RuntimeProjectLayout,
     written_result_path: Path | None = None,
 ) -> dict[str, Any]:
+    retrieval_only = bool(
+        result.get(
+            "retrieval_only",
+            request.inference_request.retrieval_only
+            or request.inference_request.only_need_context,
+        )
+    )
     payload: dict[str, Any] = {
         "code": "0",
         "des": "success",
@@ -850,6 +919,13 @@ def build_result_payload(
         "query": request.inference_request.query,
         "query_type": request.inference_request.query_type,
         "mode": str(result.get("mode") or request.inference_request.mode),
+        "retrieval_only": retrieval_only,
+        "only_need_context": bool(
+            result.get(
+                "only_need_context",
+                request.inference_request.only_need_context or retrieval_only,
+            )
+        ),
         "answer": str(result.get("answer") or ""),
         "referenced_file_paths": list(result.get("referenced_file_paths") or []),
         "image_list": list(result.get("image_list") or []),
@@ -871,7 +947,9 @@ def build_result_payload(
             "response_type",
             request.inference_request.response_type,
         ),
-        "trace": result.get("trace") if request.inference_request.include_trace else None,
+        "trace": (
+            result.get("trace") if request.inference_request.include_trace else None
+        ),
         "runtime": {
             "runtime_project_dir": str(runtime_layout.runtime_project_dir),
             "snapshot_source_dir": str(runtime_layout.source_project_dir),
@@ -881,6 +959,12 @@ def build_result_payload(
 
     if "decomposition" in result:
         payload["decomposition"] = result["decomposition"]
+    if retrieval_only or result.get("retrieval_result") is not None:
+        payload["retrieval_result"] = result.get("retrieval_result") or {}
+    if "retrieval_only_degraded_from" in result:
+        payload["retrieval_only_degraded_from"] = result[
+            "retrieval_only_degraded_from"
+        ]
     if request.inference_request.include_trace and result.get("steps") is not None:
         payload["steps"] = result["steps"]
     if written_result_path is not None:

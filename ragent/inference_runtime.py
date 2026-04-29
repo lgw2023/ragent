@@ -37,8 +37,9 @@ bootstrap_runtime_environment()
 
 QueryType = Literal["onehop", "multihop", "chat"]
 
-_MODEL_HEALTHCHECK_DONE = False
+_MODEL_HEALTHCHECK_DONE: set[str] = set()
 _MODEL_HEALTHCHECK_LOCK = asyncio.Lock()
+_RETRIEVAL_ONLY_LLM_MODEL_NAME = "retrieval-only-no-llm"
 
 
 @dataclass(slots=True)
@@ -51,6 +52,10 @@ class InferenceRequest:
     enable_rerank: bool | None = None
     response_type: str | None = None
     include_trace: bool = False
+    retrieval_only: bool = False
+    only_need_context: bool = False
+    high_level_keywords: list[str] = field(default_factory=list)
+    low_level_keywords: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -61,11 +66,21 @@ class InferenceRuntimeSession:
     initialized_stage_timings: list[dict[str, Any]] = field(default_factory=list)
     query_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    async def load(self) -> None:
+    async def load(
+        self,
+        *,
+        require_llm: bool = False,
+        enable_rerank: bool | None = None,
+    ) -> None:
         if self.rag is not None:
             return
         stage_timings: list[dict[str, Any]] = []
-        self.rag = await initialize_rag(self.project_dir, stage_timings=stage_timings)
+        self.rag = await initialize_rag(
+            self.project_dir,
+            stage_timings=stage_timings,
+            require_llm=require_llm,
+            enable_rerank=enable_rerank,
+        )
         self.initialized_stage_timings = list(stage_timings)
 
     async def close(self) -> None:
@@ -75,7 +90,11 @@ class InferenceRuntimeSession:
         self.rag = None
 
     async def run(self, request: InferenceRequest) -> dict[str, Any]:
-        await self.load()
+        retrieval_only = request.retrieval_only or request.only_need_context
+        await self.load(
+            require_llm=not retrieval_only,
+            enable_rerank=request.enable_rerank,
+        )
         if self.rag is None:
             raise RuntimeError("RAG runtime is not initialized")
 
@@ -470,7 +489,9 @@ def _build_one_hop_trace(
         "vector_candidates": [],
         "graph_chunk_candidates": [],
         "merged_candidates": [],
-        "rerank_model": None,
+        "rerank_used": bool(debug_payload.get("rerank_used", False)),
+        "rerank_model": debug_payload.get("rerank_model"),
+        "rerank_skip_reason": debug_payload.get("rerank_skip_reason"),
         "rerank_input_candidates": [],
         "rerank_output_candidates": [],
         "final_context_chunks": [],
@@ -491,8 +512,12 @@ def _build_one_hop_trace(
             debug_payload.get("vector_metadata_map"),
             source="vector",
         )
-        trace["graph_entity_hits"] = _collect_entity_hits(debug_payload["graph_entities"])
-        trace["graph_relation_hits"] = _collect_relation_hits(debug_payload["graph_relations"])
+        trace["graph_entity_hits"] = _collect_entity_hits(
+            debug_payload["graph_entities"]
+        )
+        trace["graph_relation_hits"] = _collect_relation_hits(
+            debug_payload["graph_relations"]
+        )
         trace["graph_chunk_candidates"] = _collect_ranked_chunks(
             debug_payload["graph_weights"],
             debug_payload["graph_texts"],
@@ -512,7 +537,9 @@ def _build_one_hop_trace(
             }
             for item in debug_payload["merged_candidates"]
         ]
-        trace["rerank_model"] = os.getenv("RERANK_MODEL")
+        trace["rerank_model"] = debug_payload.get("rerank_model") or os.getenv(
+            "RERANK_MODEL"
+        )
         trace["rerank_output_candidates"] = _collect_rerank_results(
             debug_payload["rerank_results"],
             debug_payload["results_text"],
@@ -532,9 +559,13 @@ def _build_one_hop_trace(
             selected_indexes=debug_payload.get("selected_candidate_indexes"),
             limit=len(debug_payload["final_context_document_chunks"]),
         )
-        trace["final_context_document_chunks"] = debug_payload["final_context_document_chunks"]
+        trace["final_context_document_chunks"] = debug_payload[
+            "final_context_document_chunks"
+        ]
     else:
-        trace["graph_entity_hits"] = _collect_entity_hits(debug_payload.get("graph_entities", []))
+        trace["graph_entity_hits"] = _collect_entity_hits(
+            debug_payload.get("graph_entities", [])
+        )
         trace["graph_relation_hits"] = _collect_relation_hits(
             debug_payload.get("graph_relations", [])
         )
@@ -543,8 +574,44 @@ def _build_one_hop_trace(
         ) or _extract_document_chunks_from_context(
             debug_payload.get("final_context_text", "") or ""
         )
+        trace["final_context_chunks"] = [
+            {
+                "rank": index + 1,
+                "chunk_id": item.get("chunk_id") or item.get("id"),
+                "source": item.get("source_type") or "graph",
+                "file_path": item.get("file_path", "unknown_source"),
+                "content": item.get("content", ""),
+                "preview": _preview_text(item.get("content", ""), limit=220),
+            }
+            for index, item in enumerate(trace["final_context_document_chunks"])
+            if isinstance(item, dict)
+        ]
 
     return trace
+
+
+def _build_retrieval_result_from_trace(trace: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(trace, dict):
+        return {}
+    return {
+        "high_level_keywords": list(trace.get("high_level_keywords") or []),
+        "low_level_keywords": list(trace.get("low_level_keywords") or []),
+        "graph_entity_hits": list(trace.get("graph_entity_hits") or []),
+        "graph_relation_hits": list(trace.get("graph_relation_hits") or []),
+        "vector_candidates": list(trace.get("vector_candidates") or []),
+        "graph_chunk_candidates": list(trace.get("graph_chunk_candidates") or []),
+        "merged_candidates": list(trace.get("merged_candidates") or []),
+        "rerank_used": bool(trace.get("rerank_used", False)),
+        "rerank_model": trace.get("rerank_model"),
+        "rerank_skip_reason": trace.get("rerank_skip_reason"),
+        "rerank_input_candidates": list(trace.get("rerank_input_candidates") or []),
+        "rerank_output_candidates": list(trace.get("rerank_output_candidates") or []),
+        "final_context_chunks": list(trace.get("final_context_chunks") or []),
+        "final_context_document_chunks": list(
+            trace.get("final_context_document_chunks") or []
+        ),
+        "final_context_text": str(trace.get("final_context_text") or ""),
+    }
 
 
 async def _run_one_hop_with_rag(
@@ -557,12 +624,26 @@ async def _run_one_hop_with_rag(
     prefill_stage_timings: list[dict[str, Any]] | None = None,
     enable_rerank: bool | None = None,
     response_type: str | None = None,
+    retrieval_only: bool = False,
+    only_need_context: bool = False,
+    high_level_keywords: list[str] | None = None,
+    low_level_keywords: list[str] | None = None,
 ) -> dict[str, Any]:
     query_param = QueryParam(mode=mode)
+    context_only = retrieval_only or only_need_context
+    query_param.only_need_context = context_only
     if enable_rerank is not None:
         query_param.enable_rerank = enable_rerank
     if response_type:
         query_param.response_type = response_type
+    if high_level_keywords:
+        query_param.hl_keywords = [
+            str(item) for item in high_level_keywords if str(item)
+        ]
+    if low_level_keywords:
+        query_param.ll_keywords = [
+            str(item) for item in low_level_keywords if str(item)
+        ]
     if conversation_history:
         query_param.conversation_history = [
             {"role": str(item["role"]), "content": str(item["content"])}
@@ -572,9 +653,15 @@ async def _run_one_hop_with_rag(
         query_param.history_turns = history_turns
     global_config = await rag._build_runtime_global_config()
     normalized_query = query.strip()
+    if context_only and not (query_param.hl_keywords or query_param.ll_keywords):
+        # Retrieval-only must be able to run without an LLM for keyword extraction.
+        # Use the raw query as both graph retrieval signals unless the caller supplied keywords.
+        query_param.hl_keywords = [normalized_query]
+        query_param.ll_keywords = [normalized_query]
+    include_debug = include_trace or context_only
 
     if mode == "hybrid":
-        if include_trace:
+        if include_debug:
             answer, referenced_file_paths, debug_payload = await hybrid_query(
                 normalized_query,
                 rag.chunks_vdb,
@@ -592,20 +679,29 @@ async def _run_one_hop_with_rag(
                     *prefill_stage_timings,
                     *debug_payload.get("stage_timings", []),
                 ]
-            await _enrich_debug_payload_with_chunk_sources(debug_payload, rag.text_chunks)
+            await _enrich_debug_payload_with_chunk_sources(
+                debug_payload,
+                rag.text_chunks,
+            )
             await rag._query_done()
-            normalized_references = _normalize_referenced_file_paths(referenced_file_paths)
+            normalized_references = _normalize_referenced_file_paths(
+                referenced_file_paths
+            )
+            trace = _build_one_hop_trace(
+                normalized_query,
+                mode,
+                answer,
+                referenced_file_paths,
+                debug_payload,
+            )
             return {
-                "answer": answer,
+                "answer": "" if context_only else answer,
                 "referenced_file_paths": normalized_references,
                 "image_list": normalized_references,
-                "trace": _build_one_hop_trace(
-                    normalized_query,
-                    mode,
-                    answer,
-                    referenced_file_paths,
-                    debug_payload,
+                "retrieval_result": (
+                    _build_retrieval_result_from_trace(trace) if context_only else None
                 ),
+                "trace": trace,
             }
         answer, referenced_file_paths = await hybrid_query(
             normalized_query,
@@ -619,7 +715,7 @@ async def _run_one_hop_with_rag(
             rag.llm_response_cache,
         )
     else:
-        if include_trace:
+        if include_debug:
             answer, referenced_file_paths, debug_payload = await graph_query(
                 normalized_query,
                 rag.chunk_entity_relation_graph,
@@ -637,20 +733,29 @@ async def _run_one_hop_with_rag(
                     *prefill_stage_timings,
                     *debug_payload.get("stage_timings", []),
                 ]
-            await _enrich_debug_payload_with_chunk_sources(debug_payload, rag.text_chunks)
+            await _enrich_debug_payload_with_chunk_sources(
+                debug_payload,
+                rag.text_chunks,
+            )
             await rag._query_done()
-            normalized_references = _normalize_referenced_file_paths(referenced_file_paths)
+            normalized_references = _normalize_referenced_file_paths(
+                referenced_file_paths
+            )
+            trace = _build_one_hop_trace(
+                normalized_query,
+                mode,
+                answer,
+                referenced_file_paths,
+                debug_payload,
+            )
             return {
-                "answer": answer,
+                "answer": "" if context_only else answer,
                 "referenced_file_paths": normalized_references,
                 "image_list": normalized_references,
-                "trace": _build_one_hop_trace(
-                    normalized_query,
-                    mode,
-                    answer,
-                    referenced_file_paths,
-                    debug_payload,
+                "retrieval_result": (
+                    _build_retrieval_result_from_trace(trace) if context_only else None
                 ),
+                "trace": trace,
             }
         answer, referenced_file_paths = await graph_query(
             normalized_query,
@@ -902,8 +1007,9 @@ def _has_complete_rerank_config() -> bool:
     )
 
 
-def _should_run_startup_rerank_check() -> bool:
-    enable_rerank = _parse_optional_bool_env_value(os.getenv("ENABLE_RERANK"))
+def _should_run_startup_rerank_check(enable_rerank: bool | None = None) -> bool:
+    if enable_rerank is None:
+        enable_rerank = _parse_optional_bool_env_value(os.getenv("ENABLE_RERANK"))
     if enable_rerank is False:
         return False
     return _has_complete_rerank_config()
@@ -976,8 +1082,16 @@ def _image_text_ping_sync(prompt: str) -> str:
     return data["choices"][0]["message"]["content"]
 
 
-async def verify_env_models_before_startup() -> None:
-    llm_timeout_sec = _resolve_startup_check_timeout_seconds("LLM_API_TIMEOUT_SECONDS")
+async def verify_env_models_before_startup(
+    *,
+    require_llm: bool = True,
+    enable_rerank: bool | None = None,
+) -> None:
+    llm_timeout_sec = (
+        _resolve_startup_check_timeout_seconds("LLM_API_TIMEOUT_SECONDS")
+        if require_llm
+        else None
+    )
     embedding_timeout_sec = _resolve_startup_check_timeout_seconds(
         "EMBEDDING_TIMEOUT_SECONDS",
         "LLM_API_TIMEOUT_SECONDS",
@@ -990,12 +1104,14 @@ async def verify_env_models_before_startup() -> None:
         "IMAGE_MODEL_TIMEOUT",
         "LLM_API_TIMEOUT_SECONDS",
     )
-    llm_example = {
-        "model_env": "LLM_MODEL",
-        "prompt": "这是启动前连通性检查。请只回复: LLM_OK",
-        "system_prompt": "你是模型连通性检查器。",
-        "timeout_seconds": llm_timeout_sec,
-    }
+    llm_example = None
+    if require_llm:
+        llm_example = {
+            "model_env": "LLM_MODEL",
+            "prompt": "这是启动前连通性检查。请只回复: LLM_OK",
+            "system_prompt": "你是模型连通性检查器。",
+            "timeout_seconds": llm_timeout_sec,
+        }
     embed_example = {
         "model_env": "EMBEDDING_MODEL",
         "texts": ["启动前 embedding 连通性检查样例文本。"],
@@ -1009,17 +1125,23 @@ async def verify_env_models_before_startup() -> None:
         "timeout_seconds": rerank_timeout_sec,
     }
 
-    _print_healthcheck("LLM 请求示例", llm_example)
-    llm_result = await asyncio.wait_for(
-        env_openai_complete(
-            prompt=llm_example["prompt"],
-            system_prompt=llm_example["system_prompt"],
-            max_tokens=64,
-            temperature=0,
-        ),
-        timeout=llm_timeout_sec,
-    )
-    _print_healthcheck("LLM 真实返回", llm_result)
+    if require_llm and llm_example is not None and llm_timeout_sec is not None:
+        _print_healthcheck("LLM 请求示例", llm_example)
+        llm_result = await asyncio.wait_for(
+            env_openai_complete(
+                prompt=llm_example["prompt"],
+                system_prompt=llm_example["system_prompt"],
+                max_tokens=64,
+                temperature=0,
+            ),
+            timeout=llm_timeout_sec,
+        )
+        _print_healthcheck("LLM 真实返回", llm_result)
+    else:
+        _print_healthcheck(
+            "LLM 检查跳过",
+            "retrieval-only 模式不要求 LLM_MODEL/LLM_MODEL_URL/LLM_MODEL_KEY",
+        )
 
     _print_healthcheck("Embedding 请求示例", embed_example)
     embed_result = await asyncio.wait_for(
@@ -1035,7 +1157,7 @@ async def verify_env_models_before_startup() -> None:
         {"shape": embed_shape, "first_vector_head8": first_vec_preview},
     )
 
-    if _should_run_startup_rerank_check():
+    if _should_run_startup_rerank_check(enable_rerank):
         _print_healthcheck("Rerank 请求示例", rerank_example)
         rerank_result = await asyncio.wait_for(
             rerank_from_env(
@@ -1086,17 +1208,37 @@ async def verify_env_models_before_startup() -> None:
     )
 
 
-async def ensure_startup_model_check_once() -> None:
+def _startup_model_check_profile(
+    *,
+    require_llm: bool,
+    enable_rerank: bool | None,
+) -> str:
+    rerank_check = _should_run_startup_rerank_check(enable_rerank)
+    return f"llm={int(require_llm)};rerank={int(rerank_check)}"
+
+
+async def ensure_startup_model_check_once(
+    *,
+    require_llm: bool = True,
+    enable_rerank: bool | None = None,
+) -> None:
     global _MODEL_HEALTHCHECK_DONE
     startup_check_enabled = os.getenv("MODEL_STARTUP_CHECK_ENABLED", "1") == "1"
-    if not startup_check_enabled or _MODEL_HEALTHCHECK_DONE:
+    profile = _startup_model_check_profile(
+        require_llm=require_llm,
+        enable_rerank=enable_rerank,
+    )
+    if not startup_check_enabled or profile in _MODEL_HEALTHCHECK_DONE:
         return
     async with _MODEL_HEALTHCHECK_LOCK:
-        if _MODEL_HEALTHCHECK_DONE:
+        if profile in _MODEL_HEALTHCHECK_DONE:
             return
         try:
-            await verify_env_models_before_startup()
-            _MODEL_HEALTHCHECK_DONE = True
+            await verify_env_models_before_startup(
+                require_llm=require_llm,
+                enable_rerank=enable_rerank,
+            )
+            _MODEL_HEALTHCHECK_DONE.add(profile)
         except Exception as e:
             err_msg = str(e) if str(e) else f"{type(e).__name__}({repr(e)})"
             if isinstance(e, asyncio.TimeoutError):
@@ -1112,11 +1254,17 @@ async def ensure_startup_model_check_once() -> None:
 async def initialize_rag(
     working_dir: str,
     stage_timings: list[dict[str, Any]] | None = None,
+    *,
+    require_llm: bool = True,
+    enable_rerank: bool | None = None,
 ) -> Ragent:
     total_started_at = time.perf_counter()
     startup_started_at = time.perf_counter()
     with model_usage_stage("startup_model_check", "启动前模型检查"):
-        await ensure_startup_model_check_once()
+        await ensure_startup_model_check_once(
+            require_llm=require_llm,
+            enable_rerank=enable_rerank,
+        )
     if stage_timings is not None:
         stage_timings.append(
             {
@@ -1132,7 +1280,8 @@ async def initialize_rag(
         embedding_func=openai_embed,
         llm_model_func=env_openai_complete,
         rerank_model_func=rerank_from_env,
-        llm_model_name=os.getenv("LLM_MODEL"),
+        llm_model_name=os.getenv("LLM_MODEL")
+        or (None if require_llm else _RETRIEVAL_ONLY_LLM_MODEL_NAME),
     )
     if stage_timings is not None:
         stage_timings.append(
@@ -1293,7 +1442,13 @@ async def execute_inference_request(
     *,
     prefill_stage_timings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    if request.query_type in {"onehop", "chat"}:
+    retrieval_only = request.retrieval_only or request.only_need_context
+    await ensure_startup_model_check_once(
+        require_llm=not retrieval_only,
+        enable_rerank=request.enable_rerank,
+    )
+
+    if request.query_type in {"onehop", "chat"} or retrieval_only:
         result = await _run_one_hop_with_rag(
             rag,
             request.query,
@@ -1304,17 +1459,37 @@ async def execute_inference_request(
             prefill_stage_timings=prefill_stage_timings,
             enable_rerank=request.enable_rerank,
             response_type=request.response_type,
+            retrieval_only=retrieval_only,
+            only_need_context=request.only_need_context or retrieval_only,
+            high_level_keywords=request.high_level_keywords,
+            low_level_keywords=request.low_level_keywords,
         )
-        return {
+        payload = {
             **result,
             "query": request.query,
             "query_type": request.query_type,
             "mode": normalize_query_mode(request.mode),
-            "conversation_history_used_count": len(request.conversation_history or []),
+            "conversation_history_used_count": len(
+                request.conversation_history or []
+            ),
             "history_turns": request.history_turns,
             "enable_rerank": request.enable_rerank,
             "response_type": request.response_type,
+            "retrieval_only": retrieval_only,
+            "only_need_context": request.only_need_context or retrieval_only,
         }
+        if retrieval_only and request.query_type == "multihop":
+            payload["retrieval_only_degraded_from"] = "multihop"
+            degrade_reason = (
+                "multihop retrieval-only skips LLM-based decomposition and runs "
+                "single-pass onehop retrieval."
+            )
+            if isinstance(payload.get("trace"), dict):
+                payload["trace"]["retrieval_only_degraded_from"] = "multihop"
+                payload["trace"]["degrade_reason"] = degrade_reason
+            if isinstance(payload.get("retrieval_result"), dict):
+                payload["retrieval_result"]["degrade_reason"] = degrade_reason
+        return payload
 
     result = await _run_multi_hop_with_rag(
         rag,
