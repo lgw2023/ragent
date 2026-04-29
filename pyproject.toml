@@ -65,6 +65,7 @@ openai = [
 
 # HuggingFace 本地模型
 hf = [
+    "gliner[stanza]",
     "torch",
     "transformers",
 ]
