@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "meta": {
+    "bId": "local-debug",
+    "flowId": "ragent-retrieval-only"
+  },
+  "data": {
+    "query_type": "onehop",
+    "query": "文档的主要主题是什么？",
+    "mode": "hybrid",
+    "retrieval_only": true,
+    "only_need_context": true,
+    "enable_rerank": false,
+    "generatePath": "/tmp/ragent_mep_retrieval_only_output"
+  }
+}

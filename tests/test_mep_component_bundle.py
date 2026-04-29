@@ -276,6 +276,26 @@ def test_example_mep_requests_exist():
     assert (request_dir / "multihop_request.json").exists()
     assert (request_dir / "chat_request.json").exists()
     assert (request_dir / "sfs_create_request.json").exists()
+    assert (request_dir / "retrieval_only_request.json").exists()
+
+
+def test_offline_full_chain_validation_script_is_exported():
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = (
+        repo_root
+        / "MEP_platform_rule"
+        / "Validated_ragent-mep-test_docker_full_chain.sh"
+    )
+    export_script = repo_root / "tools" / "export_mep_test_bundle_to_udisk.sh"
+
+    assert script_path.exists()
+    script_text = script_path.read_text(encoding="utf-8")
+    export_text = export_script.read_text(encoding="utf-8")
+
+    assert "Validated_ragent-mep-test_docker_full_chain.sh" in export_text
+    assert 'MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"' in script_text
+    assert "requests_require_llm()" in script_text
+    assert "retrieval-only payload is missing retrieval_result" in script_text
 
 
 def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(
@@ -363,6 +383,95 @@ def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(
     assert payload["answer"] == "主题是饮食知识。"
     assert payload["referenced_file_paths"] == ["doc.md"]
     assert payload["runtime"]["runtime_project_dir"] == str(runtime_layout.runtime_project_dir)
+
+
+def test_customer_model_calc_retrieval_only_writes_retrieval_result(
+    monkeypatch,
+    tmp_path: Path,
+):
+    repo_root = Path(__file__).resolve().parents[1]
+    process_path = repo_root / "process.py"
+
+    spec = importlib.util.spec_from_file_location(
+        "ragent_root_process_retrieval_only_test",
+        process_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    snapshot_dir = tmp_path / "data" / "demo_kg"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    for filename in (
+        "graph_chunk_entity_relation.graphml",
+        "kv_store_text_chunks.json",
+        "vdb_chunks.json",
+    ):
+        (snapshot_dir / filename).write_text("{}", encoding="utf-8")
+
+    runtime_layout = module.prepare_runtime_project_layout(data_dir=snapshot_dir.parent)
+
+    class FakeLoopRunner:
+        def run(self, coro):
+            return asyncio.run(coro)
+
+        def close(self):
+            pass
+
+    class FakeRuntimeSession:
+        async def run(self, inference_request):
+            assert inference_request.retrieval_only is True
+            assert inference_request.only_need_context is True
+            assert inference_request.include_trace is True
+            return {
+                "answer": "",
+                "retrieval_only": True,
+                "only_need_context": True,
+                "referenced_file_paths": ["doc.md"],
+                "image_list": ["doc.md"],
+                "retrieval_result": {
+                    "rerank_used": False,
+                    "rerank_skip_reason": "missing required RERANK_* config",
+                    "final_context_text": "检索上下文",
+                    "final_context_chunks": [
+                        {"content": "检索上下文", "file_path": "doc.md"}
+                    ],
+                },
+            }
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(module, "AsyncLoopThread", FakeLoopRunner)
+
+    model = module.CustomerModel()
+    model._runtime_layout = runtime_layout
+    model._runtime_session = FakeRuntimeSession()
+    generate_path = tmp_path / "generate"
+
+    response = model.calc(
+        {
+            "version": "1.2",
+            "data": {
+                "taskId": "retrieval-001",
+                "action": "create",
+                "query_type": "onehop",
+                "query": "文档的主要主题是什么？",
+                "mode": "hybrid",
+                "retrieval_only": True,
+                "fileInfo": [{"generatePath": str(generate_path), "processSpec": []}],
+            },
+        }
+    )
+
+    assert response["recommendResult"]["code"] == "0"
+    output_path = generate_path / "gen.json"
+    assert output_path.exists()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["retrieval_only"] is True
+    assert payload["answer"] == ""
+    assert payload["retrieval_result"]["final_context_text"] == "检索上下文"
+    assert payload["referenced_file_paths"] == ["doc.md"]
 
 
 def test_customer_model_calc_query_checks_existing_gen_json_without_loaded_runtime(

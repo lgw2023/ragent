@@ -6,8 +6,17 @@ from pathlib import Path
 from tools import export_mep_vllm_ascend_wheelhouse as exporter
 
 
-def test_default_extra_requirements_include_cbor2():
-    assert "cbor2==5.9.0" in exporter.DEFAULT_EXTRA_REQUIREMENTS
+def test_default_extra_requirements_include_mep_runtime_gaps():
+    assert {
+        "cbor2==5.9.0",
+        "configparser==7.2.0",
+        "dotenv==0.9.9",
+        "future==1.0.0",
+        "nano-vectordb==0.0.4.3",
+        "pipmaster==1.1.2",
+        "pyuca==1.2",
+        "tenacity==9.1.4",
+    }.issubset(set(exporter.DEFAULT_EXTRA_REQUIREMENTS))
 
 
 def test_export_wheelhouse_resolves_only_validated_tmp_local_wheels(

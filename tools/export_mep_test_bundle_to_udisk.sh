@@ -158,6 +158,7 @@ fi
 mkdir -p "$DEST/MEP_platform_rule"
 for path in \
   Validated_ragent-mep-test_docker_vllm.sh \
+  Validated_ragent-mep-test_docker_full_chain.sh \
   Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt
 do
   if [ -f "$PROJECT_ROOT/MEP_platform_rule/$path" ]; then

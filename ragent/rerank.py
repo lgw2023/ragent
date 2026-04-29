@@ -173,7 +173,7 @@ async def rerank_api(
     )
 
     rerank_req_start = time.perf_counter()
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(trust_env=True) as session:
         async with session.post(request_url, headers=headers, json=data) as response:
             if response.status != 200:
                 error_text = await response.text()
