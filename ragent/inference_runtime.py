@@ -12,13 +12,14 @@ from typing import Any, Literal
 
 import requests
 
+from . import keyword_extraction
 from . import QueryParam, Ragent
 from .constants import GRAPH_FIELD_SEP
 from .kg.shared_storage import finalize_share_data, initialize_pipeline_status
 from .llm.openai import env_openai_complete, openai_embed
 from .prompt import dismantle_prompt
 from .rerank import rerank_from_env
-from .runtime_env import bootstrap_runtime_environment
+from .runtime_env import bootstrap_runtime_environment, is_mep_runtime
 from .utils import (
     ModelUsageCollector,
     get_current_model_usage_collector,
@@ -40,6 +41,9 @@ QueryType = Literal["onehop", "multihop", "chat"]
 _MODEL_HEALTHCHECK_DONE: set[str] = set()
 _MODEL_HEALTHCHECK_LOCK = asyncio.Lock()
 _RETRIEVAL_ONLY_LLM_MODEL_NAME = "retrieval-only-no-llm"
+_LLM_CONFIG_ENV_VARS = ("LLM_MODEL_KEY", "LLM_MODEL_URL", "LLM_MODEL")
+_KEYWORD_FALLBACK_PRELOAD_DONE: set[str] = set()
+_KEYWORD_FALLBACK_PRELOAD_LOCK = asyncio.Lock()
 
 
 @dataclass(slots=True)
@@ -1004,6 +1008,70 @@ def _parse_optional_bool_env_value(value: Any) -> bool | None:
     return None
 
 
+def _has_complete_llm_config() -> bool:
+    return all((os.getenv(name) or "").strip() for name in _LLM_CONFIG_ENV_VARS)
+
+
+def _keyword_fallback_preload_enabled(default: bool) -> bool:
+    for name in (
+        "RAG_KEYWORD_FALLBACK_PRELOAD",
+        "RAGENT_MEP_PRELOAD_KEYWORD_FALLBACK",
+    ):
+        parsed = _parse_optional_bool_env_value(os.getenv(name))
+        if parsed is not None:
+            return parsed
+    return default
+
+
+def _should_preload_keyword_fallback_for_runtime(*, require_llm: bool) -> bool:
+    default_enabled = (
+        is_mep_runtime() and not require_llm and not _has_complete_llm_config()
+    )
+    return _keyword_fallback_preload_enabled(default_enabled)
+
+
+async def ensure_keyword_fallback_model_ready_once(
+    *,
+    require_llm: bool,
+) -> dict[str, Any] | None:
+    if not _should_preload_keyword_fallback_for_runtime(require_llm=require_llm):
+        return None
+
+    model_name = keyword_extraction.get_gliner_keyword_model_name()
+    device = keyword_extraction.get_gliner_keyword_device()
+    profile = f"{model_name};device={device}"
+    if profile in _KEYWORD_FALLBACK_PRELOAD_DONE:
+        return {
+            "keyword_model": model_name,
+            "keyword_model_device": device,
+            "cached": True,
+        }
+
+    async with _KEYWORD_FALLBACK_PRELOAD_LOCK:
+        if profile in _KEYWORD_FALLBACK_PRELOAD_DONE:
+            return {
+                "keyword_model": model_name,
+                "keyword_model_device": device,
+                "cached": True,
+            }
+        logger.info(
+            "No complete LLM config detected in MEP runtime; preloading resident "
+            "GLiNER keyword fallback model. model=%s device=%s",
+            model_name,
+            device,
+        )
+        info = await keyword_extraction.ensure_gliner_keyword_model_ready()
+        _KEYWORD_FALLBACK_PRELOAD_DONE.add(profile)
+        logger.info(
+            "Resident GLiNER keyword fallback model is ready. "
+            "model=%s device=%s warmup_entities=%s",
+            info["keyword_model"],
+            info["keyword_model_device"],
+            info["warmup_entity_count"],
+        )
+        return info
+
+
 def _has_complete_rerank_config() -> bool:
     return all(
         (os.getenv(name) or "").strip()
@@ -1282,6 +1350,25 @@ async def initialize_rag(
             }
         )
 
+    keyword_preload_started_at = time.perf_counter()
+    preload_info = await ensure_keyword_fallback_model_ready_once(
+        require_llm=require_llm,
+    )
+    if stage_timings is not None and preload_info is not None:
+        stage_timings.append(
+            {
+                "stage": "keyword_fallback_preload",
+                "label": "GLiNER 关键词模型常驻预热",
+                "seconds": round(
+                    time.perf_counter() - keyword_preload_started_at,
+                    3,
+                ),
+                "model": preload_info.get("keyword_model"),
+                "device": preload_info.get("keyword_model_device"),
+                "cached": bool(preload_info.get("cached", False)),
+            }
+        )
+
     rag_create_started_at = time.perf_counter()
     rag = Ragent(
         working_dir=working_dir,
@@ -1522,6 +1609,7 @@ __all__ = [
     "_close_rag",
     "_run_multi_hop_with_rag",
     "_run_one_hop_with_rag",
+    "ensure_keyword_fallback_model_ready_once",
     "ensure_startup_model_check_once",
     "execute_inference_request",
     "inference_multi_hop_problem",
