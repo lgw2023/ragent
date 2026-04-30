@@ -655,6 +655,61 @@ def _resolve_openai_http_embedding_dimensions(
     return resolved_dimensions
 
 
+def _coerce_embedding_response_array(
+    embeddings: list[list[float]],
+    dimensions: str | None,
+    *,
+    provider: str | None,
+    model: str,
+) -> np.ndarray:
+    array = np.array(embeddings, dtype=float)
+    if not dimensions or array.ndim != 2:
+        return array
+
+    try:
+        expected_dimensions = int(dimensions)
+    except ValueError:
+        return array
+    if expected_dimensions <= 0:
+        return array
+
+    actual_dimensions = array.shape[1]
+    if actual_dimensions > expected_dimensions:
+        allow_test_truncation = _parse_optional_env_bool(
+            "RAGENT_TEST_ALLOW_EMBEDDING_TRUNCATION"
+        )
+        if allow_test_truncation is not True:
+            logger.warning(
+                "Embedding response vectors have more dimensions than configured. "
+                "actual=%s configured=%s provider=%s model=%s. "
+                "Not truncating because RAGENT_TEST_ALLOW_EMBEDDING_TRUNCATION is not enabled.",
+                actual_dimensions,
+                expected_dimensions,
+                provider or "openai-compatible",
+                model,
+            )
+            return array
+        logger.warning(
+            "Test-only embedding truncation enabled. Truncate response vectors "
+            "from %s to %s dimensions. provider=%s model=%s",
+            actual_dimensions,
+            expected_dimensions,
+            provider or "openai-compatible",
+            model,
+        )
+        return array[:, :expected_dimensions]
+    if actual_dimensions < expected_dimensions:
+        logger.warning(
+            "Embedding response vectors have fewer dimensions than configured. "
+            "actual=%s configured=%s provider=%s model=%s",
+            actual_dimensions,
+            expected_dimensions,
+            provider or "openai-compatible",
+            model,
+        )
+    return array
+
+
 def _normalize_response_format(
     *,
     model: str,
@@ -1487,7 +1542,12 @@ async def openai_embed(
                 embeddings.append(item["embedding"])
             else:
                 embeddings.append(getattr(item, "embedding"))
-        return np.array(embeddings)
+        return _coerce_embedding_response_array(
+            embeddings,
+            dimensions,
+            provider=resolved_provider,
+            model=embedding_model,
+        )
 
     request_model, request_provider, litellm_request_kwargs = _build_litellm_request(
         model=embedding_model,
@@ -1579,4 +1639,9 @@ async def openai_embed(
             embeddings.append(item["embedding"])
         else:
             embeddings.append(getattr(item, "embedding"))
-    return np.array(embeddings)
+    return _coerce_embedding_response_array(
+        embeddings,
+        dimensions,
+        provider=request_provider,
+        model=request_model,
+    )

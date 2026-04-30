@@ -43,6 +43,7 @@ MEP_KEEP_REQUEST_GENERATE_PATH="${MEP_KEEP_REQUEST_GENERATE_PATH:-0}"
 MEP_KEEP_REQUEST_RERANK="${MEP_KEEP_REQUEST_RERANK:-0}"
 MEP_REUSE_EXISTING_VLLM="${MEP_REUSE_EXISTING_VLLM:-1}"
 MEP_CLEAR_PATH_ENV="${MEP_CLEAR_PATH_ENV:-1}"
+MEP_ALLOW_TEST_EMBEDDING_TRUNCATION="${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-1}"
 
 die() {
   echo "error: $*" >&2
@@ -135,6 +136,7 @@ EXEC_ENV_ARGS=(
   "-e" "MEP_KEEP_REQUEST_RERANK=$MEP_KEEP_REQUEST_RERANK"
   "-e" "MEP_REUSE_EXISTING_VLLM=$MEP_REUSE_EXISTING_VLLM"
   "-e" "MEP_CLEAR_PATH_ENV=$MEP_CLEAR_PATH_ENV"
+  "-e" "MEP_ALLOW_TEST_EMBEDDING_TRUNCATION=$MEP_ALLOW_TEST_EMBEDDING_TRUNCATION"
   "-e" "MEP_EMBEDDING_MODEL=${MEP_EMBEDDING_MODEL:-}"
   "-e" "MEP_EMBEDDING_MODEL_KEY=${MEP_EMBEDDING_MODEL_KEY:-}"
   "-e" "MEP_EMBEDDING_MODEL_URL=${MEP_EMBEDDING_MODEL_URL:-}"
@@ -392,6 +394,69 @@ print(request_work)
 PY
 }
 
+resolve_runtime_embedding_dimensions() {
+  python3 - "$RUNTIME_DIR" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+runtime_dir = Path(sys.argv[1]).resolve()
+data_dir = runtime_dir / "data"
+
+
+def parse_properties(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    result: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "!")):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+        elif ":" in line:
+            key, value = line.split(":", 1)
+        else:
+            key, value = line, ""
+        result[key.strip()] = value.strip()
+    return result
+
+
+def read_vdb_dim(path: Path) -> int | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    dim = payload.get("embedding_dim")
+    return dim if isinstance(dim, int) and dim > 0 else None
+
+
+vdb_dims = {
+    dim
+    for path in data_dir.glob("**/vdb_chunks.json")
+    if (dim := read_vdb_dim(path)) is not None
+}
+if len(vdb_dims) == 1:
+    print(next(iter(vdb_dims)))
+    raise SystemExit(0)
+
+for candidate in (
+    data_dir / "config" / "embedding.properties",
+    data_dir / "embedding.properties",
+):
+    properties = parse_properties(candidate)
+    raw_dim = properties.get("embedding.dimensions")
+    if raw_dim:
+        try:
+            dim = int(raw_dim)
+        except ValueError:
+            continue
+        if dim > 0:
+            print(dim)
+            raise SystemExit(0)
+PY
+}
+
 validate_result() {
   local stdout_path="$1"
   local request_work="$2"
@@ -523,12 +588,25 @@ if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
   if [ -n "${MEP_EMBEDDING_DIMENSIONS:-}" ]; then
     export EMBEDDING_DIMENSIONS="$MEP_EMBEDDING_DIMENSIONS"
   else
-    unset EMBEDDING_DIMENSIONS EMBEDDING_DIM
+    RUNTIME_EMBEDDING_DIMENSIONS="$(resolve_runtime_embedding_dimensions || true)"
+    if [ -n "$RUNTIME_EMBEDDING_DIMENSIONS" ]; then
+      export EMBEDDING_DIMENSIONS="$RUNTIME_EMBEDDING_DIMENSIONS"
+    else
+      unset EMBEDDING_DIMENSIONS EMBEDDING_DIM
+    fi
   fi
   echo "embedding runtime: reuse $EMBEDDING_MODEL_URL"
+  echo "embedding dimensions: ${EMBEDDING_DIMENSIONS:-default}"
 else
   unset EMBEDDING_MODEL EMBEDDING_MODEL_KEY EMBEDDING_MODEL_URL EMBEDDING_PROVIDER
   echo "embedding runtime: component autostart"
+fi
+if [ "${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-0}" = "1" ]; then
+  export RAGENT_TEST_ALLOW_EMBEDDING_TRUNCATION=1
+  echo "embedding truncation: test-only enabled"
+else
+  unset RAGENT_TEST_ALLOW_EMBEDDING_TRUNCATION
+  echo "embedding truncation: disabled"
 fi
 
 if [ "$MEP_CLEAR_PATH_ENV" = "1" ]; then

@@ -32,6 +32,7 @@ _MANAGED_ENV_VARS = (
     "EMBEDDING_MODEL_KEY",
     "EMBEDDING_MODEL_URL",
     "EMBEDDING_PROVIDER",
+    "EMBEDDING_DIMENSIONS",
 )
 _LOCAL_PROVIDER = "custom_openai"
 _DEFAULT_MODEL_NAME = "BAAI/bge-m3"
@@ -103,6 +104,8 @@ class LocalEmbeddingRuntime:
         os.environ["EMBEDDING_MODEL_KEY"] = self.config.api_key
         os.environ["EMBEDDING_MODEL_URL"] = self.config.base_url
         os.environ["EMBEDDING_PROVIDER"] = _LOCAL_PROVIDER
+        if self.config.dimensions is not None:
+            os.environ["EMBEDDING_DIMENSIONS"] = str(self.config.dimensions)
 
     def restore_environment(self) -> None:
         for key, previous_value in self._env_backup.items():
