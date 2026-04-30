@@ -247,6 +247,10 @@ for key in (
         print(candidate)
         raise SystemExit(0)
 
+if looks_like_model_dir(model_root):
+    print(model_root.resolve())
+    raise SystemExit(0)
+
 candidates = sorted(path.resolve() for path in model_root.iterdir() if looks_like_model_dir(path))
 if len(candidates) == 1:
     print(candidates[0])

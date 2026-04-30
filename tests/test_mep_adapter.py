@@ -106,6 +106,40 @@ def test_normalize_mep_request_retrieval_only_aliases_enable_trace(tmp_path: Pat
     assert normalized.inference_request.low_level_keywords == ["饮食", "营养"]
 
 
+def test_normalize_mep_request_defaults_to_retrieval_only_when_unset():
+    normalized = normalize_mep_request(
+        {
+            "data": {
+                "query_type": "onehop",
+                "query": "文档的主要主题是什么？",
+            }
+        }
+    )
+
+    assert normalized.inference_request.retrieval_only is True
+    assert normalized.inference_request.only_need_context is True
+    assert normalized.inference_request.include_trace is True
+
+
+@pytest.mark.parametrize("field_name", ["retrieval_only", "only_need_context"])
+def test_normalize_mep_request_explicit_false_opts_out_of_retrieval_only(
+    field_name: str,
+):
+    normalized = normalize_mep_request(
+        {
+            "data": {
+                "query_type": "onehop",
+                "query": "需要生成完整回答。",
+                field_name: False,
+            }
+        }
+    )
+
+    assert normalized.inference_request.retrieval_only is False
+    assert normalized.inference_request.only_need_context is False
+    assert normalized.inference_request.include_trace is False
+
+
 def test_normalize_mep_request_reads_process_spec_fallback(tmp_path: Path):
     req_data = {
         "data": {

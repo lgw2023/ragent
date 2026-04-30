@@ -17,6 +17,8 @@ IGNORE_PATTERNS = (
     "*.pyc",
     "*.pyo",
 )
+HF_CONFIG_MARKER = "config.json"
+HF_TOKENIZER_MARKERS = ("tokenizer.json", "tokenizer_config.json")
 ARCHIVE_FORMATS = {
     "zip": ("zip", ".zip"),
     "tar": ("tar", ".tar"),
@@ -192,17 +194,33 @@ def validate_model_root(model_root: Path, *, model_root_label: str) -> None:
     children = visible_model_root_children(model_root)
     if not children:
         raise FileNotFoundError(
-            f"{model_root_label} must contain at least one Hugging Face model "
-            f"directory: {model_root}"
+            f"{model_root_label} must contain Hugging Face model files: {model_root}"
         )
 
-    invalid_children = [child for child in children if not child.is_dir()]
-    if invalid_children:
-        invalid_text = ", ".join(str(child) for child in invalid_children)
+    has_config = (model_root / HF_CONFIG_MARKER).is_file()
+    has_tokenizer = any((model_root / marker).is_file() for marker in HF_TOKENIZER_MARKERS)
+    if has_config and has_tokenizer:
+        return
+
+    nested_model_dirs = [
+        child
+        for child in children
+        if child.is_dir()
+        and (child / HF_CONFIG_MARKER).is_file()
+        and any((child / marker).is_file() for marker in HF_TOKENIZER_MARKERS)
+    ]
+    if nested_model_dirs:
+        nested_text = ", ".join(str(child) for child in nested_model_dirs)
         raise ValueError(
-            f"{model_root_label} top level must contain only Hugging Face model "
-            f"directories; found non-directory entries: {invalid_text}"
+            f"{model_root_label} must directly contain Hugging Face model files; "
+            f"nested model directories are not allowed: {nested_text}"
         )
+
+    required = f"{HF_CONFIG_MARKER} and one of {', '.join(HF_TOKENIZER_MARKERS)}"
+    raise FileNotFoundError(
+        f"{model_root_label} must be a Hugging Face model directory containing "
+        f"{required}: {model_root}"
+    )
 
 
 def validate_model_dir(

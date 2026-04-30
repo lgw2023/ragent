@@ -123,7 +123,7 @@ export ASCEND_RT_VISIBLE_DEVICES=0
 export VLLM_LOGGING_LEVEL=DEBUG
 export VLLM_PLUGINS=ascend
 python3 -m vllm.entrypoints.openai.api_server \
-  --model /tmp/ragent-mep-runtime/model/baai_bge_m3 \
+  --model /tmp/ragent-mep-runtime/model \
   --runner pooling \
   --served-model-name BAAI-bge-m3 \
   --host 0.0.0.0 \

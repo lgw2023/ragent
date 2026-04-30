@@ -101,7 +101,10 @@ modelDir/
   meta/
     ...
   model/
-    <huggingface-model-dir>/
+    config.json
+    tokenizer.json
+    pytorch_model.bin
+    1_Pooling/
   data/
     config/
     kg/
@@ -115,7 +118,7 @@ modelDir/
 - `<runtime_root>/data`
 - `<runtime_root>/meta`
 
-`model/` 顶层只放 Hugging Face 模型目录；组件可读取的只读自定义数据放在 `data/`，例如配置、KG 快照、依赖包、样例请求等。因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念。
+`model/` 本身就是 Hugging Face 模型目录；组件可读取的只读自定义数据放在 `data/`，例如配置、KG 快照、依赖包、样例请求等。因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念。
 
 当前仓库内的模型包源码放在：
 
@@ -124,7 +127,10 @@ mep/model_packages/bge-m3/modelDir/
   meta/
     type.mf
   model/
-    baai_bge_m3/
+    config.json
+    tokenizer.json
+    pytorch_model.bin
+    1_Pooling/
   data/
     config/
       embedding.properties
@@ -490,7 +496,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
 
 支持的归档格式为 `zip`、`tar`、`tar.gz`/`tgz`。归档内容的第一层就是 `component/`、`model/`、`data/`、`meta/`，不会额外套一层 `runtime/`。
 
-如果显式指定 `--archive-output`，输出路径必须位于 runtime 根目录之外，并且必须是文件路径而不是已有目录；装配脚本会拒绝把归档写到 runtime 内部，避免归档过程中把自身也打入包中。装配脚本还会拒绝 `model/` 顶层出现非目录项，防止把组件配置重新放回模型目录。
+如果显式指定 `--archive-output`，输出路径必须位于 runtime 根目录之外，并且必须是文件路径而不是已有目录；装配脚本会拒绝把归档写到 runtime 内部，避免归档过程中把自身也打入包中。装配脚本会校验 `model/` 本身是 Hugging Face 模型目录，防止误把模型文件继续套进额外子目录。
 
 兼容调试时仍可使用显式 env override 或直接传 `model_root`：
 
@@ -549,7 +555,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 
 如需把两个上传归档写到其他目录，可在 `--archive-format` 基础上追加 `--archive-output-dir <dir>`。脚本会拒绝把归档写进正在打包的 `component_package/` 或 `model_package/` 内部，避免归档过程把自身也打入包中；自定义归档目录同样不能覆盖仓库根、组件源码或源模型包。
 
-上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝会覆盖仓库根、组件源码或源模型包的危险输出目录，并强校验 `modelDir/meta/type.mf` 非空以及 `modelDir/model` 顶层只能放 Hugging Face 模型目录。
+上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝会覆盖仓库根、组件源码或源模型包的危险输出目录，并强校验 `modelDir/meta/type.mf` 非空以及 `modelDir/model` 本身直接包含 Hugging Face 模型文件。
 
 ### 10.3 参照样例的目标容器布局
 
@@ -563,7 +569,10 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
     ragent/
     ...
   model/
-    <huggingface-model-dir>/
+    config.json
+    tokenizer.json
+    pytorch_model.bin
+    1_Pooling/
   data/
     config/
       embedding.properties

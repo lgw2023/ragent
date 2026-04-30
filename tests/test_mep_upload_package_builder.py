@@ -46,14 +46,24 @@ def _write_fake_repo(repo_root: Path) -> None:
         (path / "marker.txt").write_text("exclude\n", encoding="utf-8")
 
     model_dir = repo_root / "mep" / "model_packages" / "demo" / "modelDir"
-    (model_dir / "model" / "hf_model").mkdir(parents=True)
-    (model_dir / "model" / "hf_model" / "config.json").write_text(
+    (model_dir / "model").mkdir(parents=True)
+    (model_dir / "model" / "config.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    (model_dir / "model" / "tokenizer.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    (model_dir / "model" / "pytorch_model.bin").write_bytes(b"fake weights")
+    (model_dir / "model" / "1_Pooling").mkdir()
+    (model_dir / "model" / "1_Pooling" / "config.json").write_text(
         "{}\n",
         encoding="utf-8",
     )
     (model_dir / "data" / "config").mkdir(parents=True)
     (model_dir / "data" / "config" / "embedding.properties").write_text(
-        "model.relative_path=hf_model\n",
+        "model.relative_path=.\n",
         encoding="utf-8",
     )
     wheelhouse = model_dir / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
@@ -107,7 +117,12 @@ def test_build_mep_upload_packages_creates_upload_directories(tmp_path: Path):
         assert not (component_dir / excluded_dir).exists()
 
     assert [path.name for path in model_package_dir.iterdir()] == ["modelDir"]
-    assert (model_package_dir / "modelDir" / "model" / "hf_model").is_dir()
+    assert (model_package_dir / "modelDir" / "model" / "config.json").is_file()
+    assert (model_package_dir / "modelDir" / "model" / "tokenizer.json").is_file()
+    assert (model_package_dir / "modelDir" / "model" / "pytorch_model.bin").is_file()
+    assert (
+        model_package_dir / "modelDir" / "model" / "1_Pooling" / "config.json"
+    ).is_file()
     assert (model_package_dir / "modelDir" / "data" / "config").is_dir()
     assert (
         model_package_dir
@@ -161,11 +176,9 @@ def test_build_mep_upload_packages_filters_generated_files(tmp_path: Path):
     )
     model_root = repo_root / "mep" / "model_packages" / "demo" / "modelDir"
     (model_root / "data" / ".DS_Store").write_text("finder\n", encoding="utf-8")
-    (model_root / "model" / "hf_model" / "__pycache__").mkdir()
-    (model_root / "model" / "hf_model" / "__pycache__" / "x.pyc").write_bytes(
-        b"cached"
-    )
-    (model_root / "model" / "hf_model" / "x.pyo").write_bytes(b"optimized")
+    (model_root / "model" / "__pycache__").mkdir()
+    (model_root / "model" / "__pycache__" / "x.pyc").write_bytes(b"cached")
+    (model_root / "model" / "x.pyo").write_bytes(b"optimized")
 
     build_mep_upload_packages(
         repo_root=repo_root,
@@ -183,12 +196,9 @@ def test_build_mep_upload_packages_filters_generated_files(tmp_path: Path):
         / "model_package"
         / "modelDir"
         / "model"
-        / "hf_model"
         / "__pycache__"
     ).exists()
-    assert not (
-        output / "model_package" / "modelDir" / "model" / "hf_model" / "x.pyo"
-    ).exists()
+    assert not (output / "model_package" / "modelDir" / "model" / "x.pyo").exists()
 
 
 def test_build_mep_upload_packages_rejects_missing_component_file(tmp_path: Path):
@@ -224,16 +234,24 @@ def test_build_mep_upload_packages_rejects_missing_model_dir(
         )
 
 
-def test_build_mep_upload_packages_rejects_model_root_top_level_files(
+def test_build_mep_upload_packages_rejects_nested_model_directory(
     tmp_path: Path,
 ):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _write_fake_repo(repo_root)
     model_root = repo_root / "mep" / "model_packages" / "demo" / "modelDir" / "model"
-    (model_root / "sysconfig.properties").write_text("legacy=true\n", encoding="utf-8")
+    for child in tuple(model_root.iterdir()):
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    nested_model = model_root / "hf_model"
+    nested_model.mkdir()
+    (nested_model / "config.json").write_text("{}\n", encoding="utf-8")
+    (nested_model / "tokenizer.json").write_text("{}\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="top level must contain only"):
+    with pytest.raises(ValueError, match="directly contain Hugging Face model files"):
         build_mep_upload_packages(
             repo_root=repo_root,
             model_package="demo",
@@ -356,7 +374,10 @@ def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Pat
     with zipfile.ZipFile(model_archive) as zf:
         model_names = set(zf.namelist())
     assert "modelDir/" in model_names
-    assert "modelDir/model/hf_model/config.json" in model_names
+    assert "modelDir/model/config.json" in model_names
+    assert "modelDir/model/tokenizer.json" in model_names
+    assert "modelDir/model/pytorch_model.bin" in model_names
+    assert "modelDir/model/1_Pooling/config.json" in model_names
     assert "modelDir/data/config/embedding.properties" in model_names
     assert (
         "modelDir/data/deps/wheelhouse/linux-arm64-py3.10/"
@@ -525,7 +546,9 @@ def test_build_mep_upload_packages_archives_tgz_alias(tmp_path: Path):
 
     with tarfile.open(model_archive, "r:*") as tf:
         model_names = set(tf.getnames())
-    assert "modelDir/model/hf_model/config.json" in model_names
+    assert "modelDir/model/config.json" in model_names
+    assert "modelDir/model/tokenizer.json" in model_names
+    assert "modelDir/model/pytorch_model.bin" in model_names
     assert (
         "modelDir/data/deps/wheelhouse/linux-arm64-py3.10/"
         "demo_sdist-1.0.0.tar.gz"

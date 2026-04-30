@@ -5,7 +5,7 @@
 当前结构：
 
 - `modelDir/meta/type.mf`：MEP 模型包必需的元信息占位文件
-- `modelDir/model/baai_bge_m3/`：`BAAI/bge-m3` 运行所需的 Hugging Face 模型文件；`model/` 顶层只放 HF 模型目录
+- `modelDir/model/`：`BAAI/bge-m3` 运行所需的 Hugging Face 模型目录，`config.json`、`tokenizer.json`、`pytorch_model.bin` 和 `1_Pooling/` 直接放在这里
 - `modelDir/data/config/embedding.properties`：组件侧读取的本地 embedding/vLLM 启动配置
 - `modelDir/data/kg/sample_kg/`：示例 KG 快照
 - `modelDir/data/deps/`：vLLM 镜像缺少的自定义只读依赖包；当前目标 MEP 镜像无网络时，应把离线 wheelhouse 放在这里
@@ -22,6 +22,7 @@
 当前 `embedding.properties` 已按验证通过的 Ascend 910B 镜像配置固定为：
 
 ```text
+model.relative_path=.
 vllm.launch_mode=module
 vllm.runner=pooling
 vllm.served_model_name=BAAI-bge-m3
