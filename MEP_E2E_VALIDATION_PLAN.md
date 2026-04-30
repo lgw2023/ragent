@@ -175,7 +175,7 @@ class CustomerModel:
 4. 本地调试 env fallback：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
 5. 源码目录同级 `model/`、`data/` 作为最后兜底
 
-其中 `path_appendix` 不改变 bundle 级 `model_dir` 解析，而是用于 embedding runtime 选择 `model/` 下的实际权重子目录。当前仓库推荐通过 `tools/build_mep_layout.py` 生成 `.mep_build/<model-package>/runtime`，用平台形态验证这条路径解析，而不是把模型包直接当成组件源码的一部分。
+其中 `path_appendix` 不改变 bundle 级 `model_dir` 解析，只作为旧式平台路径的兼容输入；当前 bge-m3 包默认把 `model/` 本身作为 embedding 权重目录。当前仓库推荐通过 `tools/build_mep_layout.py` 生成 `.mep_build/<model-package>/runtime`，用平台形态验证这条路径解析，而不是把模型包直接当成组件源码的一部分。
 
 ### 3.4 参照样例后修正的目标理解
 
@@ -197,7 +197,10 @@ DATA_DIR = os.path.join(ROOT_DIR, "data")
     <main_file>.py
     ...
   model/
-    <huggingface-model-dir>/
+    config.json
+    tokenizer.json
+    pytorch_model.bin
+    1_Pooling/
   data/
     config/
     kg/
@@ -212,7 +215,7 @@ DATA_DIR = os.path.join(ROOT_DIR, "data")
 - 组件包最终位于 `<runtime_root>/component`
 - 模型包解压/挂载后向组件暴露的是平级 `model/`、`data/`、`meta/`
 - `component/` 通过父目录访问 `model/` 和 `data/`
-- `model/` 顶层只放 Hugging Face 模型目录；`data/` 放组件侧只读配置、KG、依赖包、样例等自定义数据
+- `model/` 本身就是 Hugging Face 模型目录；`data/` 放组件侧只读配置、KG、依赖包、样例等自定义数据
 
 因此此前把 `model_root` 默认理解为“模型包根目录 `modelDir`”并不稳妥。
 
@@ -482,7 +485,7 @@ bundle 层：MODEL_SFS / MODEL_OBJECT_ID / MODEL_RELATIVE_DIR / MODEL_ABSOLUTE_D
 embedding 层：path_appendix
 ```
 
-仍需平台实测确认这些变量在真实容器里的最终落盘形态，尤其是 `MODEL_ABSOLUTE_DIR`、`MODEL_RELATIVE_DIR` 和 `path_appendix` 分别指向模型包根、`model/` 目录还是具体权重子目录。
+仍需平台实测确认这些变量在真实容器里的最终落盘形态，尤其是 `MODEL_ABSOLUTE_DIR`、`MODEL_RELATIVE_DIR` 和 `path_appendix` 分别指向模型包根、`model/` 目录还是旧式 appendix 目录。
 
 ### 5.3 `data/` 目录到底如何暴露给组件
 
@@ -615,7 +618,7 @@ LLM_MODEL_KEY
 | --- | --- | --- |
 | 运行时目录布局 | `cwd`、入口 `__file__`、`component/` 是否包含 `config.json`、`component/` 父目录下是否存在 `model/`、`data/`、`meta/` | 决定 `runtime_sibling_*` 路径是否是主路径 |
 | `model_root` 传参 | 平台实例化入口类时是否传入 `model_root`；传入值是 `<runtime_root>`、`<runtime_root>/model`、模型包根目录，还是为空 | 决定兼容输入是否命中，避免误把它当主契约 |
-| SFS 环境变量 | `MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_ABSOLUTE_DIR`、`MODEL_RELATIVE_DIR`、`path_appendix` 的原始值和最终落盘目标 | 决定模型目录、数据目录和具体 embedding 权重子目录解析 |
+| SFS 环境变量 | `MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_ABSOLUTE_DIR`、`MODEL_RELATIVE_DIR`、`path_appendix` 的原始值和最终落盘目标 | 决定模型目录、数据目录以及是否需要旧式 appendix 兼容解析 |
 | 模型包 `data/` 暴露形态 | 推荐 `data/kg/<snapshot_name>/`；如平台或业务包使用其他位置，需要通过 `RAGENT_MEP_KG_DIR` 指定 | 决定 `resolve_single_snapshot_from_data_dir()` 的目标选择规则 |
 | vLLM embedding 能力 | `vllm serve ... --runner pooling`、`python -m vllm.entrypoints.openai.api_server --task embed`、`/v1/models`、`/v1/embeddings` 是否可用 | 决定本地 embedding runtime 是否能在目标镜像上工作 |
 | 子进程生命周期限制 | `load()` 超时上限、端口监听限制、同容器多实例行为、组件退出时子进程是否被平台清理 | 决定 vLLM 启动超时、端口和 cleanup 策略 |
@@ -659,7 +662,7 @@ python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-
 
 如需指定 `--archive-output`，输出路径必须位于 `.mep_build/<model-package>/runtime/` 之外，避免归档过程把自身也写进交付包。
 
-物化模式会解引用 `model/`、`data/`、`meta/` 源目录内部的软链，以便本地归档内容自包含。`--archive-output` 必须是文件路径而不是已有目录；装配脚本也会拒绝 `model/` 顶层非目录项，避免把旧式组件配置重新打进模型目录。
+物化模式会解引用 `model/`、`data/`、`meta/` 源目录内部的软链，以便本地归档内容自包含。`--archive-output` 必须是文件路径而不是已有目录；装配脚本也会校验 `model/` 本身是 Hugging Face 模型目录，避免把模型文件继续套进额外子目录。
 
 如需准备真正上传到 MEP 的组件包和模型包目录，使用上传包构建脚本，而不是本地 runtime layout：
 
@@ -701,7 +704,10 @@ python tools/build_mep_upload_packages.py --model-package bge-m3
     package.json
     ragent/
   model/
-    baai_bge_m3/
+    config.json
+    tokenizer.json
+    pytorch_model.bin
+    1_Pooling/
   data/
     config/
       embedding.properties
@@ -860,7 +866,7 @@ MODEL_SFS + MODEL_OBJECT_ID + MODEL_RELATIVE_DIR
 MODEL_SFS + MODEL_OBJECT_ID + "/model"
 ```
 
-但要注意：ragent 需要同时定位 `data/`，不能只定位 embedding 模型目录；`path_appendix` 当前只用于 embedding runtime 在 `model/` 下选择具体权重子目录。
+但要注意：ragent 需要同时定位 `data/`，不能只定位 embedding 模型目录；`path_appendix` 现在只作为旧式平台兼容输入，当前 bge-m3 包默认直接使用 `model/`。
 
 ### 7.3 已增加启动诊断日志
 

@@ -10,11 +10,6 @@ def test_bge_m3_model_package_layout_exists():
     assert package_root.exists()
     assert (package_root / "meta" / "type.mf").exists()
     assert not (package_root / "model" / "sysconfig.properties").exists()
-    model_root_children = [
-        child for child in (package_root / "model").iterdir() if not child.name.startswith(".")
-    ]
-    assert model_root_children
-    assert all(child.is_dir() for child in model_root_children)
     assert (package_root / "data" / "config" / "embedding.properties").exists()
     assert (package_root / "data").is_dir()
     assert (package_root / "data" / "kg" / "sample_kg").is_dir()
@@ -27,5 +22,8 @@ def test_bge_m3_model_package_layout_exists():
     assert (package_root / "data" / "kg" / "sample_kg" / "vdb_chunks.json").exists()
     assert (package_root / "data" / "samples" / "sample.json").exists()
     assert (package_root / "data" / "deps" / "README.md").exists()
-    assert (package_root / "model" / "baai_bge_m3" / "config.json").exists()
-    assert (package_root / "model" / "baai_bge_m3" / "tokenizer.json").exists()
+    assert (package_root / "model" / "config.json").exists()
+    assert (package_root / "model" / "tokenizer.json").exists()
+    assert (package_root / "model" / "pytorch_model.bin").exists()
+    assert (package_root / "model" / "1_Pooling" / "config.json").exists()
+    assert not (package_root / "model" / "baai_bge_m3" / "config.json").exists()

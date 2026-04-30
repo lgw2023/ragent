@@ -293,6 +293,7 @@ def test_bge_m3_embedding_properties_match_validated_vllm_ascend_runtime():
         key, value = line.split("=", 1)
         properties[key] = value
 
+    assert properties["model.relative_path"] == "."
     assert properties["vllm.launch_mode"] == "module"
     assert properties["vllm.runner"] == "pooling"
     assert properties["vllm.served_model_name"] == "BAAI-bge-m3"
@@ -331,7 +332,7 @@ def test_root_init_exports_platform_probe(monkeypatch):
     monkeypatch.setenv("MODEL_SFS", json.dumps({"sfsBasePath": "/mnt/sfs"}))
     monkeypatch.setenv("MODEL_OBJECT_ID", "object-123")
     monkeypatch.setenv("MODEL_RELATIVE_DIR", "model")
-    monkeypatch.setenv("path_appendix", "baai_bge_m3")
+    monkeypatch.setenv("path_appendix", "legacy_model")
 
     spec = importlib.util.spec_from_file_location("ragent_root_init_test", init_path)
     assert spec is not None and spec.loader is not None
@@ -341,10 +342,10 @@ def test_root_init_exports_platform_probe(monkeypatch):
     assert module.COMPONENT_DIR == repo_root
     assert module.MODEL_SFS_BASE_DIR == "/mnt/sfs/object-123"
     assert module.SFS_MODEL_DIR == "/mnt/sfs/object-123/model"
-    assert module.PATH_APPENDIX == "baai_bge_m3"
+    assert module.PATH_APPENDIX == "legacy_model"
     probe = module.build_runtime_probe()
     assert probe["component_dir"] == str(repo_root)
-    assert probe["path_appendix"] == "baai_bge_m3"
+    assert probe["path_appendix"] == "legacy_model"
 
 
 def test_example_mep_requests_exist():

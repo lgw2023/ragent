@@ -797,7 +797,12 @@ def normalize_mep_request(req_data: Any) -> NormalizedMepRequest:
         ),
         field_name="only_need_context",
     )
-    retrieval_only_enabled = bool(retrieval_only) or bool(only_need_context)
+    retrieval_only_default = retrieval_only is None and only_need_context is None
+    # MEP deployments may not inject LLM config; default to retrieval-only unless
+    # the request explicitly opts into answer generation.
+    retrieval_only_enabled = (
+        retrieval_only_default or bool(retrieval_only) or bool(only_need_context)
+    )
 
     inference_request = InferenceRequest(
         query_type=raw_query_type,  # type: ignore[arg-type]

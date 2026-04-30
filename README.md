@@ -104,10 +104,11 @@ Both MEP builders reject output paths that would overwrite the repository root,
 component source files/directories, or the source model package. The model
 package must include a non-empty `modelDir/meta/type.mf`.
 
-The component only queries an existing KG snapshot. The model package standard
-is `modelDir/model/` for Hugging Face model directories only, plus
-`modelDir/data/` for component-readable read-only data such as embedding config,
-KG snapshots, dependency payloads, and samples. `action=create` writes
+The component only queries an existing KG snapshot. In the MEP model package,
+`modelDir/model/` is the Hugging Face model directory itself, with files such as
+`config.json`, `tokenizer.json`, and model weights directly inside it.
+`modelDir/data/` holds component-readable read-only data such as embedding
+config, KG snapshots, dependency payloads, and samples. `action=create` writes
 `{generatePath}/gen.json` and returns `recommendResult`; direct local requests
 without `action` still return the result payload in `recommendResult.content`.
 

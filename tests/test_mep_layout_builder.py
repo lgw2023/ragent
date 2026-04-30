@@ -27,14 +27,19 @@ def _write_fake_repo(repo_root: Path) -> None:
     (repo_root / "ragent" / "__init__.py").write_text("", encoding="utf-8")
 
     model_dir = repo_root / "mep" / "model_packages" / "demo" / "modelDir"
-    (model_dir / "model" / "hf_model").mkdir(parents=True)
-    (model_dir / "model" / "hf_model" / "config.json").write_text(
+    (model_dir / "model").mkdir(parents=True)
+    (model_dir / "model" / "config.json").write_text(
         "{}",
         encoding="utf-8",
     )
+    (model_dir / "model" / "tokenizer.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    (model_dir / "model" / "pytorch_model.bin").write_bytes(b"fake weights")
     (model_dir / "data" / "config").mkdir(parents=True)
     (model_dir / "data" / "config" / "embedding.properties").write_text(
-        "model.relative_path=hf_model\n",
+        "model.relative_path=.\n",
         encoding="utf-8",
     )
     wheelhouse = model_dir / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
@@ -64,7 +69,9 @@ def test_build_mep_layout_creates_platform_shaped_runtime(tmp_path: Path):
     assert (output / "model").is_symlink()
     assert (output / "data").is_symlink()
     assert (output / "meta").is_symlink()
-    assert (output / "model" / "baai_bge_m3" / "config.json").exists()
+    assert (output / "model" / "config.json").exists()
+    assert (output / "model" / "tokenizer.json").exists()
+    assert (output / "model" / "pytorch_model.bin").exists()
     assert (output / "data" / "config" / "embedding.properties").exists()
     assert (output / "data" / "deps" / "README.md").exists()
     assert (output / "data" / "kg" / "sample_kg").is_dir()
@@ -96,7 +103,9 @@ def test_build_mep_layout_materializes_and_archives_zip(tmp_path: Path):
         names = set(zf.namelist())
     assert "component/process.py" in names
     assert "component/mep_dependency_bootstrap.py" in names
-    assert "model/hf_model/config.json" in names
+    assert "model/config.json" in names
+    assert "model/tokenizer.json" in names
+    assert "model/pytorch_model.bin" in names
     assert "data/config/embedding.properties" in names
     assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_dep-1.0.0-py3-none-any.whl" in names
     assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_sdist-1.0.0.tar.gz" in names
@@ -121,7 +130,6 @@ def test_build_mep_layout_materialize_dereferences_source_symlinks(tmp_path: Pat
         / "demo"
         / "modelDir"
         / "model"
-        / "hf_model"
         / "config.json"
     )
     model_config.unlink()
@@ -137,7 +145,7 @@ def test_build_mep_layout_materialize_dereferences_source_symlinks(tmp_path: Pat
         materialize=True,
     )
 
-    materialized_config = output / "model" / "hf_model" / "config.json"
+    materialized_config = output / "model" / "config.json"
     assert not materialized_config.is_symlink()
     assert materialized_config.read_text(encoding="utf-8") == '{"source": "external"}\n'
 
@@ -178,7 +186,9 @@ def test_build_mep_layout_materializes_and_archives_tar_formats(
         names = set(tf.getnames())
     assert "component/process.py" in names
     assert "component/mep_dependency_bootstrap.py" in names
-    assert "model/hf_model/config.json" in names
+    assert "model/config.json" in names
+    assert "model/tokenizer.json" in names
+    assert "model/pytorch_model.bin" in names
     assert "data/config/embedding.properties" in names
     assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_dep-1.0.0-py3-none-any.whl" in names
     assert "data/deps/wheelhouse/linux-arm64-py3.10/demo_sdist-1.0.0.tar.gz" in names
@@ -310,14 +320,22 @@ def test_build_mep_layout_rejects_archive_output_existing_directory(tmp_path: Pa
     assert marker.read_text(encoding="utf-8") == "keep\n"
 
 
-def test_build_mep_layout_rejects_model_root_top_level_files(tmp_path: Path):
+def test_build_mep_layout_rejects_nested_model_directory(tmp_path: Path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _write_fake_repo(repo_root)
     model_root = repo_root / "mep" / "model_packages" / "demo" / "modelDir" / "model"
-    (model_root / "sysconfig.properties").write_text("legacy=true\n", encoding="utf-8")
+    for child in tuple(model_root.iterdir()):
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    nested_model = model_root / "hf_model"
+    nested_model.mkdir()
+    (nested_model / "config.json").write_text("{}\n", encoding="utf-8")
+    (nested_model / "tokenizer.json").write_text("{}\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="top level must contain only"):
+    with pytest.raises(ValueError, match="directly contain Hugging Face model files"):
         build_mep_layout(
             repo_root=repo_root,
             model_package="demo",

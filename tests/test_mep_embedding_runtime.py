@@ -22,7 +22,7 @@ def _write_embedding_bundle(model_dir: Path) -> Path:
         "\n".join(
             [
                 "model.name=BAAI/bge-m3",
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "embedding.dimensions=1024",
                 "embedding.max_token_size=8192",
                 "vllm.runner=pooling",
@@ -33,11 +33,9 @@ def _write_embedding_bundle(model_dir: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
-    embedding_root = model_dir / "baai_bge_m3"
-    embedding_root.mkdir(parents=True, exist_ok=True)
-    (embedding_root / "config.json").write_text("{}", encoding="utf-8")
-    (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
-    return embedding_root
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    return model_dir
 
 
 def _write_multi_embedding_bundle(model_dir: Path) -> tuple[Path, Path]:
@@ -101,7 +99,7 @@ def test_resolve_embedding_launch_config_reads_sysconfig(tmp_path: Path):
 
 def test_resolve_embedding_launch_config_prefers_data_config(tmp_path: Path):
     model_dir = tmp_path / "model"
-    embedding_root = model_dir / "baai_bge_m3"
+    embedding_root = model_dir
     embedding_root.mkdir(parents=True, exist_ok=True)
     (embedding_root / "config.json").write_text("{}", encoding="utf-8")
     (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
@@ -109,7 +107,7 @@ def test_resolve_embedding_launch_config_prefers_data_config(tmp_path: Path):
         "\n".join(
             [
                 "model.name=legacy-name",
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "embedding.dimensions=1",
                 "vllm.port=0",
             ]
@@ -126,7 +124,7 @@ def test_resolve_embedding_launch_config_prefers_data_config(tmp_path: Path):
         "\n".join(
             [
                 "model.name=BAAI/bge-m3-data-config",
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "embedding.dimensions=1024",
                 "embedding.max_token_size=8192",
                 "vllm.bind_host=0.0.0.0",
@@ -156,7 +154,7 @@ def test_resolve_embedding_launch_config_env_overrides_data_config(
     tmp_path: Path,
 ):
     model_dir = tmp_path / "model"
-    embedding_root = model_dir / "baai_bge_m3"
+    embedding_root = model_dir
     embedding_root.mkdir(parents=True, exist_ok=True)
     (embedding_root / "config.json").write_text("{}", encoding="utf-8")
     (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
@@ -169,7 +167,7 @@ def test_resolve_embedding_launch_config_env_overrides_data_config(
         "\n".join(
             [
                 "model.name=BAAI/bge-m3-data-config",
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "vllm.port=0",
             ]
         )
@@ -202,7 +200,7 @@ def test_resolve_embedding_launch_config_accepts_direct_model_dir_with_data_conf
     tmp_path: Path,
 ):
     model_dir = tmp_path / "model"
-    embedding_root = model_dir / "baai_bge_m3"
+    embedding_root = model_dir
     embedding_root.mkdir(parents=True, exist_ok=True)
     (embedding_root / "config.json").write_text("{}", encoding="utf-8")
     (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
@@ -212,7 +210,7 @@ def test_resolve_embedding_launch_config_accepts_direct_model_dir_with_data_conf
         "\n".join(
             [
                 "model.name=BAAI/bge-m3",
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "vllm.port=0",
             ]
         )
@@ -224,6 +222,32 @@ def test_resolve_embedding_launch_config_accepts_direct_model_dir_with_data_conf
 
     assert config.model_dir == embedding_root.resolve()
     assert config.model_path == embedding_root.resolve()
+
+
+def test_resolve_embedding_launch_config_defaults_to_model_dir_for_flat_layout(
+    tmp_path: Path,
+):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    (data_dir / "config").mkdir(parents=True)
+    (data_dir / "config" / "embedding.properties").write_text(
+        "\n".join(
+            [
+                "model.name=BAAI/bge-m3",
+                "vllm.port=0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+
+    assert config.model_dir == model_dir.resolve()
+    assert config.model_path == model_dir.resolve()
 
 
 def test_resolve_embedding_launch_config_supports_path_appendix(
@@ -447,17 +471,16 @@ def test_ensure_vllm_runtime_dependencies_installs_from_platform_wheelhouse(
     tmp_path: Path,
 ):
     model_dir = tmp_path / "model"
-    embedding_root = model_dir / "baai_bge_m3"
-    embedding_root.mkdir(parents=True, exist_ok=True)
-    (embedding_root / "config.json").write_text("{}", encoding="utf-8")
-    (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
     data_dir = tmp_path / "data"
     config_dir = data_dir / "config"
     config_dir.mkdir(parents=True)
     (config_dir / "embedding.properties").write_text(
         "\n".join(
             [
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "vllm.install_requirements=cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0",
                 "vllm.uninstall_packages=vllm,vllm-ascend",
                 "vllm.install_no_deps=true",
@@ -528,17 +551,16 @@ def test_ensure_vllm_runtime_dependencies_can_reinstall_all_wheelhouse_wheels(
     tmp_path: Path,
 ):
     model_dir = tmp_path / "model"
-    embedding_root = model_dir / "baai_bge_m3"
-    embedding_root.mkdir(parents=True, exist_ok=True)
-    (embedding_root / "config.json").write_text("{}", encoding="utf-8")
-    (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
     data_dir = tmp_path / "data"
     config_dir = data_dir / "config"
     config_dir.mkdir(parents=True)
     (config_dir / "embedding.properties").write_text(
         "\n".join(
             [
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "vllm.install_requirements=cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0",
                 "vllm.install_all_wheelhouse_wheels=true",
                 "vllm.install_no_deps=false",
@@ -593,17 +615,16 @@ def test_ensure_vllm_runtime_dependencies_accepts_source_archives(
     tmp_path: Path,
 ):
     model_dir = tmp_path / "model"
-    embedding_root = model_dir / "baai_bge_m3"
-    embedding_root.mkdir(parents=True, exist_ok=True)
-    (embedding_root / "config.json").write_text("{}", encoding="utf-8")
-    (embedding_root / "tokenizer.json").write_text("{}", encoding="utf-8")
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
     data_dir = tmp_path / "data"
     config_dir = data_dir / "config"
     config_dir.mkdir(parents=True)
     (config_dir / "embedding.properties").write_text(
         "\n".join(
             [
-                "model.relative_path=baai_bge_m3",
+                "model.relative_path=.",
                 "vllm.install_requirements=func-timeout==4.3.5",
             ]
         )
