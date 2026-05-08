@@ -7,6 +7,8 @@ import sys
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from ragent import mep_embedding_runtime
 from ragent.mep_embedding_runtime import (
     bootstrap_local_embedding_runtime,
@@ -248,6 +250,55 @@ def test_resolve_embedding_launch_config_defaults_to_model_dir_for_flat_layout(
 
     assert config.model_dir == model_dir.resolve()
     assert config.model_path == model_dir.resolve()
+
+
+def test_resolve_embedding_launch_config_finds_nested_model_dir_like_bge_m3_pack(
+    tmp_path: Path,
+):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(parents=True)
+    nested = model_dir / "modelDir" / "model"
+    nested.mkdir(parents=True)
+    (nested / "config.json").write_text("{}", encoding="utf-8")
+    (nested / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+    data_dir = tmp_path / "data"
+    (data_dir / "config").mkdir(parents=True)
+    (data_dir / "config" / "embedding.properties").write_text(
+        "\n".join(
+            [
+                "model.name=BAAI/bge-m3",
+                "vllm.port=0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+
+    assert config.model_dir == model_dir.resolve()
+    assert config.model_path == nested.resolve()
+
+
+def test_resolve_embedding_launch_config_nested_ambiguous_raises(tmp_path: Path):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(parents=True)
+    for rel in ("a/model", "b/model"):
+        p = model_dir / rel
+        p.mkdir(parents=True)
+        (p / "config.json").write_text("{}", encoding="utf-8")
+        (p / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+    data_dir = tmp_path / "data"
+    (data_dir / "config").mkdir(parents=True)
+    (data_dir / "config" / "embedding.properties").write_text(
+        "model.name=BAAI/bge-m3\nvllm.port=0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="nested"):
+        resolve_embedding_launch_config(model_dir, data_dir=data_dir)
 
 
 def test_resolve_embedding_launch_config_supports_path_appendix(

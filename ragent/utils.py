@@ -37,6 +37,24 @@ from ragent.constants import (
 )
 
 
+_CALLABLE_COMPAT_ATTRS = ("embedding_dim", "max_token_size")
+
+
+def _copy_callable_compat_attrs(wrapper: Callable[..., Any], wrapped: Any) -> None:
+    """Preserve runtime metadata exposed by callable objects after decoration."""
+    for attr_name in _CALLABLE_COMPAT_ATTRS:
+        if hasattr(wrapper, attr_name):
+            continue
+        try:
+            attr_value = getattr(wrapped, attr_name)
+        except Exception:
+            continue
+        try:
+            setattr(wrapper, attr_name, attr_value)
+        except Exception:
+            continue
+
+
 def get_env_value(
     env_key: str, default: any, value_type: type = str, special_none: bool = False
 ) -> any:
@@ -896,6 +914,7 @@ def priority_limit_async_func_call(
 
         # Add the shutdown method to the decorated function
         wait_func.shutdown = shutdown
+        _copy_callable_compat_attrs(wait_func, func)
 
         return wait_func
 

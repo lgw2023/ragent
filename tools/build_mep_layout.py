@@ -16,6 +16,7 @@ try:
         validate_output_path_does_not_overlap,
         write_archive,
     )
+    from tools.mep_site_packages import materialize_model_site_packages
 except ModuleNotFoundError:
     from mep_package_utils import (
         ARCHIVE_FORMATS,
@@ -27,6 +28,7 @@ except ModuleNotFoundError:
         validate_output_path_does_not_overlap,
         write_archive,
     )
+    from mep_site_packages import materialize_model_site_packages
 
 REQUIRED_COMPONENT_FILES = (
     "process.py",
@@ -173,6 +175,7 @@ def build_mep_layout(
         source_model_package_dir=source_model_package_dir,
         output=output,
     )
+    materialize_model_site_packages(model_dir_root)
 
     required_dirs = {
         "model": model_dir_root / "model",

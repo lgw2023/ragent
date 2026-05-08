@@ -19,6 +19,7 @@ try:
         validate_model_dir,
         write_archive,
     )
+    from tools.mep_site_packages import materialize_model_site_packages
 except ModuleNotFoundError:
     from mep_package_utils import (
         ARCHIVE_FORMATS,
@@ -33,6 +34,7 @@ except ModuleNotFoundError:
         validate_model_dir,
         write_archive,
     )
+    from mep_site_packages import materialize_model_site_packages
 
 REQUIRED_COMPONENT_FILES = (
     "config.json",
@@ -222,6 +224,7 @@ def build_mep_upload_packages(
         source_model_package_dir=source_model_package_dir,
         output=output,
     )
+    materialize_model_site_packages(source_model_dir_root)
 
     component_dir = output / "component_package"
     model_upload_dir = output / "model_package"

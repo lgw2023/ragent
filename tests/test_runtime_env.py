@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import ragent.runtime_env as runtime_env
@@ -69,6 +72,32 @@ def test_mep_runtime_bootstrap_skips_dotenv(monkeypatch, tmp_path: Path):
     assert state.dotenv_loaded is False
     assert state.dotenv_path is None
     assert runtime_env.os.getenv("RAGENT_TEST_RUNTIME_VALUE") is None
+
+
+def test_importing_runtime_env_does_not_import_ragent_or_litellm():
+    repo_root = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONPATH": str(repo_root)}
+    script = "\n".join(
+        [
+            "import sys",
+            "from ragent.runtime_env import bootstrap_runtime_environment",
+            "bootstrap_runtime_environment(explicit_runtime_env='mep')",
+            "blocked = ['litellm', 'ragent.llm.openai', 'ragent.operate', 'ragent.ragent']",
+            "print({name: name in sys.modules for name in blocked})",
+            "raise SystemExit(any(name in sys.modules for name in blocked))",
+        ]
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_bootstrap_switching_local_to_mep_clears_dotenv_values(

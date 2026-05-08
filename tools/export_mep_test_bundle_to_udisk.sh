@@ -148,6 +148,7 @@ mkdir -p "$DEST/tools"
 for path in \
   build_mep_layout.py \
   build_mep_upload_packages.py \
+  mep_site_packages.py \
   mep_package_utils.py \
   export_mep_keyword_fallback_assets.py \
   export_mep_test_bundle_to_udisk.sh \
@@ -173,6 +174,12 @@ do
     rsync_file "$PROJECT_ROOT/MEP_platform_rule/$path" "$DEST/MEP_platform_rule"
   fi
 done
+
+# Ensure zip-unsafe startup wheels such as LiteLLM are available as real
+# site-packages directories before copying the model package.
+python "$PROJECT_ROOT/tools/mep_site_packages.py" \
+  --model-dir-root "$MODEL_PACKAGE_SRC/modelDir" \
+  --platform-tag "$PLATFORM_TAG"
 
 # This intentionally includes the HF model files, KG snapshot, dependency
 # wheelhouse, source archives, and any pre-expanded site-packages.

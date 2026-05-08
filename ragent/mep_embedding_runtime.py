@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+from collections import deque
 import os
 import platform
 import re
@@ -300,6 +301,58 @@ def _looks_like_embedding_model_dir(candidate: Path) -> bool:
     return candidate.is_dir() and all((candidate / marker).exists() for marker in _MODEL_DIR_MARKERS)
 
 
+_NESTED_EMBEDDING_MODEL_SCAN_MAX_DEPTH = 6
+
+
+def _find_nested_embedding_model_directories(
+    model_dir: Path, *, max_depth: int = _NESTED_EMBEDDING_MODEL_SCAN_MAX_DEPTH
+) -> tuple[Path, ...]:
+    """
+    Breadth-first search for descendant directories that look like HuggingFace-style
+    embedding snapshots (config.json + tokenizer.json).
+
+    Used when the MEP model bundle root is not itself an HF directory and no *direct*
+    child qualifies — e.g. weights live under modelDir/model/ inside the mount.
+    """
+    resolved_root = model_dir.resolve()
+    found: list[Path] = []
+    seen: set[Path] = set()
+    queue: deque[tuple[Path, int]] = deque([(resolved_root, 0)])
+
+    while queue:
+        current, depth = queue.popleft()
+        try:
+            resolved = current.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            if not resolved.is_dir():
+                continue
+        except OSError:
+            continue
+
+        if resolved != resolved_root and _looks_like_embedding_model_dir(resolved):
+            found.append(resolved)
+            continue
+
+        if depth >= max_depth:
+            continue
+        try:
+            for child in resolved.iterdir():
+                try:
+                    if child.is_dir():
+                        queue.append((child, depth + 1))
+                except OSError:
+                    continue
+        except OSError:
+            continue
+
+    return tuple(sorted(set(found)))
+
+
 def _normalize_model_dir_input(model_dir: Path) -> tuple[Path, Path | None]:
     resolved_input_dir = model_dir.expanduser().resolve()
     if (resolved_input_dir / "sysconfig.properties").exists():
@@ -375,6 +428,15 @@ def _resolve_model_path(
     if len(candidates) == 1:
         return candidates[0]
     if not candidates:
+        nested = _find_nested_embedding_model_directories(model_dir)
+        if len(nested) == 1:
+            return nested[0]
+        if len(nested) > 1:
+            raise RuntimeError(
+                "Multiple embedding model directories found under model/ (nested). "
+                "Please set RAGENT_MEP_EMBEDDING_MODEL_PATH explicitly. "
+                f"Candidates: {', '.join(str(item) for item in nested)}"
+            )
         raise FileNotFoundError(
             "No embedding model directory found under model/. "
             f"Checked: {model_dir}"

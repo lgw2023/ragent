@@ -70,6 +70,13 @@ def _write_fake_repo(repo_root: Path) -> None:
     wheelhouse.mkdir(parents=True)
     (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake wheel")
     (wheelhouse / "demo_sdist-1.0.0.tar.gz").write_bytes(b"fake sdist")
+    with zipfile.ZipFile(wheelhouse / "litellm-1.80.10-py3-none-any.whl", "w") as wheel:
+        wheel.writestr("litellm/__init__.py", "")
+        wheel.writestr("litellm/types/adapter.py", "")
+        wheel.writestr(
+            "litellm-1.80.10.dist-info/METADATA",
+            "Name: litellm\nVersion: 1.80.10\n",
+        )
     (model_dir / "meta").mkdir()
     (model_dir / "meta" / "type.mf").write_text("model\n", encoding="utf-8")
 
@@ -124,6 +131,17 @@ def test_build_mep_upload_packages_creates_upload_directories(tmp_path: Path):
         model_package_dir / "modelDir" / "model" / "1_Pooling" / "config.json"
     ).is_file()
     assert (model_package_dir / "modelDir" / "data" / "config").is_dir()
+    assert (
+        model_package_dir
+        / "modelDir"
+        / "data"
+        / "deps"
+        / "site-packages"
+        / "linux-arm64-py3.10"
+        / "litellm"
+        / "types"
+        / "adapter.py"
+    ).is_file()
     assert (
         model_package_dir
         / "modelDir"
@@ -386,6 +404,10 @@ def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Pat
     assert (
         "modelDir/data/deps/wheelhouse/linux-arm64-py3.10/"
         "demo_sdist-1.0.0.tar.gz"
+    ) in model_names
+    assert (
+        "modelDir/data/deps/site-packages/linux-arm64-py3.10/"
+        "litellm/types/adapter.py"
     ) in model_names
     assert "modelDir/meta/type.mf" in model_names
     assert not any(name.startswith("model_package/") for name in model_names)

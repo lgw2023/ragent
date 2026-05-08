@@ -55,7 +55,7 @@ modelDir/data/deps/wheelhouse/linux-arm64-py3.10/*.tar.gz
 modelDir/data/deps/site-packages/linux-arm64-py3.10/
 ```
 
-组件启动时会优先加载匹配平台标签的目录，但只直接 zipimport 纯 Python wheel。native vLLM wheel 和 sdist/source archive 不会直接加到 `sys.path`，而是通过上面的离线 `pip install` 修复步骤安装。纯 Python wheel 仅在目标镜像中已经安装且版本完全一致时跳过；需要强制加入模型包内纯 Python wheel 时，可设置 `RAGENT_MEP_FORCE_WHEELHOUSE=1`。
+组件启动时会优先加载匹配平台标签的 `site-packages` 目录，再处理 wheelhouse。打包和离线导出脚本会运行 `tools/mep_site_packages.py`，把 `litellm`、`openai` 这类启动链路会用到且不适合直接 zipimport 的纯 Python wheel 预解压到 `site-packages/linux-arm64-py3.10/`。native vLLM wheel 和 sdist/source archive 不会直接加到 `sys.path`，而是通过上面的离线 `pip install` 修复步骤安装。纯 Python wheel 仅在目标镜像或预解压目录中已经安装且版本完全一致时跳过；需要强制加入模型包内纯 Python wheel 时，可设置 `RAGENT_MEP_FORCE_WHEELHOUSE=1`。
 
 如需按已验证容器环境导出精确 wheelhouse：
 

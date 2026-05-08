@@ -19,13 +19,15 @@ Supported local bootstrap paths:
 910B target image is `linux-arm64-py3.10`.
 
 At startup the component checks platform-specific directories first, then the
-legacy flat directories. Only pure-Python wheels are directly zipimported from
+legacy flat directories. `site-packages/<platform-tag>/` is intentionally loaded
+before any wheelhouse path. Only pure-Python wheels are directly zipimported from
 `wheelhouse/`; native wheels with `.so`, `.pyd`, `.dll`, or `.dylib` payloads and
-source archives such as `.tar.gz` are left for an offline `pip install` repair step or a pre-expanded
-`site-packages/<platform-tag>/` tree. A pure-Python wheel is skipped only when
-the same distribution and exact version are already installed in the target
-image. Set `RAGENT_MEP_FORCE_WHEELHOUSE=1` to force pure-Python wheels into the
-bootstrap path.
+source archives such as `.tar.gz` are left for an offline `pip install` repair
+step or a pre-expanded `site-packages/<platform-tag>/` tree. A pure-Python wheel
+is skipped only when the same distribution and exact version are already
+installed in the target image or the pre-expanded site-packages tree. Set
+`RAGENT_MEP_FORCE_WHEELHOUSE=1` to force pure-Python wheels into the bootstrap
+path.
 
 `keyword_wheelhouse/<platform-tag>/` is reserved for no-LLM keyword fallback
 dependencies such as GLiNER, Stanza, and ONNX Runtime. Keeping this separate
@@ -37,6 +39,12 @@ Use `wheelhouse/<platform-tag>/` for universal pure-Python wheels and for native
 wheel/source archive artifacts that are installed by a configured offline repair
 step. Other compiled packages should be unpacked or installed into a compatible
 `site-packages/<platform-tag>/` tree for the target image.
+
+Some pure-Python wheels are still unsafe to import directly from a zip because
+they rely on namespace-package subdirectories. The build and export scripts run
+`tools/mep_site_packages.py` to pre-extract `litellm` and `openai` into
+`site-packages/<platform-tag>/`; this prevents `litellm.types` from depending on
+zipimport behavior during MEP worker startup.
 
 The bge-m3 embedding config uses this wheelhouse to repair the validated vLLM
 stack before launch. It reinstalls all wheel files from the matching
