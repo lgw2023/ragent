@@ -224,7 +224,7 @@ def _configure_keyword_fallback_model(data_dir: Path) -> None:
         os.environ["RAG_KEYWORD_FALLBACK_DEVICE"] = "cpu"
 
 
-def _prepend_import_path(path: Path) -> bool:
+def _prepend_import_path(path: Path, *, index: int = 0) -> bool:
     if not path.exists():
         return False
     path_text = str(path)
@@ -232,7 +232,7 @@ def _prepend_import_path(path: Path) -> bool:
         site.addsitedir(path_text)
     if path_text in sys.path:
         sys.path.remove(path_text)
-    sys.path.insert(0, path_text)
+    sys.path.insert(index, path_text)
     return True
 
 
@@ -252,7 +252,7 @@ def bootstrap_mep_data_dependencies(current_dir: str | os.PathLike[str]) -> tupl
             if dependency_path in seen_dependency_paths:
                 continue
             seen_dependency_paths.add(dependency_path)
-            if _prepend_import_path(dependency_path):
+            if _prepend_import_path(dependency_path, index=len(added_paths)):
                 added_paths.append(str(dependency_path))
     if added_paths:
         os.environ["RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH"] = os.pathsep.join(

@@ -1,4 +1,3 @@
-type=model
-framework=vllm
-task=embedding
-name=baai_bge_m3
+Manifest-Version:1.0.0
+Model-Type:python
+Model-Algorithm:BAAI-BGE-M3

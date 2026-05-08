@@ -196,6 +196,54 @@ def test_mep_data_dependency_bootstrap_uses_platform_wheelhouse(
     assert sys.path[0] == str(selected_wheel.resolve())
 
 
+def test_mep_data_dependency_bootstrap_prefers_platform_site_packages(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    site_packages = (
+        runtime_root / "data" / "deps" / "site-packages" / "linux-arm64-py3.10"
+    )
+    wheelhouse = runtime_root / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
+    (site_packages / "litellm").mkdir(parents=True)
+    (site_packages / "litellm" / "__init__.py").write_text("", encoding="utf-8")
+    dist_info = site_packages / "litellm-1.80.10.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        "Name: litellm\nVersion: 1.80.10\n",
+        encoding="utf-8",
+    )
+    wheelhouse.mkdir(parents=True)
+    litellm_wheel = wheelhouse / "litellm-1.80.10-py3-none-any.whl"
+    with zipfile.ZipFile(litellm_wheel, "w") as wheel:
+        wheel.writestr("litellm/__init__.py", "")
+        wheel.writestr("litellm/types/adapter.py", "")
+    other_wheel = wheelhouse / "other_missing_pkg-1.0.0-py3-none-any.whl"
+    with zipfile.ZipFile(other_wheel, "w") as wheel:
+        wheel.writestr("other_missing_pkg/__init__.py", "")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "linux-arm64-py3.10")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert str(site_packages.resolve()) in added_paths
+    assert str(litellm_wheel.resolve()) not in added_paths
+    assert str(other_wheel.resolve()) in added_paths
+    assert sys.path.index(str(site_packages.resolve())) < sys.path.index(
+        str(other_wheel.resolve())
+    )
+
+
 def test_mep_data_dependency_bootstrap_skips_already_installed_wheels(
     monkeypatch,
     tmp_path: Path,

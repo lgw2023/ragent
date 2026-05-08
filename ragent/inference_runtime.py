@@ -8,20 +8,19 @@ import re
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 
 from . import keyword_extraction
-from . import QueryParam, Ragent
+from .base import QueryParam
 from .constants import GRAPH_FIELD_SEP
 from .kg.shared_storage import finalize_share_data, initialize_pipeline_status
-from .llm.openai import env_openai_complete, openai_embed
 from .prompt import dismantle_prompt
-from .rerank import rerank_from_env
 from .runtime_env import bootstrap_runtime_environment, is_mep_runtime
 from .utils import (
     ModelUsageCollector,
+    get_configured_embedding_dim,
     get_current_model_usage_collector,
     log_model_call,
     logger,
@@ -30,10 +29,66 @@ from .utils import (
     split_string_by_multi_markers,
     write_model_usage_report,
 )
-from .operate import graph_query, hybrid_query
+
+if TYPE_CHECKING:
+    from .ragent import Ragent as Ragent
 
 
 bootstrap_runtime_environment()
+
+_RAGENT_SENTINEL = object()
+Ragent = _RAGENT_SENTINEL
+
+
+class _LazyOpenAIEmbeddingFunc:
+    __name__ = "openai_embed"
+    max_token_size = 8192
+
+    @property
+    def embedding_dim(self) -> int:
+        return get_configured_embedding_dim()
+
+    async def __call__(self, *args, **kwargs):
+        from .llm.openai import openai_embed as openai_embed_impl
+
+        return await openai_embed_impl(*args, **kwargs)
+
+
+async def env_openai_complete(*args, **kwargs):
+    from .llm.openai import env_openai_complete as env_openai_complete_impl
+
+    return await env_openai_complete_impl(*args, **kwargs)
+
+
+openai_embed = _LazyOpenAIEmbeddingFunc()
+
+
+async def rerank_from_env(*args, **kwargs):
+    from .rerank import rerank_from_env as rerank_from_env_impl
+
+    return await rerank_from_env_impl(*args, **kwargs)
+
+
+async def graph_query(*args, **kwargs):
+    from .operate import graph_query as graph_query_impl
+
+    return await graph_query_impl(*args, **kwargs)
+
+
+async def hybrid_query(*args, **kwargs):
+    from .operate import hybrid_query as hybrid_query_impl
+
+    return await hybrid_query_impl(*args, **kwargs)
+
+
+def _resolve_ragent_class():
+    configured_ragent = globals().get("Ragent", _RAGENT_SENTINEL)
+    if configured_ragent is not _RAGENT_SENTINEL:
+        return configured_ragent
+    from .ragent import Ragent as ragent_class
+
+    globals()["Ragent"] = ragent_class
+    return ragent_class
 
 
 QueryType = Literal["onehop", "multihop", "chat"]
@@ -1370,7 +1425,8 @@ async def initialize_rag(
         )
 
     rag_create_started_at = time.perf_counter()
-    rag = Ragent(
+    ragent_class = _resolve_ragent_class()
+    rag = ragent_class(
         working_dir=working_dir,
         embedding_func=openai_embed,
         llm_model_func=env_openai_complete,

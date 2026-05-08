@@ -11,9 +11,7 @@ import re
 import numpy as np
 from typing import Any, AsyncIterator, Callable
 from collections import Counter, defaultdict
-from ragent.rerank import rerank_from_env
 from . import keyword_extraction
-from .llm.openai import openai_embed
 from .utils import (
     logger,
     clean_str,
@@ -53,6 +51,18 @@ from .constants import (
 )
 from .kg.shared_storage import get_storage_keyed_lock
 import time
+
+
+async def openai_embed(*args, **kwargs):
+    from .llm.openai import openai_embed as openai_embed_impl
+
+    return await openai_embed_impl(*args, **kwargs)
+
+
+async def rerank_from_env(*args, **kwargs):
+    from ragent.rerank import rerank_from_env as rerank_from_env_impl
+
+    return await rerank_from_env_impl(*args, **kwargs)
 
 
 _LOCAL_QUERY_CACHE_SINGLEFLIGHT_LOCKS: dict[str, asyncio.Lock] = {}
