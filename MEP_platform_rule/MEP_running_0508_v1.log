@@ -1,0 +1,205 @@
+2026-05-08T01:16:29.469150308Z previous UMASK is: 0022
+2026-05-08T01:16:29.469654842Z setting new UMASK to: 0077
+2026-05-08T01:16:29.469778413Z python version is python39
+2026-05-08T01:16:29.469802594Z miniconda version is miniconda
+2026-05-08T01:16:29.694812061Z [2026-05-08 09:16:29 +0800] [16]: [DEBUG] Current configuration:
+2026-05-08T01:16:29.694834232Z   config: /opt/huawei/framework/service/common/security/store/wdo/gunicorn.py
+2026-05-08T01:16:29.694841272Z   wsgi_app: None
+2026-05-08T01:16:29.694846542Z   bind: [':18090']
+2026-05-08T01:16:29.694851692Z   backlog: 2048
+2026-05-08T01:16:29.694856532Z   workers: 1
+2026-05-08T01:16:29.694862012Z   worker_class: gthread
+2026-05-08T01:16:29.694866822Z   threads: 200
+2026-05-08T01:16:29.694871252Z   worker_connections: 1000
+2026-05-08T01:16:29.694875912Z   max_requests: 0
+2026-05-08T01:16:29.694880202Z   max_requests_jitter: 0
+2026-05-08T01:16:29.694884672Z   timeout: 120
+2026-05-08T01:16:29.694888982Z   graceful_timeout: 30
+2026-05-08T01:16:29.694895832Z   keepalive: 65
+2026-05-08T01:16:29.694900592Z   limit_request_line: 4094
+2026-05-08T01:16:29.694906022Z   limit_request_fields: 100
+2026-05-08T01:16:29.694910652Z   limit_request_field_size: 8190
+2026-05-08T01:16:29.694915162Z   reload: False
+2026-05-08T01:16:29.694919552Z   reload_engine: auto
+2026-05-08T01:16:29.694923912Z   reload_extra_files: []
+2026-05-08T01:16:29.694928292Z   spew: False
+2026-05-08T01:16:29.694932832Z   check_config: False
+2026-05-08T01:16:29.694937682Z   print_config: False
+2026-05-08T01:16:29.694943633Z   preload_app: False
+2026-05-08T01:16:29.694948253Z   sendfile: None
+2026-05-08T01:16:29.694953143Z   reuse_port: False
+2026-05-08T01:16:29.694957643Z   chdir: /opt/huawei/framework/service
+2026-05-08T01:16:29.694962973Z   daemon: False
+2026-05-08T01:16:29.694967713Z   raw_env: []
+2026-05-08T01:16:29.694972123Z   pidfile: None
+2026-05-08T01:16:29.694977143Z   worker_tmp_dir: None
+2026-05-08T01:16:29.694983713Z   user: 1001
+2026-05-08T01:16:29.694993893Z   group: 1001
+2026-05-08T01:16:29.694998793Z   umask: 0
+2026-05-08T01:16:29.695003103Z   initgroups: False
+2026-05-08T01:16:29.695007993Z   tmp_upload_dir: None
+2026-05-08T01:16:29.695013033Z   secure_scheme_headers: {'X-FORWARDED-PROTOCOL': 'ssl', 'X-FORWARDED-PROTO': 'https', 'X-FORWARDED-SSL': 'on'}
+2026-05-08T01:16:29.695018893Z   forwarded_allow_ips: ['127.0.0.1']
+2026-05-08T01:16:29.695023343Z   accesslog: None
+2026-05-08T01:16:29.695044383Z   disable_redirect_access_to_syslog: False
+2026-05-08T01:16:29.695051143Z   access_log_format: %(h)s %(r)s %(s)s %(a)s %(L)s
+2026-05-08T01:16:29.695056274Z   errorlog: -
+2026-05-08T01:16:29.695063504Z   loglevel: debug
+2026-05-08T01:16:29.695070054Z   capture_output: False
+2026-05-08T01:16:29.695075554Z   logger_class: gunicorn.glogging.Logger
+2026-05-08T01:16:29.695079954Z   logconfig: None
+2026-05-08T01:16:29.695086474Z   logconfig_dict: {'version': 1, 'disable_existing_loggers': False, 'root': {'level': 'DEBUG', 'handlers': ['console']}, 'loggers': {'gunicorn.error': {'level': 'DEBUG', 'handlers': ['error_file'], 'propagate': 1, 'qualname': 'gunicorn_error'}, 'gunicorn.access': {'level': 'DEBUG', 'handlers': ['access_file'], 'propagate': 0, 'qualname': 'access'}}, 'handlers': {'error_file': {'class': 'logging.handlers.RotatingFileHandler', 'maxBytes': 1000, 'backupCount': 5, 'formatter': 'generic', 'filename': '/opt/huawei/log/error.log'}, 'access_file': {'class': 'logging.handlers.RotatingFileHandler', 'maxBytes': 1000, 'backupCount': 5, 'formatter': 'generic', 'filename': '/opt/huawei/log/access.log'}, 'console': {'class': 'logging.StreamHandler', 'level': 'DEBUG', 'formatter': 'generic'}}, 'formatters': {'generic': {'format': '%(asctime)s [%(process)d]: [%(levelname)s] %(message)s', 'datefmt': '[%Y-%m-%d %H:%M:%S %z]', 'class': 'logging.Formatter'}}}
+2026-05-08T01:16:29.695097524Z   logconfig_json: None
+2026-05-08T01:16:29.695102364Z   syslog_addr: udp://localhost:514
+2026-05-08T01:16:29.695107494Z   syslog: False
+2026-05-08T01:16:29.695111794Z   syslog_prefix: None
+2026-05-08T01:16:29.695118554Z   syslog_facility: user
+2026-05-08T01:16:29.695123214Z   enable_stdio_inheritance: False
+2026-05-08T01:16:29.695127724Z   statsd_host: None
+2026-05-08T01:16:29.695132374Z   dogstatsd_tags: 
+2026-05-08T01:16:29.695137424Z   statsd_prefix: 
+2026-05-08T01:16:29.695142884Z   proc_name: None
+2026-05-08T01:16:29.695147994Z   default_proc_name: appcontainer.app:app
+2026-05-08T01:16:29.695152844Z   pythonpath: None
+2026-05-08T01:16:29.695158584Z   paste: None
+2026-05-08T01:16:29.695164644Z   on_starting: <function OnStarting.on_starting at 0xffffb7fb8dc0>
+2026-05-08T01:16:29.695170485Z   on_reload: <function OnReload.on_reload at 0xffffb7fb8ee0>
+2026-05-08T01:16:29.695175305Z   when_ready: <function WhenReady.when_ready at 0xffffb7fb9000>
+2026-05-08T01:16:29.695181585Z   pre_fork: <function Prefork.pre_fork at 0xffffb7fb9120>
+2026-05-08T01:16:29.695186685Z   post_fork: <function Postfork.post_fork at 0xffffb7fb9240>
+2026-05-08T01:16:29.695191865Z   post_worker_init: <function PostWorkerInit.post_worker_init at 0xffffb7fb9360>
+2026-05-08T01:16:29.695198395Z   worker_int: <function WorkerInt.worker_int at 0xffffb7fb9480>
+2026-05-08T01:16:29.695203455Z   worker_abort: <function WorkerAbort.worker_abort at 0xffffb7fb95a0>
+2026-05-08T01:16:29.695227775Z   pre_exec: <function PreExec.pre_exec at 0xffffb7fb96c0>
+2026-05-08T01:16:29.695234875Z   pre_request: <function PreRequest.pre_request at 0xffffb7fb97e0>
+2026-05-08T01:16:29.695241575Z   post_request: <function PostRequest.post_request at 0xffffb7fb9870>
+2026-05-08T01:16:29.695246805Z   child_exit: <function ChildExit.child_exit at 0xffffb7fb9990>
+2026-05-08T01:16:29.695251525Z   worker_exit: <function WorkerExit.worker_exit at 0xffffb7fb9ab0>
+2026-05-08T01:16:29.695257595Z   nworkers_changed: <function NumWorkersChanged.nworkers_changed at 0xffffb7fb9bd0>
+2026-05-08T01:16:29.695263625Z   on_exit: <function OnExit.on_exit at 0xffffb7fb9cf0>
+2026-05-08T01:16:29.695269405Z   ssl_context: <function NewSSLContext.ssl_context at 0xffffb7fb9e10>
+2026-05-08T01:16:29.695276855Z   proxy_protocol: False
+2026-05-08T01:16:29.695281965Z   proxy_allow_ips: ['127.0.0.1']
+2026-05-08T01:16:29.695286566Z   keyfile: None
+2026-05-08T01:16:29.695292006Z   certfile: None
+2026-05-08T01:16:29.695297576Z   ssl_version: 2
+2026-05-08T01:16:29.695302636Z   cert_reqs: 0
+2026-05-08T01:16:29.695309016Z   ca_certs: None
+2026-05-08T01:16:29.695316156Z   suppress_ragged_eofs: True
+2026-05-08T01:16:29.695320646Z   do_handshake_on_connect: False
+2026-05-08T01:16:29.695324856Z   ciphers: None
+2026-05-08T01:16:29.695330306Z   raw_paste_global_conf: []
+2026-05-08T01:16:29.695335096Z   strip_header_spaces: False
+2026-05-08T01:16:29.695339586Z   permit_unconventional_http_method: False
+2026-05-08T01:16:29.695343946Z   permit_unconventional_http_version: False
+2026-05-08T01:16:29.695355026Z   casefold_http_method: False
+2026-05-08T01:16:29.695361366Z   header_map: drop
+2026-05-08T01:16:29.695367596Z   tolerate_dangerous_framing: False
+2026-05-08T01:16:29.695377006Z [2026-05-08 09:16:29 +0800] [16]: [INFO] Starting gunicorn 22.0.0
+2026-05-08T01:16:29.695809560Z [2026-05-08 09:16:29 +0800] [16]: [DEBUG] Arbiter booted
+2026-05-08T01:16:29.695943671Z [2026-05-08 09:16:29 +0800] [16]: [INFO] Listening at: http://0.0.0.0:18090 (16)
+2026-05-08T01:16:29.696065512Z [2026-05-08 09:16:29 +0800] [16]: [INFO] Using worker: gthread
+2026-05-08T01:16:29.699239500Z [2026-05-08 09:16:29 +0800] [17]: [INFO] Booting worker with pid: 17
+2026-05-08T01:16:29.754307892Z [2026-05-08 09:16:29 +0800] [16]: [DEBUG] 1 workers
+2026-05-08T01:16:30.193559203Z [2026-05-08 09:16:30 +0800] [17]: [INFO] get environment MONITOR_APP_SECRET_NEW failed!
+2026-05-08T01:16:30.206088413Z [2026-05-08 09:16:30 +0800] [17]: [ERROR] decrypt by sts error sts init failed
+2026-05-08T01:16:30.207228763Z [2026-05-08 09:16:30 +0800] [17]: [WARNING] The image does not contain flask_apscheduler dependencies, and the flow control function will be disabled
+2026-05-08T01:16:33.295568931Z [2026-05-08 09:16:33 +0800] [17]: [DEBUG] Using selector: EpollSelector
+2026-05-08T01:16:33.296418818Z [2026-05-08 09:16:33 +0800] [17]: [INFO] component load success
+2026-05-08T01:16:33.299033051Z [2026-05-08 09:16:33] INFO ragent.mep_process: Resolved MEP bundle paths. model_dir=/model-data/model source=runtime_sibling_model_dir exists=True; data_dir=/model-data/data source=runtime_sibling_data_dir exists=True; meta_dir=/opt/huawei/sfsstorage/sfs-mep-common-guian-exp/2e36b101-2d95-4763-9ec2-86e82155a75b/meta source=sfs_object_meta_dir exists=True
+2026-05-08T01:16:33.299069962Z 2026-05-08 09:16:33,298 | INFO | ragent.mep_process:_log_bundle_path_resolution:97 - Resolved MEP bundle paths. model_dir=/model-data/model source=runtime_sibling_model_dir exists=True; data_dir=/model-data/data source=runtime_sibling_data_dir exists=True; meta_dir=/opt/huawei/sfsstorage/sfs-mep-common-guian-exp/2e36b101-2d95-4763-9ec2-86e82155a75b/meta source=sfs_object_meta_dir exists=True
+2026-05-08T01:16:33.302339260Z [2026-05-08 09:16:33] ERROR ragent.mep_process: CustomerModel.load failed
+2026-05-08T01:16:33.302362140Z Traceback (most recent call last):
+2026-05-08T01:16:33.302369500Z   File "/model-data/component/process.py", line 181, in load
+2026-05-08T01:16:33.302375920Z     self._loop_runner.run(self._load_async())
+2026-05-08T01:16:33.302381101Z   File "/model-data/component/ragent/mep_adapter.py", line 95, in run
+2026-05-08T01:16:33.302386111Z     return future.result()
+2026-05-08T01:16:33.302391391Z   File "/usr/local/python3.10.2/lib/python3.10/concurrent/futures/_base.py", line 446, in result
+2026-05-08T01:16:33.302396381Z     return self.__get_result()
+2026-05-08T01:16:33.302400941Z   File "/usr/local/python3.10.2/lib/python3.10/concurrent/futures/_base.py", line 391, in __get_result
+2026-05-08T01:16:33.302406481Z     raise self._exception
+2026-05-08T01:16:33.302410911Z   File "/model-data/component/process.py", line 144, in _load_async
+2026-05-08T01:16:33.302415621Z     embedding_runtime = bootstrap_local_embedding_runtime(
+2026-05-08T01:16:33.302420251Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 1131, in bootstrap_local_embedding_runtime
+2026-05-08T01:16:33.302425131Z     config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+2026-05-08T01:16:33.302429741Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 410, in resolve_embedding_launch_config
+2026-05-08T01:16:33.302435511Z     model_path = _resolve_model_path(
+2026-05-08T01:16:33.302441511Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 378, in _resolve_model_path
+2026-05-08T01:16:33.302446281Z     raise FileNotFoundError(
+2026-05-08T01:16:33.302451811Z FileNotFoundError: No embedding model directory found under model/. Checked: /model-data/model
+2026-05-08T01:16:33.302460721Z 2026-05-08 09:16:33,300 | ERROR | ragent.mep_process:load:183 - CustomerModel.load failed
+2026-05-08T01:16:33.302467901Z Traceback (most recent call last):
+2026-05-08T01:16:33.302473121Z   File "/model-data/component/process.py", line 181, in load
+2026-05-08T01:16:33.302502192Z     self._loop_runner.run(self._load_async())
+2026-05-08T01:16:33.302509682Z   File "/model-data/component/ragent/mep_adapter.py", line 95, in run
+2026-05-08T01:16:33.302515982Z     return future.result()
+2026-05-08T01:16:33.302522862Z   File "/usr/local/python3.10.2/lib/python3.10/concurrent/futures/_base.py", line 446, in result
+2026-05-08T01:16:33.302527962Z     return self.__get_result()
+2026-05-08T01:16:33.302532492Z   File "/usr/local/python3.10.2/lib/python3.10/concurrent/futures/_base.py", line 391, in __get_result
+2026-05-08T01:16:33.302537162Z     raise self._exception
+2026-05-08T01:16:33.302545102Z   File "/model-data/component/process.py", line 144, in _load_async
+2026-05-08T01:16:33.302550442Z     embedding_runtime = bootstrap_local_embedding_runtime(
+2026-05-08T01:16:33.302556012Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 1131, in bootstrap_local_embedding_runtime
+2026-05-08T01:16:33.302563352Z     config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+2026-05-08T01:16:33.302569162Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 410, in resolve_embedding_launch_config
+2026-05-08T01:16:33.302576522Z     model_path = _resolve_model_path(
+2026-05-08T01:16:33.302581932Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 378, in _resolve_model_path
+2026-05-08T01:16:33.302588362Z     raise FileNotFoundError(
+2026-05-08T01:16:33.302594072Z FileNotFoundError: No embedding model directory found under model/. Checked: /model-data/model
+2026-05-08T01:16:33.306186434Z [2026-05-08 09:16:33 +0800] [17]: [ERROR] Exception in worker process
+2026-05-08T01:16:33.306227074Z Traceback (most recent call last):
+2026-05-08T01:16:33.306235314Z   File "/model-data/component/process.py", line 181, in load
+2026-05-08T01:16:33.306241694Z     self._loop_runner.run(self._load_async())
+2026-05-08T01:16:33.306246704Z   File "/model-data/component/ragent/mep_adapter.py", line 95, in run
+2026-05-08T01:16:33.306252734Z     return future.result()
+2026-05-08T01:16:33.306257994Z   File "/usr/local/python3.10.2/lib/python3.10/concurrent/futures/_base.py", line 446, in result
+2026-05-08T01:16:33.306263514Z     return self.__get_result()
+2026-05-08T01:16:33.306268435Z   File "/usr/local/python3.10.2/lib/python3.10/concurrent/futures/_base.py", line 391, in __get_result
+2026-05-08T01:16:33.306273525Z     raise self._exception
+2026-05-08T01:16:33.306277995Z   File "/model-data/component/process.py", line 144, in _load_async
+2026-05-08T01:16:33.306282725Z     embedding_runtime = bootstrap_local_embedding_runtime(
+2026-05-08T01:16:33.306287455Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 1131, in bootstrap_local_embedding_runtime
+2026-05-08T01:16:33.306295525Z     config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+2026-05-08T01:16:33.306343065Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 410, in resolve_embedding_launch_config
+2026-05-08T01:16:33.306351755Z     model_path = _resolve_model_path(
+2026-05-08T01:16:33.306356805Z   File "/model-data/component/ragent/mep_embedding_runtime.py", line 378, in _resolve_model_path
+2026-05-08T01:16:33.306362415Z     raise FileNotFoundError(
+2026-05-08T01:16:33.306367345Z FileNotFoundError: No embedding model directory found under model/. Checked: /model-data/model
+2026-05-08T01:16:33.306372675Z 
+2026-05-08T01:16:33.306377385Z The above exception was the direct cause of the following exception:
+2026-05-08T01:16:33.306383386Z 
+2026-05-08T01:16:33.306391116Z Traceback (most recent call last):
+2026-05-08T01:16:33.306400276Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/arbiter.py", line 609, in spawn_worker
+2026-05-08T01:16:33.306406516Z     worker.init_process()
+2026-05-08T01:16:33.306412706Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/workers/gthread.py", line 95, in init_process
+2026-05-08T01:16:33.306419416Z     super().init_process()
+2026-05-08T01:16:33.306427216Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/workers/base.py", line 134, in init_process
+2026-05-08T01:16:33.306432686Z     self.load_wsgi()
+2026-05-08T01:16:33.306437586Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/workers/base.py", line 146, in load_wsgi
+2026-05-08T01:16:33.306445566Z     self.wsgi = self.app.wsgi()
+2026-05-08T01:16:33.306450266Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/app/base.py", line 67, in wsgi
+2026-05-08T01:16:33.306457046Z     self.callable = self.load()
+2026-05-08T01:16:33.306463996Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 58, in load
+2026-05-08T01:16:33.306472456Z     return self.load_wsgiapp()
+2026-05-08T01:16:33.306477536Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 48, in load_wsgiapp
+2026-05-08T01:16:33.306482216Z     return util.import_app(self.app_uri)
+2026-05-08T01:16:33.306489886Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/util.py", line 371, in import_app
+2026-05-08T01:16:33.306496207Z     mod = importlib.import_module(module)
+2026-05-08T01:16:33.306501667Z   File "/usr/local/python3.10.2/lib/python3.10/importlib/__init__.py", line 126, in import_module
+2026-05-08T01:16:33.306509267Z     return _bootstrap._gcd_import(name[level:], package, level)
+2026-05-08T01:16:33.306514447Z   File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
+2026-05-08T01:16:33.306520257Z   File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+2026-05-08T01:16:33.306525667Z   File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+2026-05-08T01:16:33.306545387Z   File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+2026-05-08T01:16:33.306553657Z   File "<frozen importlib._bootstrap_external>", line 883, in exec_module
+2026-05-08T01:16:33.306559317Z   File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+2026-05-08T01:16:33.306564067Z   File "/opt/huawei/framework/service/appcontainer/app.py", line 115, in <module>
+2026-05-08T01:16:33.306573137Z     process.load()
+2026-05-08T01:16:33.306578697Z   File "/model-data/component/process.py", line 184, in load
+2026-05-08T01:16:33.306584247Z     raise RuntimeError(f"CustomerModel.load failed: {exc}") from exc
+2026-05-08T01:16:33.306591697Z RuntimeError: CustomerModel.load failed: No embedding model directory found under model/. Checked: /model-data/model
+2026-05-08T01:16:33.306696648Z [2026-05-08 09:16:33 +0800] [17]: [INFO] Worker exiting (pid: 17)
+2026-05-08T01:16:33.523808647Z [2026-05-08 09:16:33 +0800] [16]: [ERROR] Worker (pid:17) exited with code 3
+2026-05-08T01:16:33.524350382Z [2026-05-08 09:16:33 +0800] [16]: [ERROR] Shutting down: Master
+2026-05-08T01:16:33.524490373Z [2026-05-08 09:16:33 +0800] [16]: [ERROR] Reason: Worker failed to boot.
+2026-05-08T01:16:33.560857281Z /usr/bin/sh: line 1: tailf: command not found

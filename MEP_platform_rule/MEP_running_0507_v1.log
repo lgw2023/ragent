@@ -1,0 +1,160 @@
+2026-05-07T03:06:03.422093277Z previous UMASK is: 0022
+2026-05-07T03:06:03.422600852Z setting new UMASK to: 0077
+2026-05-07T03:06:03.422706853Z python version is python39
+2026-05-07T03:06:03.422728553Z miniconda version is miniconda
+2026-05-07T03:06:03.592349006Z [2026-05-07 11:06:03 +0800] [16]: [DEBUG] Current configuration:
+2026-05-07T03:06:03.592370496Z   config: /opt/huawei/framework/service/common/security/store/wdo/gunicorn.py
+2026-05-07T03:06:03.592377286Z   wsgi_app: None
+2026-05-07T03:06:03.592382636Z   bind: [':18090']
+2026-05-07T03:06:03.592387396Z   backlog: 2048
+2026-05-07T03:06:03.592391767Z   workers: 1
+2026-05-07T03:06:03.592396337Z   worker_class: gthread
+2026-05-07T03:06:03.592400947Z   threads: 200
+2026-05-07T03:06:03.592405677Z   worker_connections: 1000
+2026-05-07T03:06:03.592410057Z   max_requests: 0
+2026-05-07T03:06:03.592414377Z   max_requests_jitter: 0
+2026-05-07T03:06:03.592419147Z   timeout: 120
+2026-05-07T03:06:03.592423487Z   graceful_timeout: 30
+2026-05-07T03:06:03.592427867Z   keepalive: 65
+2026-05-07T03:06:03.592432247Z   limit_request_line: 4094
+2026-05-07T03:06:03.592436817Z   limit_request_fields: 100
+2026-05-07T03:06:03.592441137Z   limit_request_field_size: 8190
+2026-05-07T03:06:03.592445457Z   reload: False
+2026-05-07T03:06:03.592449897Z   reload_engine: auto
+2026-05-07T03:06:03.592454457Z   reload_extra_files: []
+2026-05-07T03:06:03.592459397Z   spew: False
+2026-05-07T03:06:03.592463627Z   check_config: False
+2026-05-07T03:06:03.592467907Z   print_config: False
+2026-05-07T03:06:03.592472227Z   preload_app: False
+2026-05-07T03:06:03.592477047Z   sendfile: None
+2026-05-07T03:06:03.592481497Z   reuse_port: False
+2026-05-07T03:06:03.592485927Z   chdir: /opt/huawei/framework/service
+2026-05-07T03:06:03.592491457Z   daemon: False
+2026-05-07T03:06:03.592495807Z   raw_env: []
+2026-05-07T03:06:03.592500177Z   pidfile: None
+2026-05-07T03:06:03.592504497Z   worker_tmp_dir: None
+2026-05-07T03:06:03.592508738Z   user: 1001
+2026-05-07T03:06:03.592513038Z   group: 1001
+2026-05-07T03:06:03.592517298Z   umask: 0
+2026-05-07T03:06:03.592522488Z   initgroups: False
+2026-05-07T03:06:03.592527518Z   tmp_upload_dir: None
+2026-05-07T03:06:03.592532098Z   secure_scheme_headers: {'X-FORWARDED-PROTOCOL': 'ssl', 'X-FORWARDED-PROTO': 'https', 'X-FORWARDED-SSL': 'on'}
+2026-05-07T03:06:03.592538458Z   forwarded_allow_ips: ['127.0.0.1']
+2026-05-07T03:06:03.592543128Z   accesslog: None
+2026-05-07T03:06:03.592571768Z   disable_redirect_access_to_syslog: False
+2026-05-07T03:06:03.592578178Z   access_log_format: %(h)s %(r)s %(s)s %(a)s %(L)s
+2026-05-07T03:06:03.592583178Z   errorlog: -
+2026-05-07T03:06:03.592588198Z   loglevel: debug
+2026-05-07T03:06:03.592592828Z   capture_output: False
+2026-05-07T03:06:03.592597208Z   logger_class: gunicorn.glogging.Logger
+2026-05-07T03:06:03.592602228Z   logconfig: None
+2026-05-07T03:06:03.592608688Z   logconfig_dict: {'version': 1, 'disable_existing_loggers': False, 'root': {'level': 'DEBUG', 'handlers': ['console']}, 'loggers': {'gunicorn.error': {'level': 'DEBUG', 'handlers': ['error_file'], 'propagate': 1, 'qualname': 'gunicorn_error'}, 'gunicorn.access': {'level': 'DEBUG', 'handlers': ['access_file'], 'propagate': 0, 'qualname': 'access'}}, 'handlers': {'error_file': {'class': 'logging.handlers.RotatingFileHandler', 'maxBytes': 1000, 'backupCount': 5, 'formatter': 'generic', 'filename': '/opt/huawei/log/error.log'}, 'access_file': {'class': 'logging.handlers.RotatingFileHandler', 'maxBytes': 1000, 'backupCount': 5, 'formatter': 'generic', 'filename': '/opt/huawei/log/access.log'}, 'console': {'class': 'logging.StreamHandler', 'level': 'DEBUG', 'formatter': 'generic'}}, 'formatters': {'generic': {'format': '%(asctime)s [%(process)d]: [%(levelname)s] %(message)s', 'datefmt': '[%Y-%m-%d %H:%M:%S %z]', 'class': 'logging.Formatter'}}}
+2026-05-07T03:06:03.592624469Z   logconfig_json: None
+2026-05-07T03:06:03.592630029Z   syslog_addr: udp://localhost:514
+2026-05-07T03:06:03.592634839Z   syslog: False
+2026-05-07T03:06:03.592641029Z   syslog_prefix: None
+2026-05-07T03:06:03.592645649Z   syslog_facility: user
+2026-05-07T03:06:03.592650639Z   enable_stdio_inheritance: False
+2026-05-07T03:06:03.592655269Z   statsd_host: None
+2026-05-07T03:06:03.592660009Z   dogstatsd_tags: 
+2026-05-07T03:06:03.592664589Z   statsd_prefix: 
+2026-05-07T03:06:03.592669509Z   proc_name: None
+2026-05-07T03:06:03.592674059Z   default_proc_name: appcontainer.app:app
+2026-05-07T03:06:03.592679089Z   pythonpath: None
+2026-05-07T03:06:03.592686909Z   paste: None
+2026-05-07T03:06:03.592692339Z   on_starting: <function OnStarting.on_starting at 0xffff8c2e8dc0>
+2026-05-07T03:06:03.592697329Z   on_reload: <function OnReload.on_reload at 0xffff8c2e8ee0>
+2026-05-07T03:06:03.592702379Z   when_ready: <function WhenReady.when_ready at 0xffff8c2e9000>
+2026-05-07T03:06:03.592707589Z   pre_fork: <function Prefork.pre_fork at 0xffff8c2e9120>
+2026-05-07T03:06:03.592712899Z   post_fork: <function Postfork.post_fork at 0xffff8c2e9240>
+2026-05-07T03:06:03.592718729Z   post_worker_init: <function PostWorkerInit.post_worker_init at 0xffff8c2e9360>
+2026-05-07T03:06:03.592724039Z   worker_int: <function WorkerInt.worker_int at 0xffff8c2e9480>
+2026-05-07T03:06:03.592728779Z   worker_abort: <function WorkerAbort.worker_abort at 0xffff8c2e95a0>
+2026-05-07T03:06:03.592740200Z   pre_exec: <function PreExec.pre_exec at 0xffff8c2e96c0>
+2026-05-07T03:06:03.592747330Z   pre_request: <function PreRequest.pre_request at 0xffff8c2e97e0>
+2026-05-07T03:06:03.592752270Z   post_request: <function PostRequest.post_request at 0xffff8c2e9870>
+2026-05-07T03:06:03.592757570Z   child_exit: <function ChildExit.child_exit at 0xffff8c2e9990>
+2026-05-07T03:06:03.592763020Z   worker_exit: <function WorkerExit.worker_exit at 0xffff8c2e9ab0>
+2026-05-07T03:06:03.592767840Z   nworkers_changed: <function NumWorkersChanged.nworkers_changed at 0xffff8c2e9bd0>
+2026-05-07T03:06:03.592773220Z   on_exit: <function OnExit.on_exit at 0xffff8c2e9cf0>
+2026-05-07T03:06:03.592778400Z   ssl_context: <function NewSSLContext.ssl_context at 0xffff8c2e9e10>
+2026-05-07T03:06:03.592782950Z   proxy_protocol: False
+2026-05-07T03:06:03.592788180Z   proxy_allow_ips: ['127.0.0.1']
+2026-05-07T03:06:03.592793510Z   keyfile: None
+2026-05-07T03:06:03.592797980Z   certfile: None
+2026-05-07T03:06:03.592803150Z   ssl_version: 2
+2026-05-07T03:06:03.592808730Z   cert_reqs: 0
+2026-05-07T03:06:03.592813090Z   ca_certs: None
+2026-05-07T03:06:03.592818570Z   suppress_ragged_eofs: True
+2026-05-07T03:06:03.592823350Z   do_handshake_on_connect: False
+2026-05-07T03:06:03.592827830Z   ciphers: None
+2026-05-07T03:06:03.592832710Z   raw_paste_global_conf: []
+2026-05-07T03:06:03.592839660Z   strip_header_spaces: False
+2026-05-07T03:06:03.592845280Z   permit_unconventional_http_method: False
+2026-05-07T03:06:03.592850161Z   permit_unconventional_http_version: False
+2026-05-07T03:06:03.592854691Z   casefold_http_method: False
+2026-05-07T03:06:03.592859581Z   header_map: drop
+2026-05-07T03:06:03.592864921Z   tolerate_dangerous_framing: False
+2026-05-07T03:06:03.592872671Z [2026-05-07 11:06:03 +0800] [16]: [INFO] Starting gunicorn 22.0.0
+2026-05-07T03:06:03.593315645Z [2026-05-07 11:06:03 +0800] [16]: [DEBUG] Arbiter booted
+2026-05-07T03:06:03.593442816Z [2026-05-07 11:06:03 +0800] [16]: [INFO] Listening at: http://0.0.0.0:18090 (16)
+2026-05-07T03:06:03.593569047Z [2026-05-07 11:06:03 +0800] [16]: [INFO] Using worker: gthread
+2026-05-07T03:06:03.597035467Z [2026-05-07 11:06:03 +0800] [17]: [INFO] Booting worker with pid: 17
+2026-05-07T03:06:03.613342218Z [2026-05-07 11:06:03 +0800] [16]: [DEBUG] 1 workers
+2026-05-07T03:06:04.016139227Z [2026-05-07 11:06:04 +0800] [17]: [INFO] get environment MONITOR_APP_SECRET_NEW failed!
+2026-05-07T03:06:04.027801969Z [2026-05-07 11:06:04 +0800] [17]: [ERROR] decrypt by sts error sts init failed
+2026-05-07T03:06:04.028816497Z [2026-05-07 11:06:04 +0800] [17]: [WARNING] The image does not contain flask_apscheduler dependencies, and the flow control function will be disabled
+2026-05-07T03:06:06.865836780Z [2026-05-07 11:06:06 +0800] [17]: [ERROR] Exception in worker process
+2026-05-07T03:06:06.865862801Z Traceback (most recent call last):
+2026-05-07T03:06:06.865869061Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/arbiter.py", line 609, in spawn_worker
+2026-05-07T03:06:06.865875011Z     worker.init_process()
+2026-05-07T03:06:06.865879831Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/workers/gthread.py", line 95, in init_process
+2026-05-07T03:06:06.865884841Z     super().init_process()
+2026-05-07T03:06:06.865889481Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/workers/base.py", line 134, in init_process
+2026-05-07T03:06:06.865894421Z     self.load_wsgi()
+2026-05-07T03:06:06.865899001Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/workers/base.py", line 146, in load_wsgi
+2026-05-07T03:06:06.865903911Z     self.wsgi = self.app.wsgi()
+2026-05-07T03:06:06.865908531Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/app/base.py", line 67, in wsgi
+2026-05-07T03:06:06.865913981Z     self.callable = self.load()
+2026-05-07T03:06:06.865918481Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 58, in load
+2026-05-07T03:06:06.865923821Z     return self.load_wsgiapp()
+2026-05-07T03:06:06.865928381Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 48, in load_wsgiapp
+2026-05-07T03:06:06.865933171Z     return util.import_app(self.app_uri)
+2026-05-07T03:06:06.865937871Z   File "/usr/local/python3.10.2/lib/python3.10/site-packages/gunicorn/util.py", line 371, in import_app
+2026-05-07T03:06:06.865942791Z     mod = importlib.import_module(module)
+2026-05-07T03:06:06.865947261Z   File "/usr/local/python3.10.2/lib/python3.10/importlib/__init__.py", line 126, in import_module
+2026-05-07T03:06:06.865952051Z     return _bootstrap._gcd_import(name[level:], package, level)
+2026-05-07T03:06:06.865956551Z   File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
+2026-05-07T03:06:06.865961531Z   File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+2026-05-07T03:06:06.865966472Z   File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+2026-05-07T03:06:06.865971622Z   File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+2026-05-07T03:06:06.865976722Z   File "<frozen importlib._bootstrap_external>", line 883, in exec_module
+2026-05-07T03:06:06.865981672Z   File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+2026-05-07T03:06:06.865986622Z   File "/opt/huawei/framework/service/appcontainer/app.py", line 109, in <module>
+2026-05-07T03:06:06.865991942Z     customer_class = getattr(importlib.import_module(config.mainFile), config.mainClass)
+2026-05-07T03:06:06.866008112Z   File "/usr/local/python3.10.2/lib/python3.10/importlib/__init__.py", line 126, in import_module
+2026-05-07T03:06:06.866014522Z     return _bootstrap._gcd_import(name[level:], package, level)
+2026-05-07T03:06:06.866019572Z   File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
+2026-05-07T03:06:06.866025272Z   File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+2026-05-07T03:06:06.866030412Z   File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+2026-05-07T03:06:06.866036142Z   File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+2026-05-07T03:06:06.866040742Z   File "<frozen importlib._bootstrap_external>", line 883, in exec_module
+2026-05-07T03:06:06.866045462Z   File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+2026-05-07T03:06:06.866050102Z   File "/model-data/component/process.py", line 21, in <module>
+2026-05-07T03:06:06.866055352Z     from ragent.runtime_env import bootstrap_runtime_environment  # noqa: E402
+2026-05-07T03:06:06.866059992Z   File "/model-data/component/ragent/__init__.py", line 1, in <module>
+2026-05-07T03:06:06.866065382Z     from .ragent import QueryParam as QueryParam, Ragent as Ragent
+2026-05-07T03:06:06.866070852Z   File "/model-data/component/ragent/ragent.py", line 66, in <module>
+2026-05-07T03:06:06.866075582Z     from .operate import (
+2026-05-07T03:06:06.866080132Z   File "/model-data/component/ragent/operate.py", line 16, in <module>
+2026-05-07T03:06:06.866084903Z     from .llm.openai import openai_embed
+2026-05-07T03:06:06.866090223Z   File "/model-data/component/ragent/llm/openai.py", line 14, in <module>
+2026-05-07T03:06:06.866095833Z     from litellm import (
+2026-05-07T03:06:06.866100383Z   File "/opt/huawei/sfsstorage/sfs-mep-common-guian-exp/25c7b0c2-dbbd-4889-9da3-6c2b53b672f7/data/deps/wheelhouse/linux-arm64-py3.10/litellm-1.80.10-py3-none-any.whl/litellm/__init__.py", line 27, in <module>
+2026-05-07T03:06:06.866106293Z     from litellm.types.integrations.datadog_llm_obs import DatadogLLMObsInitParams
+2026-05-07T03:06:06.866110873Z ModuleNotFoundError: No module named 'litellm.types'
+2026-05-07T03:06:06.866372445Z [2026-05-07 11:06:06 +0800] [17]: [INFO] Worker exiting (pid: 17)
+2026-05-07T03:06:07.123441648Z [2026-05-07 11:06:07 +0800] [16]: [ERROR] Worker (pid:17) exited with code 3
+2026-05-07T03:06:07.123952312Z [2026-05-07 11:06:07 +0800] [16]: [ERROR] Shutting down: Master
+2026-05-07T03:06:07.124126654Z [2026-05-07 11:06:07 +0800] [16]: [ERROR] Reason: Worker failed to boot.
+2026-05-07T03:06:07.159788574Z /usr/bin/sh: line 1: tailf: command not found
