@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import site
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -19,6 +20,7 @@ _NATIVE_WHEEL_SUFFIXES = (".so", ".pyd", ".dll", ".dylib")
 _KEYWORD_FALLBACK_MODEL_RELATIVE_DIR = (
     "models/keyword_extraction/knowledgator-gliner-x-small"
 )
+_OFFLINE_REQUIREMENTS_DONE: set[Path] = set()
 
 
 def _maybe_json_loads(value: str):
@@ -115,6 +117,10 @@ def _env_flag_enabled(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_flag_disabled(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in {"0", "false", "no", "off"}
+
+
 def _wheel_has_native_extensions(wheel_path: Path) -> bool:
     try:
         with zipfile.ZipFile(wheel_path) as wheel:
@@ -184,6 +190,127 @@ def _iter_wheelhouse_dirs(
     legacy_flat_dir = wheelhouse_root.resolve()
     if legacy_flat_dir not in yielded:
         yield legacy_flat_dir
+
+
+def _iter_platform_named_files(
+    deps_dir: Path,
+    *,
+    prefix: str,
+    suffix: str = ".txt",
+) -> Iterator[Path]:
+    seen: set[Path] = set()
+    for tag in iter_platform_tags():
+        candidate = deps_dir / f"{prefix}-{tag}{suffix}"
+        if candidate.is_file():
+            resolved = candidate.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                yield resolved
+
+
+def _resolve_constraints_file(deps_dir: Path) -> Path | None:
+    return next(
+        _iter_platform_named_files(
+            deps_dir,
+            prefix="constraints",
+        ),
+        None,
+    )
+
+
+def _iter_offline_requirements_files(deps_dir: Path) -> Iterator[Path]:
+    yield from _iter_platform_named_files(
+        deps_dir,
+        prefix="requirements",
+    )
+
+
+def _run_offline_pip_install(
+    *,
+    requirements_file: Path,
+    constraints_file: Path | None,
+    wheelhouse_dirs: tuple[Path, ...],
+) -> None:
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--no-index",
+    ]
+    for wheelhouse_dir in wheelhouse_dirs:
+        command.extend(["--find-links", str(wheelhouse_dir)])
+    if constraints_file is not None:
+        command.extend(["-c", str(constraints_file)])
+    command.extend(["-r", str(requirements_file)])
+
+    completed = subprocess.run(
+        command,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "offline MEP dependency installation failed with exit_code="
+            f"{completed.returncode}: {' '.join(command)}\n{completed.stdout}"
+        )
+
+
+def _refresh_site_paths() -> None:
+    try:
+        site.addsitedir(site.getusersitepackages())
+    except Exception:
+        pass
+    try:
+        for site_package_dir in site.getsitepackages():
+            site.addsitedir(site_package_dir)
+    except Exception:
+        pass
+
+
+def ensure_mep_offline_requirements(
+    current_dir: str | os.PathLike[str],
+) -> tuple[str, ...]:
+    if _env_flag_disabled("RAGENT_MEP_OFFLINE_PIP_INSTALL"):
+        return ()
+
+    resolved_current_dir = Path(current_dir).expanduser().resolve()
+    installed_from: list[str] = []
+    seen_data_dirs: set[Path] = set()
+    for data_dir in iter_mep_data_dir_candidates(resolved_current_dir):
+        if data_dir in seen_data_dirs:
+            continue
+        seen_data_dirs.add(data_dir)
+        deps_dir = data_dir / "deps"
+        if not deps_dir.is_dir():
+            continue
+
+        wheelhouse_dirs = tuple(
+            wheelhouse_dir
+            for wheelhouse_dir in _iter_wheelhouse_dirs(deps_dir)
+            if wheelhouse_dir.is_dir() and any(wheelhouse_dir.glob("*.whl"))
+        )
+        if not wheelhouse_dirs:
+            continue
+
+        constraints_file = _resolve_constraints_file(deps_dir)
+        for requirements_file in _iter_offline_requirements_files(deps_dir):
+            if requirements_file in _OFFLINE_REQUIREMENTS_DONE:
+                continue
+            _run_offline_pip_install(
+                requirements_file=requirements_file,
+                constraints_file=constraints_file,
+                wheelhouse_dirs=wheelhouse_dirs,
+            )
+            _OFFLINE_REQUIREMENTS_DONE.add(requirements_file)
+            installed_from.append(str(requirements_file))
+
+    if installed_from:
+        _refresh_site_paths()
+    return tuple(installed_from)
 
 
 def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
@@ -266,6 +393,7 @@ def bootstrap_mep_data_dependencies(current_dir: str | os.PathLike[str]) -> tupl
 __all__ = [
     "bootstrap_mep_data_dependencies",
     "current_platform_tag",
+    "ensure_mep_offline_requirements",
     "iter_mep_data_dir_candidates",
     "iter_mep_dependency_paths",
     "iter_platform_tags",

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import asyncio
 import logging
 from collections import deque
+import json
 import os
 import platform
 import re
@@ -12,11 +14,13 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+import numpy as np
 import requests
 
 try:
@@ -81,6 +85,12 @@ class MepEmbeddingLaunchConfig:
     install_force_reinstall: bool = True
     install_all_wheelhouse_wheels: bool = False
     launch_mode: str = "auto"
+    runtime: str = "vllm"
+    device: str | None = None
+    batch_size: int = 8
+    pooling: str = "auto"
+    normalize_embeddings: bool = True
+    trust_remote_code: bool = True
     config_path: Path | None = None
     data_dir: Path | None = None
 
@@ -92,9 +102,10 @@ class MepEmbeddingLaunchConfig:
 @dataclass
 class LocalEmbeddingRuntime:
     config: MepEmbeddingLaunchConfig
-    process: subprocess.Popen[Any]
+    process: subprocess.Popen[Any] | None
     launch_command: tuple[str, ...]
     log_path: Path
+    cleanup_callback: Callable[[], None] | None = field(default=None, repr=False)
     _env_backup: dict[str, str | None] = field(default_factory=dict, repr=False)
 
     def apply_environment(self) -> None:
@@ -102,9 +113,10 @@ class LocalEmbeddingRuntime:
             for key in _MANAGED_ENV_VARS:
                 self._env_backup[key] = os.getenv(key)
         os.environ["EMBEDDING_MODEL"] = self.config.served_model_name
-        os.environ["EMBEDDING_MODEL_KEY"] = self.config.api_key
-        os.environ["EMBEDDING_MODEL_URL"] = self.config.base_url
-        os.environ["EMBEDDING_PROVIDER"] = _LOCAL_PROVIDER
+        if self.config.runtime == "vllm":
+            os.environ["EMBEDDING_MODEL_KEY"] = self.config.api_key
+            os.environ["EMBEDDING_MODEL_URL"] = self.config.base_url
+            os.environ["EMBEDDING_PROVIDER"] = _LOCAL_PROVIDER
         if self.config.dimensions is not None:
             os.environ["EMBEDDING_DIMENSIONS"] = str(self.config.dimensions)
 
@@ -119,6 +131,12 @@ class LocalEmbeddingRuntime:
     def shutdown(self) -> None:
         self.restore_environment()
 
+        if self.cleanup_callback is not None:
+            self.cleanup_callback()
+            self.cleanup_callback = None
+
+        if self.process is None:
+            return
         if self.process.poll() is not None:
             return
 
@@ -543,6 +561,14 @@ def resolve_embedding_launch_config(
         )
         or "auto"
     ).lower()
+    runtime = (
+        _resolve_property(
+            properties,
+            "RAGENT_MEP_EMBEDDING_RUNTIME",
+            "embedding.runtime",
+        )
+        or "vllm"
+    ).lower()
     extra_args = tuple(
         shlex.split(
             _resolve_property(
@@ -571,12 +597,13 @@ def resolve_embedding_launch_config(
 
     logger.info(
         "Resolved embedding launch config. input_model_dir=%s bundle_model_dir=%s "
-        "data_dir=%s model_path=%s bind_host=%s client_host=%s port=%s "
+        "data_dir=%s model_path=%s runtime=%s bind_host=%s client_host=%s port=%s "
         "path_appendix=%s config_path=%s legacy_sysconfig_present=%s",
         resolved_model_dir_input,
         resolved_model_dir,
         resolved_data_dir,
         model_path,
+        runtime,
         bind_host,
         host,
         port,
@@ -639,6 +666,64 @@ def resolve_embedding_launch_config(
             else False
         ),
         launch_mode=launch_mode,
+        runtime=runtime,
+        device=_resolve_property(
+            properties,
+            "RAGENT_MEP_EMBEDDING_DEVICE",
+            "embedding.device",
+        ),
+        batch_size=(
+            _parse_optional_int(
+                _resolve_property(
+                    properties,
+                    "RAGENT_MEP_EMBEDDING_BATCH_SIZE",
+                    "embedding.batch_size",
+                )
+            )
+            or 8
+        ),
+        pooling=(
+            _resolve_property(
+                properties,
+                "RAGENT_MEP_EMBEDDING_POOLING",
+                "embedding.pooling",
+            )
+            or "auto"
+        ).lower(),
+        normalize_embeddings=(
+            _parse_optional_bool(
+                _resolve_property(
+                    properties,
+                    "RAGENT_MEP_EMBEDDING_NORMALIZE",
+                    "embedding.normalize",
+                    "embedding.normalize_embeddings",
+                )
+            )
+            if _resolve_property(
+                properties,
+                "RAGENT_MEP_EMBEDDING_NORMALIZE",
+                "embedding.normalize",
+                "embedding.normalize_embeddings",
+            )
+            is not None
+            else True
+        ),
+        trust_remote_code=(
+            _parse_optional_bool(
+                _resolve_property(
+                    properties,
+                    "RAGENT_MEP_EMBEDDING_TRUST_REMOTE_CODE",
+                    "embedding.trust_remote_code",
+                )
+            )
+            if _resolve_property(
+                properties,
+                "RAGENT_MEP_EMBEDDING_TRUST_REMOTE_CODE",
+                "embedding.trust_remote_code",
+            )
+            is not None
+            else True
+        ),
         config_path=config_path,
         data_dir=resolved_data_dir,
     )
@@ -1168,6 +1253,219 @@ def _apply_embedding_function_attributes(config: MepEmbeddingLaunchConfig) -> No
         openai_module.openai_embed.max_token_size = config.max_token_size
 
 
+def _apply_ascend_env_to_current_process(config: MepEmbeddingLaunchConfig) -> None:
+    env = build_vllm_subprocess_env(config)
+    for key, value in env.items():
+        if key in os.environ and key not in {
+            "PATH",
+            "LD_LIBRARY_PATH",
+            "PYTHONPATH",
+        }:
+            continue
+        if key.startswith(("ASCEND_", "HCCL_", "ATB_", "NPU_")) or key in {
+            "PATH",
+            "LD_LIBRARY_PATH",
+            "PYTHONPATH",
+        }:
+            os.environ[key] = value
+
+
+def _resolve_sentence_transformers_pooling(model_path: Path) -> str:
+    pooling_config_path = model_path / "1_Pooling" / "config.json"
+    if not pooling_config_path.is_file():
+        return "cls"
+    try:
+        payload = json.loads(pooling_config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return "cls"
+    if payload.get("pooling_mode_cls_token") is True:
+        return "cls"
+    if payload.get("pooling_mode_mean_tokens") is True:
+        return "mean"
+    if payload.get("pooling_mode_max_tokens") is True:
+        return "max"
+    return "cls"
+
+
+class _LocalTransformersEmbeddingModel:
+    def __init__(self, config: MepEmbeddingLaunchConfig) -> None:
+        self.config = config
+        self._lock = threading.Lock()
+        self._loaded = False
+        self._tokenizer: Any | None = None
+        self._model: Any | None = None
+        self._torch: Any | None = None
+        self._device = "cpu"
+        self._pooling = (
+            _resolve_sentence_transformers_pooling(config.model_path)
+            if config.pooling in {"", "auto"}
+            else config.pooling
+        )
+
+    @property
+    def output_dimensions(self) -> int:
+        return self.config.dimensions or 1024
+
+    def _load(self) -> None:
+        if self._loaded:
+            return
+        with self._lock:
+            if self._loaded:
+                return
+            _apply_ascend_env_to_current_process(self.config)
+
+            import torch
+            try:
+                import torch_npu  # noqa: F401
+            except Exception as exc:
+                logger.warning("torch_npu import failed, using CPU if available: %s", exc)
+            from transformers import AutoModel, AutoTokenizer
+
+            has_npu = hasattr(torch, "npu") and torch.npu.is_available()
+            configured_device = (self.config.device or "").strip()
+            device = configured_device or ("npu:0" if has_npu else "cpu")
+            if device.startswith("npu") and not has_npu:
+                raise RuntimeError(
+                    f"Configured embedding device {device!r}, but torch.npu is not available."
+                )
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                str(self.config.model_path),
+                local_files_only=True,
+                use_fast=True,
+            )
+            model = AutoModel.from_pretrained(
+                str(self.config.model_path),
+                local_files_only=True,
+                trust_remote_code=self.config.trust_remote_code,
+            )
+            model.to(device)
+            model.eval()
+
+            self._torch = torch
+            self._tokenizer = tokenizer
+            self._model = model
+            self._device = device
+            self._loaded = True
+            logger.info(
+                "Loaded local transformers embedding model. model_path=%s device=%s "
+                "pooling=%s dimensions=%s batch_size=%s",
+                self.config.model_path,
+                self._device,
+                self._pooling,
+                self.output_dimensions,
+                self.config.batch_size,
+            )
+
+    def _pool(self, outputs: Any, attention_mask: Any) -> Any:
+        torch = self._torch
+        if torch is None:
+            raise RuntimeError("local transformers embedding model is not loaded")
+
+        last_hidden = outputs.last_hidden_state.float()
+        if self._pooling == "cls":
+            return last_hidden[:, 0]
+        if self._pooling == "max":
+            mask = attention_mask.unsqueeze(-1).to(last_hidden.dtype)
+            masked = last_hidden.masked_fill(mask == 0, -1e9)
+            return masked.max(dim=1).values
+
+        mask = attention_mask.unsqueeze(-1).to(last_hidden.dtype)
+        return (last_hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        self._load()
+        if not texts:
+            return np.empty((0, self.output_dimensions), dtype=float)
+
+        torch = self._torch
+        tokenizer = self._tokenizer
+        model = self._model
+        if torch is None or tokenizer is None or model is None:
+            raise RuntimeError("local transformers embedding model is not loaded")
+
+        max_length = self.config.max_token_size or self.config.max_model_len or 8192
+        batch_size = max(1, self.config.batch_size)
+        chunks: list[np.ndarray] = []
+        for offset in range(0, len(texts), batch_size):
+            batch_texts = texts[offset : offset + batch_size]
+            batch = tokenizer(
+                batch_texts,
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+                return_tensors="pt",
+            )
+            batch = {key: value.to(self._device) for key, value in batch.items()}
+
+            with torch.inference_mode():
+                outputs = model(**batch)
+                if self._device.startswith("npu"):
+                    torch.npu.synchronize()
+                embeddings = self._pool(outputs, batch["attention_mask"])
+                if self.config.dimensions is not None:
+                    embeddings = embeddings[:, : self.config.dimensions]
+                if self.config.normalize_embeddings:
+                    embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+            chunks.append(embeddings.detach().cpu().numpy().astype(float))
+        return np.concatenate(chunks, axis=0)
+
+    def close(self) -> None:
+        self._model = None
+        self._tokenizer = None
+        self._torch = None
+        self._loaded = False
+
+
+def _install_local_transformers_embedding_function(
+    config: MepEmbeddingLaunchConfig,
+) -> Callable[[], None]:
+    from .llm import openai as openai_module
+
+    previous_openai_embed = openai_module.openai_embed
+    embedder = _LocalTransformersEmbeddingModel(config)
+
+    async def local_transformers_embed(
+        texts: list[str],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> np.ndarray:
+        return await asyncio.to_thread(embedder.embed, list(texts))
+
+    local_transformers_embed.embedding_dim = embedder.output_dimensions  # type: ignore[attr-defined]
+    local_transformers_embed.max_token_size = (  # type: ignore[attr-defined]
+        config.max_token_size or config.max_model_len or 8192
+    )
+    openai_module.openai_embed = local_transformers_embed
+
+    def cleanup() -> None:
+        openai_module.openai_embed = previous_openai_embed
+        embedder.close()
+
+    return cleanup
+
+
+def _bootstrap_local_transformers_embedding_runtime(
+    config: MepEmbeddingLaunchConfig,
+) -> LocalEmbeddingRuntime:
+    cleanup_callback = _install_local_transformers_embedding_function(config)
+    runtime = LocalEmbeddingRuntime(
+        config=config,
+        process=None,
+        launch_command=("local-transformers", str(config.model_path)),
+        log_path=Path(os.devnull),
+        cleanup_callback=cleanup_callback,
+    )
+    runtime.apply_environment()
+    logger.info(
+        "Local transformers embedding runtime is ready. model=%s model_path=%s device=%s",
+        config.served_model_name,
+        config.model_path,
+        config.device or "auto",
+    )
+    return runtime
+
+
 def bootstrap_local_embedding_runtime(
     model_dir: str | os.PathLike[str],
     *,
@@ -1191,6 +1489,14 @@ def bootstrap_local_embedding_runtime(
         return None
 
     config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+    if config.runtime in {"transformers", "local_transformers", "local-transformers"}:
+        return _bootstrap_local_transformers_embedding_runtime(config)
+    if config.runtime != "vllm":
+        raise ValueError(
+            f"Unsupported embedding runtime: {config.runtime!r}. "
+            "Use one of: vllm | transformers"
+        )
+
     _ensure_vllm_runtime_dependencies(config)
     launch_errors: list[str] = []
     for command in build_vllm_command_candidates(config):

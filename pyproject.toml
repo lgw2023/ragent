@@ -13,7 +13,7 @@ description = "Ragent: Dynamic and Intelligent RAG via Agent Architecture"
 #-->> ended by acs
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
@@ -115,4 +115,4 @@ include-package-data = true
 version = {attr = "ragent.__version__"}
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py39"
