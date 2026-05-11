@@ -10,7 +10,11 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 from types import SimpleNamespace
 
-from mep_dependency_bootstrap import bootstrap_mep_data_dependencies
+import mep_dependency_bootstrap
+from mep_dependency_bootstrap import (
+    bootstrap_mep_data_dependencies,
+    ensure_mep_offline_requirements,
+)
 
 
 def test_root_component_files_exist():
@@ -310,6 +314,92 @@ def test_mep_data_dependency_bootstrap_skips_native_wheel_zipimport(
     assert str(native_wheel.resolve()) not in added_paths
 
 
+def test_mep_offline_requirements_install_uses_platform_wheelhouse(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    deps_dir = runtime_root / "data" / "deps"
+    wheelhouse = deps_dir / "wheelhouse" / "test-platform"
+    wheelhouse.mkdir(parents=True)
+    (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake")
+    requirements = deps_dir / "requirements-test-platform.txt"
+    requirements.write_text("demo-dep\n", encoding="utf-8")
+    constraints = deps_dir / "constraints-test-platform.txt"
+    constraints.write_text("demo-dep==1.0.0\n", encoding="utf-8")
+
+    commands: list[list[str]] = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "ok"
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return FakeCompleted()
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_OFFLINE_PIP_INSTALL", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setattr(mep_dependency_bootstrap, "_OFFLINE_REQUIREMENTS_DONE", set())
+    monkeypatch.setattr(mep_dependency_bootstrap.subprocess, "run", fake_run)
+    monkeypatch.setattr(mep_dependency_bootstrap.site, "addsitedir", lambda _: None)
+
+    installed = ensure_mep_offline_requirements(component_dir)
+
+    assert installed == (str(requirements.resolve()),)
+    assert len(commands) == 1
+    command = commands[0]
+    assert command[:5] == [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+    ]
+    assert "--no-index" in command
+    assert command[command.index("--find-links") + 1] == str(wheelhouse.resolve())
+    assert command[command.index("-c") + 1] == str(constraints.resolve())
+    assert command[command.index("-r") + 1] == str(requirements.resolve())
+
+
+def test_mep_offline_requirements_install_can_be_disabled(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    deps_dir = runtime_root / "data" / "deps"
+    wheelhouse = deps_dir / "wheelhouse" / "test-platform"
+    wheelhouse.mkdir(parents=True)
+    (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake")
+    (deps_dir / "requirements-test-platform.txt").write_text(
+        "demo-dep\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setenv("RAGENT_MEP_OFFLINE_PIP_INSTALL", "0")
+    monkeypatch.setattr(
+        mep_dependency_bootstrap.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected pip")),
+    )
+
+    assert ensure_mep_offline_requirements(component_dir) == ()
+
+
 def test_package_json_uses_non_placeholder_scope():
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -321,7 +411,7 @@ def test_package_json_uses_non_placeholder_scope():
     assert package["name"] == "ragent_inference_mep"
 
 
-def test_bge_m3_embedding_properties_match_validated_vllm_ascend_runtime():
+def test_bge_m3_embedding_properties_match_validated_transformers_runtime():
     repo_root = Path(__file__).resolve().parents[1]
     config_path = (
         repo_root
@@ -342,23 +432,13 @@ def test_bge_m3_embedding_properties_match_validated_vllm_ascend_runtime():
         properties[key] = value
 
     assert properties["model.relative_path"] == "."
-    assert properties["vllm.launch_mode"] == "module"
-    assert properties["vllm.runner"] == "pooling"
-    assert properties["vllm.served_model_name"] == "BAAI-bge-m3"
-    assert properties["vllm.bind_host"] == "0.0.0.0"
-    assert properties["vllm.host"] == "127.0.0.1"
-    assert properties["vllm.port"] == "8000"
-    assert properties["vllm.max_model_len"] == "8192"
-    assert properties["vllm.extra_args"] == "--dtype auto"
-    assert properties["vllm.uninstall_packages"] == "vllm,vllm-ascend"
-    assert (
-        properties["vllm.install_requirements"]
-        == "cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0"
-    )
-    assert properties["vllm.install_all_wheelhouse_wheels"] == "true"
-    assert properties["vllm.env.ASCEND_RT_VISIBLE_DEVICES"] == "0"
-    assert properties["vllm.env.VLLM_LOGGING_LEVEL"] == "DEBUG"
-    assert properties["vllm.env.VLLM_PLUGINS"] == "ascend"
+    assert properties["embedding.runtime"] == "transformers"
+    assert properties["embedding.dimensions"] == "256"
+    assert properties["embedding.max_token_size"] == "8192"
+    assert properties["embedding.device"] == "npu:0"
+    assert properties["embedding.pooling"] == "cls"
+    assert properties["embedding.normalize"] == "true"
+    assert properties["embedding.batch_size"] == "8"
 
 
 def test_root_process_exports_customer_model():

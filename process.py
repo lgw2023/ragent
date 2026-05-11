@@ -10,9 +10,13 @@ _CODE_ROOT = Path(__file__).resolve().parent
 if str(_CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(_CODE_ROOT))
 
-from mep_dependency_bootstrap import bootstrap_mep_data_dependencies  # noqa: E402
+from mep_dependency_bootstrap import (  # noqa: E402
+    bootstrap_mep_data_dependencies,
+    ensure_mep_offline_requirements,
+)
 
 
+ensure_mep_offline_requirements(_CODE_ROOT)
 bootstrap_mep_data_dependencies(_CODE_ROOT)
 if str(_CODE_ROOT) in sys.path:
     sys.path.remove(str(_CODE_ROOT))

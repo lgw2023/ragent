@@ -81,6 +81,52 @@ def test_bootstrap_local_embedding_runtime_skips_when_external_api_is_configured
     assert runtime is None
 
 
+def test_bootstrap_local_embedding_runtime_uses_transformers_runtime(
+    monkeypatch,
+    tmp_path: Path,
+):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    (data_dir / "config").mkdir(parents=True)
+    (data_dir / "config" / "embedding.properties").write_text(
+        "\n".join(
+            [
+                "model.name=BAAI/bge-m3",
+                "model.relative_path=.",
+                "embedding.runtime=transformers",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    sentinel = object()
+    seen: dict[str, object] = {}
+
+    def fake_bootstrap(config):
+        seen["config"] = config
+        return sentinel
+
+    monkeypatch.setattr(
+        mep_embedding_runtime,
+        "_bootstrap_local_transformers_embedding_runtime",
+        fake_bootstrap,
+    )
+    monkeypatch.setattr(
+        mep_embedding_runtime,
+        "_ensure_vllm_runtime_dependencies",
+        lambda _config: (_ for _ in ()).throw(AssertionError("unexpected vLLM setup")),
+    )
+
+    runtime = bootstrap_local_embedding_runtime(model_dir, data_dir=data_dir)
+
+    assert runtime is sentinel
+    assert seen["config"].runtime == "transformers"
+
+
 def test_resolve_embedding_launch_config_reads_sysconfig(tmp_path: Path):
     model_dir = tmp_path / "model"
     embedding_root = _write_embedding_bundle(model_dir)
@@ -149,6 +195,42 @@ def test_resolve_embedding_launch_config_prefers_data_config(tmp_path: Path):
     assert config.port == 8000
     assert config.dimensions == 1024
     assert config.config_path == config_path.resolve()
+
+
+def test_resolve_embedding_launch_config_reads_transformers_runtime(tmp_path: Path):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    (data_dir / "config").mkdir(parents=True)
+    (data_dir / "config" / "embedding.properties").write_text(
+        "\n".join(
+            [
+                "model.name=BAAI/bge-m3",
+                "model.relative_path=.",
+                "embedding.runtime=transformers",
+                "embedding.device=npu:0",
+                "embedding.batch_size=16",
+                "embedding.pooling=cls",
+                "embedding.normalize=true",
+                "embedding.trust_remote_code=false",
+                "embedding.dimensions=256",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_embedding_launch_config(model_dir, data_dir=data_dir)
+
+    assert config.runtime == "transformers"
+    assert config.device == "npu:0"
+    assert config.batch_size == 16
+    assert config.pooling == "cls"
+    assert config.normalize_embeddings is True
+    assert config.trust_remote_code is False
+    assert config.dimensions == 256
 
 
 def test_resolve_embedding_launch_config_env_overrides_data_config(

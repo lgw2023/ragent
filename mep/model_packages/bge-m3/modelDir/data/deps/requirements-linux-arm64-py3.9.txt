@@ -1,0 +1,18 @@
+# Top-level Python packages that are not reliably present in the target
+# Python 3.9/aarch64 MEP image.
+#
+# Install offline with:
+#   python3 -m pip install --no-index \
+#     --find-links data/deps/wheelhouse/linux-arm64-py3.9 \
+#     -c data/deps/constraints-linux-arm64-py3.9.txt \
+#     -r data/deps/requirements-linux-arm64-py3.9.txt
+configparser
+dotenv
+future
+litellm
+nano-vectordb
+openai
+pipmaster
+pyuca
+tenacity
+tiktoken

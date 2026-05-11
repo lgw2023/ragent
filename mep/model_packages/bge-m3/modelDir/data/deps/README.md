@@ -1,9 +1,21 @@
 # data/deps
 
-Place MEP image-specific runtime dependencies here when the target vLLM image
-does not already include them. This directory is part of the model package's
-read-only `data/` payload, so it is available even when the MEP server has no
+Place MEP image-specific runtime dependencies here when the target image does
+not already include them. This directory is part of the model package's
+read-only `data/` payload, so it is available when the MEP server has no
 network access.
+
+The current target image is:
+
+```text
+swr.cn-southwest-2.myhuaweicloud.com/mep-dev-ga/mep-vllm-ascend:11.3.10.300.2
+```
+
+Its effective Python platform tag is:
+
+```text
+linux-arm64-py3.9
+```
 
 Supported local bootstrap paths:
 
@@ -12,67 +24,47 @@ Supported local bootstrap paths:
 - `python/`
 - `keyword_wheelhouse/<platform-tag>/*.whl`
 - `wheelhouse/<platform-tag>/*.whl`
-- `wheelhouse/<platform-tag>/*.tar.gz`
 - `wheelhouse/*.whl` for legacy flat pure-Python wheels
 
-`<platform-tag>` uses `linux-arm64-py3.10` style tags. The current MEP Ascend
-910B target image is `linux-arm64-py3.10`.
+At startup, `process.py` first calls `mep_dependency_bootstrap.py` before
+importing `ragent`. The bootstrap does two things:
 
-At startup the component checks platform-specific directories first, then the
-legacy flat directories. `site-packages/<platform-tag>/` is intentionally loaded
-before any wheelhouse path. Only pure-Python wheels are directly zipimported from
-`wheelhouse/`; native wheels with `.so`, `.pyd`, `.dll`, or `.dylib` payloads and
-source archives such as `.tar.gz` are left for an offline `pip install` repair
-step or a pre-expanded `site-packages/<platform-tag>/` tree. A pure-Python wheel
-is skipped only when the same distribution and exact version are already
-installed in the target image or the pre-expanded site-packages tree. Set
-`RAGENT_MEP_FORCE_WHEELHOUSE=1` to force pure-Python wheels into the bootstrap
-path.
+1. It runs an offline pip install when a matching
+   `requirements-<platform-tag>.txt` file exists:
 
-`keyword_wheelhouse/<platform-tag>/` is reserved for no-LLM keyword fallback
-dependencies such as GLiNER, Stanza, and ONNX Runtime. Keeping this separate
-prevents keyword extraction packages from changing the validated Ascend vLLM
-repair wheelhouse. The full-chain validation installs this wheelhouse with
-`--no-index --no-deps` before running retrieval-only requests.
+   ```bash
+   python3 -m pip install --no-index \
+     --find-links data/deps/wheelhouse/linux-arm64-py3.9 \
+     -c data/deps/constraints-linux-arm64-py3.9.txt \
+     -r data/deps/requirements-linux-arm64-py3.9.txt
+   ```
 
-Use `wheelhouse/<platform-tag>/` for universal pure-Python wheels and for native
-wheel/source archive artifacts that are installed by a configured offline repair
-step. Other compiled packages should be unpacked or installed into a compatible
-`site-packages/<platform-tag>/` tree for the target image.
+   Already installed packages with matching versions are skipped by pip. This
+   path handles native wheels such as `tiktoken`, `jiter`, and `fastuuid`.
 
-Some pure-Python wheels are still unsafe to import directly from a zip because
-they rely on namespace-package subdirectories. The build and export scripts run
-`tools/mep_site_packages.py` to pre-extract `litellm` and `openai` into
-`site-packages/<platform-tag>/`; this prevents `litellm.types` from depending on
-zipimport behavior during MEP worker startup.
+2. It adds pure-Python dependency paths to `sys.path` as a fallback. Native
+   wheels with `.so`, `.pyd`, `.dll`, or `.dylib` payloads are not zipimported.
 
-The bge-m3 embedding config uses this wheelhouse to repair the validated vLLM
-stack before launch. It reinstalls all wheel files from the matching
-platform-specific wheelhouse with `--no-deps`, so dependencies are restored as
-the exact exported wheels instead of being re-resolved. `cbor2==5.9.0`,
-`triton-ascend==3.2.0`, `vllm==0.13.0`, and `vllm-ascend==0.13.0` are still
-validated as required repair artifacts.
+`image-baseline-constraints-linux-arm64-py3.9.txt` pins the package versions
+observed in the target image, especially `torch`, `torch_npu`, `transformers`,
+`tokenizers`, `numpy`, and `huggingface-hub`. This prevents the resolver from
+silently replacing the tested Ascend/transformers stack.
 
-For the validated Ascend 910B vLLM embedding image, export exact `cp310`
-`aarch64` wheels with:
+`constraints-linux-arm64-py3.9.txt` is the final resolved constraints file. It
+keeps the image baseline pins and adds the latest compatible versions for the
+missing application dependencies.
+
+Regenerate the wheelhouse and constraints with:
 
 ```bash
-python tools/export_mep_vllm_ascend_wheelhouse.py
+python tools/export_mep_transformers_embedding_wheelhouse.py --clean
 ```
 
-Export the GLiNER keyword fallback model snapshot and keyword wheelhouse with:
+The exporter writes `manifest.json` and `downloaded-wheels.txt` beside the
+wheel files. Pass `--index-url` or `--extra-index-url` when using an internal
+PyPI mirror.
 
-```bash
-python tools/export_mep_keyword_fallback_assets.py
-```
-
-The exporter writes `manifest.json`, `downloaded-wheels.txt`,
-`source-archives.txt`, `downloaded-artifacts.txt`, `failed-requirements.txt`, and
-`local-file-requirements.txt` beside the artifacts.
-`@ file://...whl` entries under `/tmp/ragent-mep-test` are resolved from the
-configured package indexes by default; this covers `triton-ascend==3.2.0` from
-the validated startup repair step. Other image-internal `file://` entries are
-recorded as image-provided by default and are not downloaded. Use
-`--local-wheel-dir <dir>` when those wheels were downloaded separately, or
-`--resolve-local-file-wheels` to explicitly resolve all local wheel entries from
-configured package indexes.
+`keyword_wheelhouse/<platform-tag>/` remains reserved for no-LLM keyword
+fallback dependencies such as GLiNER, Stanza, and ONNX Runtime. Keep it separate
+from the embedding/application wheelhouse so keyword extraction packages do not
+change the validated BGE-M3 embedding runtime.

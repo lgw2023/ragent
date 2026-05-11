@@ -6,9 +6,9 @@
 
 - `modelDir/meta/type.mf`：MEP 模型包必需的元信息占位文件
 - `modelDir/model/`：`BAAI/bge-m3` 运行所需的 Hugging Face 模型目录，`config.json`、`tokenizer.json`、`pytorch_model.bin` 和 `1_Pooling/` 直接放在这里
-- `modelDir/data/config/embedding.properties`：组件侧读取的本地 embedding/vLLM 启动配置
+- `modelDir/data/config/embedding.properties`：组件侧读取的本地 embedding 启动配置
 - `modelDir/data/kg/sample_kg/`：示例 KG 快照
-- `modelDir/data/deps/`：vLLM 镜像缺少的自定义只读依赖包；当前目标 MEP 镜像无网络时，应把离线 wheelhouse 放在这里
+- `modelDir/data/deps/`：目标镜像缺少的自定义只读依赖包；当前目标 MEP 镜像无网络时，应把离线 wheelhouse 放在这里
 - `modelDir/data/samples/sample.json`：可选的请求样例
 
 本仓库中的组件包默认假设模型包和组件包在 MEP 上会被解压到同一个父目录下，因此 `process.py` 会按平台习惯从相对路径 `../model` 读取模型目录。
@@ -16,54 +16,39 @@
 本模型包的运行约定：
 
 - 如果 `EMBEDDING_MODEL`、`EMBEDDING_MODEL_URL`、`EMBEDDING_MODEL_KEY` 都已由环境变量提供，则组件继续走外部 embedding API
-- 如果没有提供完整的 embedding API 配置，则组件会在 `CustomerModel.load()` 阶段读取 `data/config/embedding.properties`，用 Python 子进程方式拉起本地 vLLM OpenAI-compatible embedding 服务
-- 服务成功拉起后，现有知识图谱 inference 链路仍然复用原先的 `openai_embed` 调用，只是目标地址切到本地 vLLM
+- 如果没有提供完整的 embedding API 配置，则组件会在 `CustomerModel.load()` 阶段读取 `data/config/embedding.properties`，用本地 `transformers + torch_npu` 直接加载 BGE-M3
+- 本地 embedding 函数会注入到现有 `openai_embed` 调用链路，知识图谱 inference 代码不需要再感知 vLLM 或 OpenAI-compatible embedding server
 
-当前 `embedding.properties` 已按验证通过的 Ascend 910B 镜像配置固定为：
+当前 `embedding.properties` 已按验证通过的 Ascend 910B Python 3.9 镜像配置固定为：
 
 ```text
 model.relative_path=.
-vllm.launch_mode=module
-vllm.runner=pooling
-vllm.served_model_name=BAAI-bge-m3
-vllm.bind_host=0.0.0.0
-vllm.host=127.0.0.1
-vllm.port=8000
-vllm.max_model_len=8192
-vllm.extra_args=--dtype auto
-vllm.uninstall_packages=vllm,vllm-ascend
-vllm.install_requirements=cbor2==5.9.0,triton-ascend==3.2.0,vllm==0.13.0,vllm-ascend==0.13.0
-vllm.install_no_deps=true
-vllm.install_force_reinstall=true
-vllm.install_all_wheelhouse_wheels=true
-vllm.env.ASCEND_RT_VISIBLE_DEVICES=0
-vllm.env.VLLM_LOGGING_LEVEL=DEBUG
-vllm.env.VLLM_PLUGINS=ascend
+embedding.runtime=transformers
+embedding.dimensions=256
+embedding.max_token_size=8192
+embedding.device=npu:0
+embedding.pooling=cls
+embedding.normalize=true
+embedding.batch_size=8
 ```
 
-`vllm.bind_host` 对齐验证脚本中的 vLLM `--host 0.0.0.0`；`vllm.host` 是组件调用 `/v1/embeddings` 时使用的本地回连地址。`vllm.api_key=EMPTY` 只用于满足 ragent 侧调用参数，只有配置为真实 key 时才会传给 vLLM `--api-key`。
+组件加载本地 transformers 模型前会自动尝试加载 `/usr/local/Ascend/ascend-toolkit/set_env.sh` 和 `/usr/local/Ascend/nnal/atb/set_env.sh`。当前权威测试显示，仅 `/usr/local/Ascend/ascend-toolkit/set_env.sh` 就能让 `torch.npu.is_available()` 为 true。如目标镜像路径不同，可通过 `RAGENT_ASCEND_SET_ENV_SH` 或 `RAGENT_ASCEND_ENV_SHS` 覆盖。
 
-组件拉起 vLLM 前会从模型包 `data/deps/wheelhouse/<platform-tag>/` 离线重装所有 wheel，以恢复验证环境中的二进制依赖组合；`cbor2==5.9.0`、`triton-ascend==3.2.0`、`vllm==0.13.0`、`vllm-ascend==0.13.0` 仍作为关键修复包校验项。这里保留 `vllm.install_no_deps=true`，因为依赖已经作为显式 wheel 一并安装，不能再让 pip resolver 把 Ascend 需要的 `torch==2.8.0` 解成 vLLM 元数据里的其他版本。
-
-组件启动 vLLM 子进程前会自动尝试加载 `/usr/local/Ascend/ascend-toolkit/set_env.sh` 和 `/usr/local/Ascend/nnal/atb/set_env.sh`。如目标镜像路径不同，可通过 `RAGENT_ASCEND_SET_ENV_SH` 或 `RAGENT_ASCEND_ENV_SHS` 覆盖。
-
-目标 MEP Ascend 910B 镜像是 `linux-arm64-py3.10`。离线依赖放置约定：
+目标 MEP Ascend 910B 镜像是 `linux-arm64-py3.9`。离线依赖放置约定：
 
 ```text
-modelDir/data/deps/wheelhouse/linux-arm64-py3.10/*.whl
-modelDir/data/deps/wheelhouse/linux-arm64-py3.10/*.tar.gz
-modelDir/data/deps/site-packages/linux-arm64-py3.10/
+modelDir/data/deps/requirements-linux-arm64-py3.9.txt
+modelDir/data/deps/constraints-linux-arm64-py3.9.txt
+modelDir/data/deps/wheelhouse/linux-arm64-py3.9/*.whl
 ```
 
-组件启动时会优先加载匹配平台标签的 `site-packages` 目录，再处理 wheelhouse。打包和离线导出脚本会运行 `tools/mep_site_packages.py`，把 `litellm`、`openai` 这类启动链路会用到且不适合直接 zipimport 的纯 Python wheel 预解压到 `site-packages/linux-arm64-py3.10/`。native vLLM wheel 和 sdist/source archive 不会直接加到 `sys.path`，而是通过上面的离线 `pip install` 修复步骤安装。纯 Python wheel 仅在目标镜像或预解压目录中已经安装且版本完全一致时跳过；需要强制加入模型包内纯 Python wheel 时，可设置 `RAGENT_MEP_FORCE_WHEELHOUSE=1`。
+组件启动时会优先用 `requirements/constraints/wheelhouse` 执行一次 `pip install --no-index`，已安装且版本一致的镜像包会被跳过，缺失的应用层依赖和 native wheel 会从本地 wheelhouse 安装。之后才加载匹配平台标签的 `site-packages`、`pythonpath` 和可 zipimport 的纯 Python wheel。
 
-如需按已验证容器环境导出精确 wheelhouse：
+如需按 Python 3.9/aarch64 重新解析并导出 wheelhouse：
 
 ```bash
-python /Volumes/SSD1/ragent/tools/export_mep_vllm_ascend_wheelhouse.py
+python /Volumes/SSD1/ragent/tools/export_mep_transformers_embedding_wheelhouse.py --clean
 ```
-
-导出依据是 `MEP_platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt`。导出器会额外补入 `cbor2==5.9.0`，并记录 wheel、手工补入的 `.tar.gz` source archive、失败项和本地 `file://` 条目。`@ file://...whl` 形式的条目中，`/tmp/ragent-mep-test` 前缀会默认从索引解析下载；这覆盖启动修复步骤需要的 `triton-ascend==3.2.0`。`/home/mep/...` 和 `/usr/local/Ascend/...` 这类镜像内置路径默认只记录不下载。若这些 wheel 已单独下载到某个目录，可追加 `--local-wheel-dir <dir>` 复制；若确实需要从索引解析全部本地 wheel，可追加 `--resolve-local-file-wheels`。
 
 本地模拟 MEP 组件时，推荐先生成平台形态运行时目录：
 

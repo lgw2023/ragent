@@ -164,6 +164,9 @@ def materialize_model_site_packages(
 
     manifests: list[dict[str, Any]] = []
     for wheelhouse_dir in wheelhouse_dirs:
+        requirements_file = deps_dir / f"requirements-{wheelhouse_dir.name}.txt"
+        if requirements_file.is_file():
+            continue
         target_dir = deps_dir / "site-packages" / wheelhouse_dir.name
         manifest = materialize_wheelhouse_site_packages(
             wheelhouse_dir=wheelhouse_dir,
