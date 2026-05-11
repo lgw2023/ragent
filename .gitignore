@@ -51,3 +51,4 @@ htmlcov/
 
 .env_bak
 .env_onehop
+pytorch_model.bin
