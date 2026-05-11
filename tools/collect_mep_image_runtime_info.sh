@@ -33,7 +33,12 @@ INCLUDE_RAW_DOCKER_JSON="${INCLUDE_RAW_DOCKER_JSON:-0}"
 INCLUDE_SECRET_VALUES="${INCLUDE_SECRET_VALUES:-0}"
 
 ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0-7}"
+ASCEND_ENV_SCRIPTS="${ASCEND_ENV_SCRIPTS:-/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/bin/setenv.bash /usr/local/Ascend/nnal/atb/set_env.sh}"
 START_COMMAND="${START_COMMAND:-while true; do sleep 3600; done}"
+RUN_VLLM_EMBEDDING_SMOKE="${RUN_VLLM_EMBEDDING_SMOKE:-0}"
+VLLM_SMOKE_MODEL_PATH="${VLLM_SMOKE_MODEL_PATH:-/tmp/ragent-project/mep/model_packages/bge-m3/modelDir/model}"
+VLLM_SMOKE_PORT="${VLLM_SMOKE_PORT:-8000}"
+VLLM_SMOKE_TIMEOUT_SECONDS="${VLLM_SMOKE_TIMEOUT_SECONDS:-300}"
 NO_PROXY_DEFAULT="localhost,127.0.0.1,::1,*.huawei.com,*.huaweicloud.com"
 http_proxy="${http_proxy:-}"
 https_proxy="${https_proxy:-}"
@@ -94,7 +99,7 @@ sanitize_file_in_place() {
       }
       print line
     }
-  ' "$path" >"$tmp_path"
+  ' "$path" | sed -E 's#(https?|ftp)://[^/@[:space:]]+@#\1://<redacted>@#g' >"$tmp_path"
   mv "$tmp_path" "$path"
 }
 
@@ -119,7 +124,9 @@ write_summary() {
     echo "- container/probe/pip_freeze.txt"
     echo "- container/probe/pip_key_packages.txt"
     echo "- container/probe/vllm_probe.txt"
+    echo "- container/probe/vllm_probe_after_ascend_env.txt"
     echo "- container/probe/ascend_probe.txt"
+    echo "- container/probe/ascend_env_after_source.txt"
     echo "- container/probe/mep_env.txt"
     echo "- container/probe/mep_paths.txt"
     echo "- project/project_context.txt"
@@ -197,7 +204,7 @@ fi
 step "Collect image metadata"
 capture "$OUTPUT_DIR/docker/image_history.txt" docker image history --no-trunc "$IMAGE"
 capture "$OUTPUT_DIR/docker/image_inspect_summary.txt" docker image inspect \
-  --format $'Id={{.Id}}\nRepoTags={{json .RepoTags}}\nRepoDigests={{json .RepoDigests}}\nCreated={{.Created}}\nArchitecture={{.Architecture}}\nOs={{.Os}}\nSize={{.Size}}\nUser={{.Config.User}}\nWorkingDir={{.Config.WorkingDir}}\nEntrypoint={{json .Config.Entrypoint}}\nCmd={{json .Config.Cmd}}\nExposedPorts={{json .Config.ExposedPorts}}\nVolumes={{json .Config.Volumes}}\nLabels={{json .Config.Labels}}\nEnv={{json .Config.Env}}' \
+  --format $'Id={{.Id}}\nRepoTags={{json .RepoTags}}\nRepoDigests={{json .RepoDigests}}\nCreated={{.Created}}\nArchitecture={{.Architecture}}\nOs={{.Os}}\nSize={{.Size}}\nConfig={{json .Config}}' \
   "$IMAGE"
 sanitize_file_in_place "$OUTPUT_DIR/docker/image_inspect_summary.txt"
 if [ "$INCLUDE_RAW_DOCKER_JSON" = "1" ]; then
@@ -225,6 +232,7 @@ if ! docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     --ipc=host
     --pids-limit 409600
     -e "ASCEND_VISIBLE_DEVICES=$ASCEND_VISIBLE_DEVICES"
+    -e "ASCEND_ENV_SCRIPTS=$ASCEND_ENV_SCRIPTS"
     -e "http_proxy=$http_proxy"
     -e "https_proxy=$https_proxy"
     -e "ftp_proxy=$ftp_proxy"
@@ -257,6 +265,7 @@ if ! docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     printf ' %q' "${docker_run_cmd[@]}"
     printf '\n'
   } >"$OUTPUT_DIR/docker/docker_run_command.txt"
+  sanitize_file_in_place "$OUTPUT_DIR/docker/docker_run_command.txt"
   "${docker_run_cmd[@]}" >/dev/null
 fi
 
@@ -278,12 +287,23 @@ step "Run read-only probe inside container"
 docker exec -i \
   -e "RAGENT_MEP_PROBE_DIR=$CONTAINER_PROBE_DIR" \
   -e "INCLUDE_SECRET_VALUES=$INCLUDE_SECRET_VALUES" \
+  -e "ASCEND_ENV_SCRIPTS=$ASCEND_ENV_SCRIPTS" \
+  -e "RUN_VLLM_EMBEDDING_SMOKE=$RUN_VLLM_EMBEDDING_SMOKE" \
+  -e "VLLM_SMOKE_MODEL_PATH=$VLLM_SMOKE_MODEL_PATH" \
+  -e "VLLM_SMOKE_PORT=$VLLM_SMOKE_PORT" \
+  -e "VLLM_SMOKE_TIMEOUT_SECONDS=$VLLM_SMOKE_TIMEOUT_SECONDS" \
   "$CONTAINER_NAME" \
   /bin/bash -s <<'CONTAINER_SCRIPT'
 set +e
 
 PROBE_DIR="${RAGENT_MEP_PROBE_DIR:-/tmp/ragent-mep-image-probe}"
 INCLUDE_SECRET_VALUES="${INCLUDE_SECRET_VALUES:-0}"
+ASCEND_ENV_SCRIPTS="${ASCEND_ENV_SCRIPTS:-/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/bin/setenv.bash /usr/local/Ascend/nnal/atb/set_env.sh}"
+RUN_VLLM_EMBEDDING_SMOKE="${RUN_VLLM_EMBEDDING_SMOKE:-0}"
+VLLM_SMOKE_MODEL_PATH="${VLLM_SMOKE_MODEL_PATH:-/tmp/ragent-project/mep/model_packages/bge-m3/modelDir/model}"
+VLLM_SMOKE_PORT="${VLLM_SMOKE_PORT:-8000}"
+VLLM_SMOKE_TIMEOUT_SECONDS="${VLLM_SMOKE_TIMEOUT_SECONDS:-300}"
+export ASCEND_ENV_SCRIPTS RUN_VLLM_EMBEDDING_SMOKE VLLM_SMOKE_MODEL_PATH VLLM_SMOKE_PORT VLLM_SMOKE_TIMEOUT_SECONDS
 rm -rf "$PROBE_DIR"
 mkdir -p "$PROBE_DIR"
 
@@ -323,8 +343,21 @@ sanitize_file_in_place() {
       }
       print line
     }
-  ' "$path" >"$tmp_path"
+  ' "$path" | sed -E 's#(https?|ftp)://[^/@[:space:]]+@#\1://<redacted>@#g' >"$tmp_path"
   mv "$tmp_path" "$path"
+}
+
+source_ascend_env() {
+  local path
+  for path in $ASCEND_ENV_SCRIPTS; do
+    if [ -f "$path" ]; then
+      echo "source $path"
+      # shellcheck disable=SC1090
+      source "$path"
+    else
+      echo "missing $path"
+    fi
+  done
 }
 
 capture_shell system.txt '
@@ -399,6 +432,27 @@ capture_shell ascend_probe.txt '
   done
 '
 
+capture_shell ascend_env_after_source.txt '
+  source_ascend_env() {
+    local path
+    for path in $ASCEND_ENV_SCRIPTS; do
+      if [ -f "$path" ]; then
+        echo "source $path"
+        # shellcheck disable=SC1090
+        source "$path"
+      else
+        echo "missing $path"
+      fi
+    done
+  }
+  source_ascend_env
+  printf "\n--- env after source ---\n"
+  env | sort | grep -E "^(ASCEND_|ATB_|HCCL_|NPU_|TORCH_|VLLM_|LD_LIBRARY_PATH|PATH=|PYTHONPATH=)" || true
+  printf "\n--- npu-smi after source ---\n"
+  command -v npu-smi >/dev/null 2>&1 && npu-smi info || true
+'
+sanitize_file_in_place "$PROBE_DIR/ascend_env_after_source.txt"
+
 capture_shell python.txt '
   for python_bin in python3 python python3.10 /usr/local/python3.10.2/bin/python3; do
     if command -v "$python_bin" >/dev/null 2>&1 || [ -x "$python_bin" ]; then
@@ -443,7 +497,8 @@ packages = [
 ]
 for name in packages:
     spec = importlib.util.find_spec(name)
-    print(f"module {name}: {spec.origin if spec else 'missing'}")
+    origin = spec.origin if spec else "missing"
+    print(f"module {name}: {origin}")
 PY
     fi
   done
@@ -488,6 +543,120 @@ PY
     fi
   done
 '
+
+capture_shell vllm_probe_after_ascend_env.txt '
+  source_ascend_env() {
+    local path
+    for path in $ASCEND_ENV_SCRIPTS; do
+      if [ -f "$path" ]; then
+        echo "source $path"
+        # shellcheck disable=SC1090
+        source "$path"
+      else
+        echo "missing $path"
+      fi
+    done
+  }
+  source_ascend_env
+  printf "\n--- vLLM command discovery ---\n"
+  command -v vllm || true
+  command -v vllm >/dev/null 2>&1 && timeout 30 vllm --help 2>&1 | sed -n "1,240p" || true
+  for python_bin in python3 python3.10 /usr/local/python3.10.2/bin/python3 python; do
+    if command -v "$python_bin" >/dev/null 2>&1 || [ -x "$python_bin" ]; then
+      printf "\n----- %s import/version/entrypoints after Ascend env -----\n" "$python_bin"
+      "$python_bin" - <<PY
+import importlib
+try:
+    from importlib import metadata
+except ImportError:
+    import importlib_metadata as metadata
+
+mods = ["vllm", "vllm_npu", "vllm_ascend", "torch", "torch_npu"]
+for name in mods:
+    try:
+        mod = importlib.import_module(name)
+        print(name, "version=", getattr(mod, "__version__", "unknown"), "file=", getattr(mod, "__file__", "unknown"))
+    except Exception as exc:
+        print(name, "import_error=", repr(exc))
+
+for dist_name in ("vllm", "vllm-npu", "vllm_npu", "vllm-ascend", "torch", "torch-npu"):
+    try:
+        dist = metadata.distribution(dist_name)
+    except Exception as exc:
+        print("dist", dist_name, "missing_or_error=", repr(exc))
+        continue
+    print("dist", dist_name, "version=", dist.version)
+    for ep in dist.entry_points:
+        if ep.group == "console_scripts" or "vllm" in ep.name.lower():
+            print("entry_point", ep.group, ep.name, ep.value)
+PY
+      printf "\n----- %s openai.api_server help after Ascend env -----\n" "$python_bin"
+      timeout 30 "$python_bin" -m vllm.entrypoints.openai.api_server --help 2>&1 | sed -n "1,260p" || true
+      printf "\n----- %s api_server help after Ascend env -----\n" "$python_bin"
+      timeout 30 "$python_bin" -m vllm.entrypoints.api_server --help 2>&1 | sed -n "1,220p" || true
+    fi
+  done
+'
+
+if [ "$RUN_VLLM_EMBEDDING_SMOKE" = "1" ]; then
+  capture_shell vllm_embedding_smoke_after_ascend_env.txt '
+    source_ascend_env() {
+      local path
+      for path in $ASCEND_ENV_SCRIPTS; do
+        if [ -f "$path" ]; then
+          echo "source $path"
+          # shellcheck disable=SC1090
+          source "$path"
+        else
+          echo "missing $path"
+        fi
+      done
+    }
+    source_ascend_env
+    if [ ! -d "$VLLM_SMOKE_MODEL_PATH" ]; then
+      echo "missing VLLM_SMOKE_MODEL_PATH=$VLLM_SMOKE_MODEL_PATH"
+      exit 0
+    fi
+    LOG_PATH=/tmp/ragent-mep-vllm-smoke.log
+    RESPONSE_PATH=/tmp/ragent-mep-vllm-smoke-response.json
+    rm -f "$LOG_PATH" "$RESPONSE_PATH"
+    pkill -f "vllm.entrypoints.openai.api_server" >/dev/null 2>&1 || true
+    export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0}"
+    export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-DEBUG}"
+    python3 -m vllm.entrypoints.openai.api_server \
+      --model "$VLLM_SMOKE_MODEL_PATH" \
+      --runner pooling \
+      --served-model-name BAAI-bge-m3 \
+      --host 0.0.0.0 \
+      --port "$VLLM_SMOKE_PORT" \
+      --max-model-len 8192 \
+      --dtype auto >"$LOG_PATH" 2>&1 &
+    VLLM_PID=$!
+    deadline=$((SECONDS + VLLM_SMOKE_TIMEOUT_SECONDS))
+    until curl -fsS "http://127.0.0.1:${VLLM_SMOKE_PORT}/v1/models" >/tmp/ragent-mep-vllm-smoke-models.json 2>/dev/null; do
+      if ! kill -0 "$VLLM_PID" >/dev/null 2>&1; then
+        echo "vLLM exited before readiness"
+        tail -200 "$LOG_PATH" || true
+        exit 0
+      fi
+      if [ "$SECONDS" -ge "$deadline" ]; then
+        echo "timed out waiting for vLLM"
+        tail -200 "$LOG_PATH" || true
+        kill "$VLLM_PID" >/dev/null 2>&1 || true
+        exit 0
+      fi
+      sleep 5
+    done
+    curl -fsS "http://127.0.0.1:${VLLM_SMOKE_PORT}/v1/embeddings" \
+      -H "Content-Type: application/json" \
+      -d "{\"model\":\"BAAI-bge-m3\",\"input\":[\"embedding smoke test\"],\"encoding_format\":\"float\"}" \
+      >"$RESPONSE_PATH" 2>&1 || true
+    python3 -m json.tool "$RESPONSE_PATH" || cat "$RESPONSE_PATH"
+    kill "$VLLM_PID" >/dev/null 2>&1 || true
+    wait "$VLLM_PID" >/dev/null 2>&1 || true
+    echo "vLLM smoke log: $LOG_PATH"
+  '
+fi
 
 capture_shell project_mount.txt '
   if [ -d /tmp/ragent-project ]; then
