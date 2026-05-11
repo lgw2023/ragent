@@ -1,0 +1,6 @@
+{
+  "service_url": "http://127.0.0.1:18100",
+  "log_file": "/Volumes/SSD1/ragent/benchmark/smoke_20260422_2/service.log",
+  "pid": 1102,
+  "startup_wall_seconds": 12.300946
+}

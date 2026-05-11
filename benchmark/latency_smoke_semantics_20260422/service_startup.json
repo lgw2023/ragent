@@ -1,0 +1,6 @@
+{
+  "service_url": "http://127.0.0.1:18103",
+  "log_file": "/Volumes/SSD1/ragent/benchmark/latency_smoke_semantics_20260422/service.log",
+  "pid": 2158,
+  "startup_wall_seconds": 10.265011
+}

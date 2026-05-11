@@ -1,0 +1,14 @@
+{
+  "mode": "hybrid",
+  "rerank_enabled": false,
+  "in_process_wall_seconds": 17.84508,
+  "rag_initialization_seconds": 3.566,
+  "onehop_query_seconds": 14.259,
+  "startup_model_check_seconds": 1.855,
+  "cache_hit_stages": [],
+  "cache_hit_count": 0,
+  "referenced_file_paths": [
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf",
+    "/Users/liguowei/ubuntu/ragent/example/成人肥胖食养指南_2024.pdf"
+  ]
+}

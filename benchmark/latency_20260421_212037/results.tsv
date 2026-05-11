@@ -1,0 +1,1 @@
+scenario	mode	rerank_enabled	cache_state	run_index	wall_seconds	in_process_wall_seconds	init_seconds	query_seconds	cache_hit_stages	cache_hit_count	trace_file	metrics_file	stdout_file

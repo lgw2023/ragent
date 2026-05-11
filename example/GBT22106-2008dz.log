@@ -1,0 +1,694 @@
+objc[15627]: Class AVFFrameReceiver is implemented in both /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x11c65c3a8) and /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x136e5c3a8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+objc[15627]: Class AVFAudioReceiver is implemented in both /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x11c65c3f8) and /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x136e5c3f8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+2026-04-07 03:32:57,496 | INFO | ragent:parse:609 - 自动推断阶段: all
+2026-04-07 03:32:57,496 | INFO | ragent:parse:611 - parse 执行阶段: all (input=/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf, mineru_output_dir=/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md, project_dir=/Users/liguowei/ubuntu/ragent/example/demo_diet_kg)
+2026-04-07 03:32:57,496 | INFO | ragent:parse:620 - 开始提取PDF并构建知识库...
+2026-04-07 03:32:59,438 | INFO | ragent:_prepare_mineru_runtime:311 - MinerU parse settings resolved: {'requested_mode': 'pipeline', 'effective_backend': 'pipeline', 'parse_method': 'txt', 'output_subdir': 'txt', 'model_source': 'local', 'server_url': None, 'model_path': None, 'local_model_key': 'pipeline'}
+2026-04-07 03:32:59.455 | INFO     | mineru.backend.pipeline.pipeline_analyze:doc_analyze_streaming:182 - Pipeline processing-window multi-file run. doc_count=1, total_pages=8, window_size=64, total_batches=1
+2026-04-07 03:32:59.456 | DEBUG    | mineru.utils.pdf_image_tools:_load_images_from_pdf_bytes_range:220 - PDF image rendering uses 1 processes for pages 1-8: [(0, 7)]
+2026-04-07 03:32:59.468 | DEBUG    | mineru.utils.pdf_image_tools:_get_pdf_render_executor:157 - Created persistent PDF render executor with max_workers=4
+objc[15638]: Class AVFFrameReceiver is implemented in both /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x10fae83a8) and /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x13a6643a8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+objc[15638]: Class AVFAudioReceiver is implemented in both /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x10fae83f8) and /Users/liguowei/ubuntu/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x13a6643f8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+2026-04-07 03:33:03.554 | INFO     | mineru.backend.pipeline.pipeline_analyze:doc_analyze_streaming:234 - Pipeline processing window batch 1/1: 8/8 pages, batch_pages=8, doc_slices=doc0:1-8
+2026-04-07 03:33:03.566 | INFO     | mineru.backend.pipeline.pipeline_analyze:batch_image_analyze:327 - GPU Memory: 1 GB, Batch Ratio: 1. 
+2026-04-07 03:33:03.566 | INFO     | mineru.backend.pipeline.model_init:__init__:206 - DocAnalysis init, this may take some times......
+2026-04-07 03:33:08.882 | INFO     | mineru.backend.pipeline.model_init:__init__:259 - DocAnalysis init done!
+2026-04-07 03:33:08.882 | INFO     | mineru.backend.pipeline.pipeline_analyze:custom_model_init:82 - model init cost: 5.315748691558838
+Layout Predict:   0%|          | 0/8 [00:00<?, ?it/s]Layout Predict:  12%|█▎        | 1/8 [00:00<00:02,  2.53it/s]Layout Predict:  25%|██▌       | 2/8 [00:00<00:01,  3.89it/s]Layout Predict:  38%|███▊      | 3/8 [00:00<00:01,  4.46it/s]Layout Predict:  50%|█████     | 4/8 [00:00<00:00,  4.86it/s]Layout Predict:  62%|██████▎   | 5/8 [00:01<00:00,  5.15it/s]Layout Predict:  75%|███████▌  | 6/8 [00:01<00:00,  5.36it/s]Layout Predict:  88%|████████▊ | 7/8 [00:01<00:00,  5.46it/s]Layout Predict: 100%|██████████| 8/8 [00:01<00:00,  5.55it/s]Layout Predict: 100%|██████████| 8/8 [00:01<00:00,  4.95it/s]
+2026-04-07 03:33:10.661 | DEBUG    | mineru.utils.model_utils:clean_vram:213 - gc time: 0.12
+MFR Predict:   0%|          | 0/16 [00:00<?, ?it/s]MFR Predict: 100%|██████████| 16/16 [00:00<00:00, 17.78it/s]MFR Predict: 100%|██████████| 16/16 [00:00<00:00, 17.78it/s]
+2026-04-07 03:33:11.680 | DEBUG    | mineru.utils.model_utils:clean_vram:213 - gc time: 0.12
+Table-ocr det:   0%|          | 0/8 [00:00<?, ?it/s]Table-ocr det:  12%|█▎        | 1/8 [00:00<00:00,  8.79it/s]Table-ocr det:  38%|███▊      | 3/8 [00:00<00:00, 10.84it/s]Table-ocr det:  62%|██████▎   | 5/8 [00:00<00:00, 13.66it/s]Table-ocr det:  88%|████████▊ | 7/8 [00:00<00:00, 15.16it/s]Table-ocr det: 100%|██████████| 8/8 [00:00<00:00, 15.36it/s]
+Table-ocr rec ch:   0%|          | 0/130 [00:00<?, ?it/s]Table-ocr rec ch:   9%|▉         | 12/130 [00:00<00:01, 81.84it/s]Table-ocr rec ch:  23%|██▎       | 30/130 [00:00<00:00, 106.34it/s]Table-ocr rec ch:  37%|███▋      | 48/130 [00:00<00:00, 114.23it/s]Table-ocr rec ch:  51%|█████     | 66/130 [00:00<00:00, 117.98it/s]Table-ocr rec ch:  65%|██████▍   | 84/130 [00:00<00:00, 120.02it/s]Table-ocr rec ch:  78%|███████▊  | 102/130 [00:00<00:00, 121.37it/s]Table-ocr rec ch:  92%|█████████▏| 120/130 [00:01<00:00, 90.55it/s] Table-ocr rec ch: 100%|██████████| 130/130 [00:01<00:00, 94.77it/s]
+Table-wireless Predict:   0%|          | 0/8 [00:00<?, ?it/s]Table-wireless Predict:  50%|█████     | 4/8 [00:00<00:00, 25.70it/s]Table-wireless Predict: 100%|██████████| 8/8 [00:00<00:00, 28.10it/s]Table-wireless Predict: 100%|██████████| 8/8 [00:00<00:00, 27.70it/s]
+Table-wired Predict:   0%|          | 0/8 [00:00<?, ?it/s]Table-wired Predict:  12%|█▎        | 1/8 [00:00<00:01,  3.92it/s]Table-wired Predict:  25%|██▌       | 2/8 [00:00<00:01,  4.59it/s]Table-wired Predict:  38%|███▊      | 3/8 [00:00<00:01,  3.76it/s]Table-wired Predict:  50%|█████     | 4/8 [00:01<00:01,  3.47it/s]Table-wired Predict:  62%|██████▎   | 5/8 [00:01<00:00,  3.82it/s]Table-wired Predict:  75%|███████▌  | 6/8 [00:01<00:00,  3.91it/s]Table-wired Predict:  88%|████████▊ | 7/8 [00:01<00:00,  4.36it/s]Table-wired Predict: 100%|██████████| 8/8 [00:01<00:00,  4.68it/s]Table-wired Predict: 100%|██████████| 8/8 [00:01<00:00,  4.20it/s]
+OCR-det ch:   0%|          | 0/33 [00:00<?, ?it/s]OCR-det ch:   3%|▎         | 1/33 [00:00<00:03,  9.47it/s]OCR-det ch:   9%|▉         | 3/33 [00:00<00:02, 10.70it/s]OCR-det ch:  15%|█▌        | 5/33 [00:00<00:02,  9.49it/s]OCR-det ch:  18%|█▊        | 6/33 [00:00<00:03,  8.20it/s]OCR-det ch:  21%|██        | 7/33 [00:00<00:04,  6.45it/s]OCR-det ch:  27%|██▋       | 9/33 [00:01<00:04,  5.62it/s]OCR-det ch:  30%|███       | 10/33 [00:01<00:04,  5.16it/s]OCR-det ch:  33%|███▎      | 11/33 [00:01<00:04,  5.26it/s]OCR-det ch:  36%|███▋      | 12/33 [00:01<00:03,  5.89it/s]OCR-det ch:  42%|████▏     | 14/33 [00:02<00:02,  7.69it/s]OCR-det ch:  48%|████▊     | 16/33 [00:02<00:02,  7.21it/s]OCR-det ch:  52%|█████▏    | 17/33 [00:02<00:02,  7.32it/s]OCR-det ch:  55%|█████▍    | 18/33 [00:02<00:02,  5.50it/s]OCR-det ch:  58%|█████▊    | 19/33 [00:03<00:02,  4.93it/s]OCR-det ch:  61%|██████    | 20/33 [00:03<00:02,  5.24it/s]OCR-det ch:  64%|██████▎   | 21/33 [00:03<00:02,  4.67it/s]OCR-det ch:  67%|██████▋   | 22/33 [00:03<00:02,  5.06it/s]OCR-det ch:  70%|██████▉   | 23/33 [00:03<00:01,  5.51it/s]OCR-det ch:  76%|███████▌  | 25/33 [00:03<00:01,  7.78it/s]OCR-det ch:  79%|███████▉  | 26/33 [00:04<00:00,  7.80it/s]OCR-det ch:  88%|████████▊ | 29/33 [00:04<00:00, 11.00it/s]OCR-det ch:  94%|█████████▍| 31/33 [00:04<00:00,  9.51it/s]OCR-det ch: 100%|██████████| 33/33 [00:04<00:00,  9.82it/s]OCR-det ch: 100%|██████████| 33/33 [00:04<00:00,  7.06it/s]
+2026-04-07 03:33:22.327 | DEBUG    | mineru.utils.model_utils:clean_vram:213 - gc time: 0.12
+Seal Predict: 0it [00:00, ?it/s]Seal Predict: 0it [00:00, ?it/s]
+Processing pages:   0%|          | 0/8 [00:00<?, ?it/s]Processing pages:  38%|███▊      | 3/8 [00:00<00:00, 29.20it/s]Processing pages:  75%|███████▌  | 6/8 [00:00<00:00, 26.48it/s]
+OCR-rec Predict:   0%|          | 0/231 [00:00<?, ?it/s][A
+OCR-rec Predict:   5%|▌         | 12/231 [00:00<00:01, 115.84it/s][A
+OCR-rec Predict:  13%|█▎        | 30/231 [00:00<00:01, 121.04it/s][A
+OCR-rec Predict:  21%|██        | 48/231 [00:00<00:01, 122.16it/s][A
+OCR-rec Predict:  29%|██▊       | 66/231 [00:00<00:01, 122.34it/s][A
+OCR-rec Predict:  36%|███▋      | 84/231 [00:00<00:01, 122.66it/s][A
+OCR-rec Predict:  44%|████▍     | 102/231 [00:00<00:01, 111.36it/s][A
+OCR-rec Predict:  49%|████▉     | 114/231 [00:01<00:01, 90.67it/s] [A
+OCR-rec Predict:  55%|█████▍    | 126/231 [00:01<00:01, 73.07it/s][A
+OCR-rec Predict:  60%|█████▉    | 138/231 [00:01<00:01, 61.07it/s][A
+OCR-rec Predict:  65%|██████▍   | 150/231 [00:01<00:01, 56.15it/s][A
+OCR-rec Predict:  70%|███████   | 162/231 [00:02<00:01, 53.34it/s][A
+OCR-rec Predict:  73%|███████▎  | 168/231 [00:02<00:01, 52.10it/s][A
+OCR-rec Predict:  75%|███████▌  | 174/231 [00:02<00:01, 46.48it/s][A
+OCR-rec Predict:  78%|███████▊  | 180/231 [00:02<00:01, 44.11it/s][A
+OCR-rec Predict:  81%|████████  | 186/231 [00:02<00:01, 42.95it/s][A
+OCR-rec Predict:  83%|████████▎ | 192/231 [00:02<00:00, 40.43it/s][A
+OCR-rec Predict:  86%|████████▌ | 198/231 [00:03<00:00, 37.52it/s][A
+OCR-rec Predict:  88%|████████▊ | 204/231 [00:03<00:00, 34.94it/s][A
+OCR-rec Predict:  91%|█████████ | 210/231 [00:03<00:00, 33.97it/s][A
+OCR-rec Predict:  94%|█████████▎| 216/231 [00:03<00:00, 33.25it/s][A
+OCR-rec Predict:  96%|█████████▌| 222/231 [00:03<00:00, 32.81it/s][A
+OCR-rec Predict:  99%|█████████▊| 228/231 [00:04<00:00, 32.56it/s][AOCR-rec Predict: 100%|██████████| 231/231 [00:04<00:00, 54.65it/s]
+2026-04-07 03:33:26.983 | DEBUG    | mineru.backend.pipeline.pipeline_analyze:_finalize_processing_window_context:120 - Pipeline doc ready: doc0 pages=8
+Processing pages: 100%|██████████| 8/8 [00:04<00:00,  1.76it/s]
+2026-04-07 03:33:26.983 | DEBUG    | mineru.backend.pipeline.pipeline_analyze:doc_analyze_streaming:283 - processing-window multi-file infer finished, cost: 27.53, speed: 0.291 page/s
+2026-04-07 03:33:27,030 | INFO | ragent:_dump_pipeline_parse_result:3553 - local output dir is example/GBT22106-2008dz_md/txt
+2026-04-07 03:33:27,046 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=build_enhanced_md_start, source_pdf='/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf', md_path='/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/GBT22106-2008dz.md', image_dir='/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/images', total_blocks=3, total_images=2
+2026-04-07 03:33:27,046 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=image_mm_start, image_index=1, total_images=2, image_name='9875cf258e89b9241eba8a3a10c50b4e68d389400edffcf38015120eb4b3692d.jpg', image_path='/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/images/9875cf258e89b9241eba8a3a10c50b4e68d389400edffcf38015120eb4b3692d.jpg', image_description_mode='single_multimodal'
+2026-04-07 03:33:27,046 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=image_mm_start, image_index=2, total_images=2, image_name='e935bb4271c0449949ae50940851bcadaad984eb4a169bc1b1a4d559da14dec9.jpg', image_path='/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/images/e935bb4271c0449949ae50940851bcadaad984eb4a169bc1b1a4d559da14dec9.jpg', image_description_mode='single_multimodal'
+2026-04-07 03:33:29,649 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=image_mm_done, image_index=1, completed=1, total_images=2, image_name='9875cf258e89b9241eba8a3a10c50b4e68d389400edffcf38015120eb4b3692d.jpg', image_description_mode='single_multimodal', desc_len=308
+2026-04-07 03:33:31,076 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=image_mm_done, image_index=2, completed=2, total_images=2, image_name='e935bb4271c0449949ae50940851bcadaad984eb4a169bc1b1a4d559da14dec9.jpg', image_description_mode='single_multimodal', desc_len=447
+2026-04-07 03:33:31,077 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=image_mm_all_done, total_images=2, generated_descriptions=2
+2026-04-07 03:33:31,079 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=md_injection_start, md_path='/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/GBT22106-2008dz.md', total_md_images=2
+2026-04-07 03:33:31,079 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=md_injection_done, progress='1/2', image_file='9875cf258e89b9241eba8a3a10c50b4e68d389400edffcf38015120eb4b3692d.jpg', desc_len=308
+2026-04-07 03:33:31,079 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=md_injection_done, progress='2/2', image_file='e935bb4271c0449949ae50940851bcadaad984eb4a169bc1b1a4d559da14dec9.jpg', desc_len=447
+2026-04-07 03:33:31,080 | INFO | ragent:_print_pipeline_progress:2807 - [PipelineProgress] stage=md_injection_finished, md_path='/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/GBT22106-2008dz.md', total_md_images=2, injected_count=2, skipped_existing_count=0, modified=True
+2026-04-07 03:33:31,080 | INFO | ragent:_print_md_ready_banner:2829 - ============================================================
+[PDF->MD READY] Markdown stage completed. Final markdown generated.
+next_step_hint: if current command is running the full pipeline, RAG/KG indexing will continue automatically.
+source_pdf_abs: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+md_file_abs: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/GBT22106-2008dz.md
+image_dir_abs: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/images
+parse_output_dir_abs: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt
+============================================================
+2026-04-07 03:33:31,080 | INFO | ragent:pdf_insert:4549 - Pre-step finished: markdown artifacts are ready, start RAG/KG indexing. md_path=/Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/GBT22106-2008dz.md
+2026-04-07 03:33:31,080 | WARNING | ragent:__post_init__:506 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-07 03:33:32,141 | INFO | ragent:__post_init__:60 - Loaded graph from example/demo_diet_kg/graph_chunk_entity_relation.graphml with 15732 nodes, 55137 edges
+INFO:nano-vectordb:Load (15358, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': 'example/demo_diet_kg/vdb_entities.json'} 15358 data
+INFO:nano-vectordb:Load (55137, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': 'example/demo_diet_kg/vdb_relationships.json'} 55137 data
+INFO:nano-vectordb:Load (2542, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': 'example/demo_diet_kg/vdb_chunks.json'} 2542 data
+2026-04-07 03:33:32,642 | INFO | ragent:initialize:65 - Process 15627 KV load full_docs with 2267 records
+2026-04-07 03:33:32,656 | INFO | ragent:initialize:65 - Process 15627 KV load text_chunks with 2542 records
+2026-04-07 03:33:33,020 | INFO | ragent:initialize:65 - Process 15627 KV load llm_response_cache with 9892 records
+2026-04-07 03:33:33,046 | INFO | ragent:initialize:61 - Process 15627 doc status load doc_status with 2267 records
+2026-04-07 03:33:33,046 | INFO | ragent:<lambda>:666 - Storage Initialization completed!
+2026-04-07 03:33:33,115 | INFO | ragent:apipeline_enqueue_documents:1034 - Stored 22 new unique documents
+2026-04-07 03:33:33,116 | INFO | ragent:apipeline_process_enqueue_documents:1496 - Processing 22 document(s)
+2026-04-07 03:33:33,116 | INFO | ragent:_stage_document:1562 - Extracting stage 1/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,116 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-a0356dd6953f91ff3d114904a70b6001
+2026-04-07 03:33:33,116 | INFO | ragent:_stage_document:1562 - Extracting stage 2/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,116 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-c3283b1d7d3ba61f8864c78d2e9b608d
+2026-04-07 03:33:33,116 | INFO | ragent:_stage_document:1562 - Extracting stage 3/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,116 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-2e95d9b28e7fd30a8bcd67c88af37143
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 4/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-231aa156a5d6bbdcf9f7dea677329fba
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 5/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-5c81712f9f326a62511134deda4f7519
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 6/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-ca3fc69b4cbb2522590275278f3b7760
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 7/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-8a27d686de13af9eec5dd7d320721b1d
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 8/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-bda0df1923800e84c050082dd7cc68de
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 9/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-e72f63983ef827b578f27d66d03e5b03
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 10/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-4101d49d8de2b9e8a4a5771b03b9106c
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 11/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-06b73eb23d57b658f7874fb9ff8b9954
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 12/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-12a21d8a3cd4d4ba7f6db8b19911be70
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 13/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-6a32f642bacc549742c486fb357f0024
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 14/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-2713309915712de3cdad0601a53c0351
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 15/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-718a644d71b2c07c8a406eeac7b7d091
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 16/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-48fd7b1b756c1568bd769e8ade7005d5
+2026-04-07 03:33:33,117 | INFO | ragent:_stage_document:1562 - Extracting stage 17/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-48f917a9d24764bab3631bd6b2d2ef6d
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1562 - Extracting stage 18/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-7c3a51defe2f61fa55002fb72428bf5f
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1562 - Extracting stage 19/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-2907d60ecef0e99dac11a1a34c6dff2d
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1562 - Extracting stage 20/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-2589714a488c4aab810204fab581f803
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1562 - Extracting stage 21/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-0081e519a950c3e9c837571bfa92c699
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1562 - Extracting stage 22/22: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:33:33,118 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-c24df9a50925e2c1302c65df5a12a57f
+2026-04-07 03:33:33,118 | INFO | ragent:ensure_workers:621 - limit_async[embedding]: 8 new workers initialized
+2026-04-07 03:33:33,565 | INFO | ragent:ensure_workers:621 - limit_async[llm]: 32 new workers initialized
+2026-04-07 03:33:36,721 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:7bde4f613d268752b14b9a326ec68e8d
+2026-04-07 03:33:36,828 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:36359e131a133adc5547b80f18662c61
+2026-04-07 03:33:36,836 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:4dd9c17b0b4a210ff98f8273f8395855
+2026-04-07 03:33:37,029 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:bf8c3919dfa68d2da0f1199ba1b51e2a
+2026-04-07 03:33:37,056 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:cdbf75cadf0106d1a256837ce9118012
+2026-04-07 03:33:37,258 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0e7ef8e3a71ed95fd5b80b4a33980eea
+2026-04-07 03:33:37,569 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:433fd8840aab64fcaae86d94a647e227
+2026-04-07 03:33:37,789 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:7566e771e40f932a27dfe8f2f0907e7d
+2026-04-07 03:33:37,848 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:4f2d0a196150d04b4c72c27743bda7a6
+2026-04-07 03:33:37,928 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:ec420ccc53927a2372ca62268f4a5ec1
+2026-04-07 03:33:37,964 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:e4da7b226c515c092740d5bfcf1a8408
+2026-04-07 03:33:38,086 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:09e0a3b45b9fb10671e5283f6a57763d
+2026-04-07 03:33:38,127 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:d3faae6518ae384f2d7fed960fc29347
+2026-04-07 03:33:38,168 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:a15ad69f55a2ac2880cbe79e8bd3e94a
+2026-04-07 03:33:38,309 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:b17e9dfd9ef5d0e40eaa80fbf10d0296
+2026-04-07 03:33:38,639 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:d43ad20b8a3129c19bfd20145987d257
+2026-04-07 03:33:38,970 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:2bf09d1212040616a61cdd3844f50d9d
+2026-04-07 03:33:38,973 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:2b6c7aa43b55e1fcb8b2393b7bccb23e
+2026-04-07 03:33:39,579 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:b3d441cb885e9511a5200b9e52bada2f
+2026-04-07 03:33:39,778 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:813be869a88a573163aa51588012f9e2
+2026-04-07 03:33:39,779 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-04-07 03:33:40,198 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:cd67ff7d5ddb0f96f122d7a0b287c546
+2026-04-07 03:33:40,199 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 3 Rel
+2026-04-07 03:33:41,019 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:91876de53869ce0f06e356e40320da04
+2026-04-07 03:33:41,020 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 5 Rel
+2026-04-07 03:33:41,143 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:cb166c4ef6bc876990f31b665ee67b81
+2026-04-07 03:33:41,144 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-04-07 03:33:41,228 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:5f27ef633ceb849d10868173ffd4ec07
+2026-04-07 03:33:41,309 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:1d1af66901ef4569d7195fcab54248e9
+2026-04-07 03:33:41,310 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-04-07 03:33:41,730 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:a62f9d6d98c5ab9d159d3889177aa0da
+2026-04-07 03:33:41,731 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-04-07 03:33:41,737 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0836e988354c3fcabd5e83f545c6aaf6
+2026-04-07 03:33:41,737 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-04-07 03:33:42,038 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0da578621a6c1c33cf3507f0b3a5b3e1
+2026-04-07 03:33:42,040 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-04-07 03:33:42,147 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:5b8e1068ce82bb22007700885c180265
+2026-04-07 03:33:42,147 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 1 Rel
+2026-04-07 03:33:42,449 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:87e8fe4d91da5c255f9f4a90093918e8
+2026-04-07 03:33:42,450 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-04-07 03:33:42,690 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:eaab1993b2248699440ba19c253bb7ac
+2026-04-07 03:33:42,691 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 7 Rel
+2026-04-07 03:33:42,857 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:680dc52a0c53b74fccf5655bf1e490e4
+2026-04-07 03:33:42,858 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-04-07 03:33:42,938 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:e6be149fc2233b89ea3c3d41342f7f7e
+2026-04-07 03:33:42,939 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-04-07 03:33:43,128 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0bd9f0c66470ddcfb1951e5b1f0999fa
+2026-04-07 03:33:43,128 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-04-07 03:33:44,148 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:9d889f490518c4da81d141570d483a84
+2026-04-07 03:33:44,148 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 10 Ent + 10 Rel
+2026-04-07 03:33:44,348 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:770325333b85ee6c371db4284bbe46e6
+2026-04-07 03:33:44,349 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 7 Rel
+2026-04-07 03:33:45,519 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:f6fbfdcb617f2569c28d24256e84c628
+2026-04-07 03:33:45,521 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 11 Ent + 12 Rel
+2026-04-07 03:33:47,979 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:00101d1e3d616911e8fb54779ee67501
+2026-04-07 03:33:47,980 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 9 Ent + 11 Rel
+2026-04-07 03:33:48,393 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:1df5cfa3496bfb2658617903a134ab05
+2026-04-07 03:33:49,799 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:2aca0a49f62e4b65916c6d07f631ae1a
+2026-04-07 03:33:53,509 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:07b3720a51272bc54ba2a3a3697bd6a6
+2026-04-07 03:33:53,510 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 9 Ent + 3 Rel
+2026-04-07 03:33:53,511 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:44d43970d29569c7009744a76cd5b4d1
+2026-04-07 03:33:53,512 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 8 Ent + 8 Rel
+2026-04-07 03:34:00,698 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:46ed42a9fc3f25f9417058cf81c124bb
+2026-04-07 03:34:00,700 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 22 Ent + 0 Rel
+2026-04-07 03:34:26,379 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:7df202c8b3e23f5b55c82a7bdd57e31d
+2026-04-07 03:34:26,382 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 47 Ent + 50 Rel
+2026-04-07 03:34:26,385 | INFO | ragent:merge_nodes_and_edges:933 - Merging stage 22/22: GBT22106-2008dz
+2026-04-07 03:34:26,385 | INFO | ragent:merge_nodes_and_edges:944 - Processing: 161 entities and 340 relations (async: 32)
+2026-04-07 03:34:26,389 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: GBT22106-2008dz.pdf | 15+0
+2026-04-07 03:34:26,391 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: People's Republic of China | 1+1
+2026-04-07 03:34:26,392 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: China | 2+1
+2026-04-07 03:34:26,393 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Beijing | 1+1
+2026-04-07 03:34:26,393 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Shanghai | 1+1
+2026-04-07 03:34:26,394 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-fermented Soy Products | 10+0
+2026-04-07 03:34:26,395 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-fermented Soybean Products | 5+0
+2026-04-07 03:34:26,396 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Production | 1+1
+2026-04-07 03:34:26,396 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Packaging | 1+2
+2026-04-07 03:34:26,396 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Labeling | 1+1
+2026-04-07 03:34:26,396 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Transportation | 1+2
+2026-04-07 03:34:26,396 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Storage | 1+2
+2026-04-07 03:34:26,397 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: JJF 1070 | 1+2
+2026-04-07 03:34:26,397 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Food Safety | 1+1
+2026-04-07 03:34:26,397 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Soy Products | 1+1
+2026-04-07 03:34:26,397 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Water | 2+2
+2026-04-07 03:34:26,398 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: 非发酵豆制品 | 2+2
+2026-04-07 03:34:26,398 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Pulping Process | 2+0
+2026-04-07 03:34:26,398 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Seasoning | 2+0
+2026-04-07 03:34:26,399 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Soybeans | 1+2
+2026-04-07 03:34:26,399 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 凝固剂 | 1+1
+2026-04-07 03:34:26,400 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 蛋白质 | 1+1
+2026-04-07 03:34:26,401 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Seasoned Tofu | 4+0
+2026-04-07 03:34:26,401 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Tofu | 4+2
+2026-04-07 03:34:26,401 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Braising | 2+0
+2026-04-07 03:34:26,401 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Stir-frying | 2+0
+2026-04-07 03:34:26,402 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Cooked Soy Milk | 2+0
+2026-04-07 03:34:26,402 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Dehydration | 2+1
+2026-04-07 03:34:26,402 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Smoked Dried Tofu | 2+0
+2026-04-07 03:34:26,402 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Dried Tofu | 3+1
+2026-04-07 03:34:26,403 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Fried Dried Tofu | 2+0
+2026-04-07 03:34:26,404 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Soy Milk | 1+2
+2026-04-07 03:34:26,405 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Beijing - China Commercial Federation Commercial Standards Center | 2+0
+2026-04-07 03:34:26,405 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Shanghai - Shanghai Qingmei Green Food Co., Ltd. | 2+0
+2026-04-07 03:34:27,059 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:609459c7664afc715b92b23790b11bdb
+2026-04-07 03:34:27,147 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:8182739d72c0aa65ffa3f7cb6e683273
+2026-04-07 03:34:27,149 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:3d797e3b1e2e62c51b23112ca8e31c92
+2026-04-07 03:34:27,639 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:fbca2f6bc330eb3487ca73f9090f9a69
+2026-04-07 03:34:28,019 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:a7b4eb3c142d9d780ba47cccb7b63456
+2026-04-07 03:34:28,021 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:c639c91646b4545693e97524fe64faf5
+2026-04-07 03:34:28,027 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0b603a2efbf4aa459fb47b22cb45cb68
+2026-04-07 03:34:28,209 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:43dde4b3dd470d6a3a5484c5964ee636
+2026-04-07 03:34:28,212 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Non-fermented Soy Products | 9+0
+2026-04-07 03:34:28,227 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Non-fermented Soybean Products | 4+0
+2026-04-07 03:34:28,229 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Dehydrated Tofu - Non-fermented Soy Products | 2+0
+2026-04-07 03:34:28,231 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Dried Tofu - Smoked Dried Tofu | 2+0
+2026-04-07 03:34:28,232 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Dried Tofu - Fried Dried Tofu | 2+0
+2026-04-07 03:34:29,148 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:b336610f8555a5c983b3fbd24152dd44
+2026-04-07 03:34:29,308 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:fd90d255055c822e39c46f9558309bd2
+2026-04-07 03:34:33,951 | INFO | ragent:write_nx_graph:34 - Writing graph with 15872 nodes, 55477 edges
+2026-04-07 03:34:34,780 | INFO | ragent:_insert_done:1961 - In memory DB persist to disk
+2026-04-07 03:34:34,780 | INFO | ragent:process_source_group:1838 - Completed processing source group 22/22: GBT22106-2008dz
+2026-04-07 03:34:34,780 | INFO | ragent:apipeline_process_enqueue_documents:1912 - Document processing pipeline completed
+2026-04-07 03:34:34,826 | INFO | ragent:apipeline_enqueue_documents:1034 - Stored 1 new unique documents
+2026-04-07 03:34:34,827 | INFO | ragent:apipeline_process_enqueue_documents:1496 - Processing 1 document(s)
+2026-04-07 03:34:34,827 | INFO | ragent:_stage_document:1562 - Extracting stage 1/1: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/images/9875cf258e89b9241eba8a3a10c50b4e68d389400edffcf38015120eb4b3692d.jpg
+2026-04-07 03:34:34,827 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-3804ed16547c1e49fc16663caace32dd
+2026-04-07 03:34:39,979 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:f88046d6c2322f5476bea0b3a7283bcd
+2026-04-07 03:34:46,039 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:38e02f30d5fdc723cad3a7bf354c29ef
+2026-04-07 03:34:46,039 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 7 Rel
+2026-04-07 03:34:46,041 | INFO | ragent:merge_nodes_and_edges:933 - Merging stage 1/1: GBT22106-2008dz
+2026-04-07 03:34:46,041 | INFO | ragent:merge_nodes_and_edges:944 - Processing: 8 entities and 14 relations (async: 32)
+2026-04-07 03:34:46,041 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: SZC | 1+1
+2026-04-07 03:34:46,042 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Non-fermented Soy Products | 1+1
+2026-04-07 03:34:46,042 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Soybeans | 1+3
+2026-04-07 03:34:46,042 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Water | 1+1
+2026-04-07 03:34:46,042 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB 5749 | 1+1
+2026-04-07 03:34:46,959 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:bd9e0d331e3310699aa522d3540a531f
+2026-04-07 03:34:48,442 | INFO | ragent:write_nx_graph:34 - Writing graph with 15875 nodes, 55491 edges
+2026-04-07 03:34:49,251 | INFO | ragent:_insert_done:1961 - In memory DB persist to disk
+2026-04-07 03:34:49,251 | INFO | ragent:process_source_group:1838 - Completed processing source group 1/1: GBT22106-2008dz
+2026-04-07 03:34:49,251 | INFO | ragent:apipeline_process_enqueue_documents:1912 - Document processing pipeline completed
+2026-04-07 03:34:49,297 | INFO | ragent:apipeline_enqueue_documents:1034 - Stored 7 new unique documents
+2026-04-07 03:34:49,298 | INFO | ragent:apipeline_process_enqueue_documents:1496 - Processing 7 document(s)
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1562 - Extracting stage 1/7: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-41e2fc066d71576dabe0fb692080fa3b
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1562 - Extracting stage 2/7: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-b0f95831756e22a0762eec091402cba9
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1562 - Extracting stage 3/7: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-eb413503d07e85e36266ac28aed0ad41
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1562 - Extracting stage 4/7: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-24532d8eb0855d829979dcdcc84e5d92
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1562 - Extracting stage 5/7: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-c906d9e13e9ba0a1f914e779ecc01adf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1562 - Extracting stage 6/7: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-70b0fc31e365c6525671711a0ea2445d
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1562 - Extracting stage 7/7: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:34:49,298 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-a166208e2458007cb1a8d493d2ba5e39
+2026-04-07 03:34:52,078 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:fce5fef51ff7d8c243e6bd8624db80be
+2026-04-07 03:34:52,789 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:80cba9a804662c2367ec8124574d0f95
+2026-04-07 03:34:53,211 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:2f9462a77c365d5e595df31cbb5a858c
+2026-04-07 03:34:53,620 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:e9a921f581a04a2d76a1f08deb3af232
+2026-04-07 03:34:54,225 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:991ec8cb640da3c1e6f13c10d3be21ca
+2026-04-07 03:34:54,229 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:531e9d4367fee5833ddffed5448fd010
+2026-04-07 03:34:55,748 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:b11d1b9fc53093e0face8a7e7298b8b9
+2026-04-07 03:34:56,589 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:b225e87519e92e46341ce830f7e29df5
+2026-04-07 03:34:56,590 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-04-07 03:34:58,019 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:cc4308e83ca0b7a69bf9fc9b99286977
+2026-04-07 03:34:58,020 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-04-07 03:34:58,640 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:4b5e1690eb71db456c11580b3b7f2be2
+2026-04-07 03:34:58,641 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 6 Rel
+2026-04-07 03:34:58,678 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:63f9b5287e3db2a02349882546b7f52b
+2026-04-07 03:34:58,679 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-04-07 03:34:59,229 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:186e2b201a4e59b570a0f112d03be483
+2026-04-07 03:34:59,230 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 10 Rel
+2026-04-07 03:35:00,360 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:b1a4b0d7f3fa1a7d2218cf5349d3345f
+2026-04-07 03:35:00,362 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 12 Rel
+2026-04-07 03:35:02,271 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:cf396ef1a5b83880d3126c7150d97014
+2026-04-07 03:35:02,273 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 8 Ent + 10 Rel
+2026-04-07 03:35:02,274 | INFO | ragent:merge_nodes_and_edges:933 - Merging stage 7/7: GBT22106-2008dz
+2026-04-07 03:35:02,274 | INFO | ragent:merge_nodes_and_edges:944 - Processing: 37 entities and 92 relations (async: 32)
+2026-04-07 03:35:02,275 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: GBT22106-2008dz.pdf | 7+1
+2026-04-07 03:35:02,277 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB 1352 | 1+1
+2026-04-07 03:35:02,278 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB 5749 | 1+2
+2026-04-07 03:35:02,278 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Non-fermented Soybean Products | 2+1
+2026-04-07 03:35:02,278 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Soybeans | 1+1
+2026-04-07 03:35:02,278 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Water | 1+2
+2026-04-07 03:35:02,278 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB 5461 | 1+1
+2026-04-07 03:35:02,279 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 食盐 | 1+2
+2026-04-07 03:35:02,279 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 白砂糖 | 1+2
+2026-04-07 03:35:02,279 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 非发酵豆制品 | 1+1
+2026-04-07 03:35:02,279 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB 2760 | 1+1
+2026-04-07 03:35:02,280 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-fermented Soy Products | 3+2
+2026-04-07 03:35:02,281 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Soy Milk Class | 1+1
+2026-04-07 03:35:02,281 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Quality Requirements | 1+1
+2026-04-07 03:35:02,282 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Sensory Requirements | 2+0
+2026-04-07 03:35:02,282 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Table 1 | 2+3
+2026-04-07 03:35:02,283 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Non-Fermented Soy Products | 1+1
+2026-04-07 03:35:02,283 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Pure Soy Milk | 1+1
+2026-04-07 03:35:02,283 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Flavored Soy Milk | 1+1
+2026-04-07 03:35:02,283 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Table 2 | 1+2
+2026-04-07 03:35:02,284 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GB 1352 - Soybeans | 1+1
+2026-04-07 03:35:02,284 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GB 5749 - Water | 1+1
+2026-04-07 03:35:03,768 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:62ab4f8c246821370c081c285a49886e
+2026-04-07 03:35:04,189 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:de65a1ef62d3bb64e423ccc51c4a6888
+2026-04-07 03:35:04,191 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Non-fermented Soy Products - Soy Milk Class | 1+1
+2026-04-07 03:35:04,290 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:3bdf4f9198151f96d4db81ed99c0a009
+2026-04-07 03:35:04,290 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Non-fermented Soybean Products | 2+1
+2026-04-07 03:35:04,292 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - 非发酵豆制品 | 1+1
+2026-04-07 03:35:04,292 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Non-fermented Soy Products | 3+1
+2026-04-07 03:35:04,296 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Sensory Requirements | 2+0
+2026-04-07 03:35:04,296 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Non-Fermented Soy Products | 1+1
+2026-04-07 03:35:05,391 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:b947e5e8beeaf679d8e9ab26dbd98d57
+2026-04-07 03:35:07,454 | INFO | ragent:write_nx_graph:34 - Writing graph with 15893 nodes, 55576 edges
+2026-04-07 03:35:08,274 | INFO | ragent:_insert_done:1961 - In memory DB persist to disk
+2026-04-07 03:35:08,274 | INFO | ragent:process_source_group:1838 - Completed processing source group 7/7: GBT22106-2008dz
+2026-04-07 03:35:08,274 | INFO | ragent:apipeline_process_enqueue_documents:1912 - Document processing pipeline completed
+2026-04-07 03:35:08,321 | INFO | ragent:apipeline_enqueue_documents:1034 - Stored 1 new unique documents
+2026-04-07 03:35:08,321 | INFO | ragent:apipeline_process_enqueue_documents:1496 - Processing 1 document(s)
+2026-04-07 03:35:08,321 | INFO | ragent:_stage_document:1562 - Extracting stage 1/1: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/txt/images/e935bb4271c0449949ae50940851bcadaad984eb4a169bc1b1a4d559da14dec9.jpg
+2026-04-07 03:35:08,321 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-9de94925567b75a24440b90aba4a78f7
+2026-04-07 03:35:12,870 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:fcb385e181be80f90c38d9d734d1eb38
+2026-04-07 03:35:20,959 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:510e01970731fb3ee1e6ea5135fa6b4d
+2026-04-07 03:35:20,960 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 9 Ent + 10 Rel
+2026-04-07 03:35:20,962 | INFO | ragent:merge_nodes_and_edges:933 - Merging stage 1/1: GBT22106-2008dz
+2026-04-07 03:35:20,962 | INFO | ragent:merge_nodes_and_edges:944 - Processing: 10 entities and 19 relations (async: 32)
+2026-04-07 03:35:20,962 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GBT22106-2008dz | 1+1
+2026-04-07 03:35:20,962 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-fermented Soybean Products | 1+3
+2026-04-07 03:35:20,963 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Table 2 | 1+3
+2026-04-07 03:35:20,964 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Soy Milk Products | 1+1
+2026-04-07 03:35:22,799 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:dc8e8515719f9c8f30f6121486afaf1b
+2026-04-07 03:35:22,868 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:166fc930f202b4c680c9da5cd4f38078
+2026-04-07 03:35:22,870 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Non-fermented Soybean Products - Table 2 | 1+1
+2026-04-07 03:35:24,697 | INFO | ragent:write_nx_graph:34 - Writing graph with 15899 nodes, 55594 edges
+2026-04-07 03:35:25,534 | INFO | ragent:_insert_done:1961 - In memory DB persist to disk
+2026-04-07 03:35:25,534 | INFO | ragent:process_source_group:1838 - Completed processing source group 1/1: GBT22106-2008dz
+2026-04-07 03:35:25,534 | INFO | ragent:apipeline_process_enqueue_documents:1912 - Document processing pipeline completed
+2026-04-07 03:35:25,580 | INFO | ragent:apipeline_enqueue_documents:1034 - Stored 32 new unique documents
+2026-04-07 03:35:25,581 | INFO | ragent:apipeline_process_enqueue_documents:1496 - Processing 32 document(s)
+2026-04-07 03:35:25,581 | INFO | ragent:_stage_document:1562 - Extracting stage 1/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,581 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-edaa8cfce0b5057e1db6a486aa53c65e
+2026-04-07 03:35:25,581 | INFO | ragent:_stage_document:1562 - Extracting stage 2/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,581 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-6aabbbc0526c057ab69693478f449a55
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1562 - Extracting stage 3/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-cbdb6b33cb6afb54ddf79f53a219d4aa
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1562 - Extracting stage 4/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-de989156887cf962284174ee46cf8fa3
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1562 - Extracting stage 5/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-e6acd79192b6900da6dc56e855592429
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1562 - Extracting stage 6/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-a549cc1256db531afd45fb7c91740cd1
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1562 - Extracting stage 7/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,582 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-c09a052a53f59a3a4ef97ba524226b60
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1562 - Extracting stage 8/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-54e16fa90ab1f0daf295b2ac20edd194
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1562 - Extracting stage 9/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-d2b7d79e500835fb62d9be4b860487b2
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1562 - Extracting stage 10/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-a4f182c903c0efd9f91ed1e291cca4a0
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1562 - Extracting stage 11/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,583 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-99b050121793c840a6568fa249c43b6f
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1562 - Extracting stage 12/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-382d70f2f6900a859789149b38eef0e7
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1562 - Extracting stage 13/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-d00b343ee782445562f8b9ad384f9ee9
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1562 - Extracting stage 14/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-411fd08fb6935aed4ce538d7e3cdfe3f
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1562 - Extracting stage 15/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-a77af7aa279d6a990b4878457303f0eb
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1562 - Extracting stage 16/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,584 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-05f14c1b1ffc62caa37e9e63c158912b
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1562 - Extracting stage 17/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-8a7c30e1134a4864ddddbf7ae7c123d5
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1562 - Extracting stage 18/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-d770aa21c941bc73e0e6817b18054189
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1562 - Extracting stage 19/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-a9d2b8ebcf7da3c6c4f5c7943cb18434
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1562 - Extracting stage 20/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-1f6d39d8fc59d0e63b728c715d4dccb6
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1562 - Extracting stage 21/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,585 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-03c9173cecfc65190ef703f7d717bb63
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 22/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-7e6d990412bffcfdf8920771829d1d15
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 23/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-796f9ef689fd6c990db15aaf7e3361c2
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 24/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-f392f853f0ee4be583343aa3d373f659
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 25/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-13cd0c6bd30a9e78ca2891b68506d7b5
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 26/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-1ff0a0f67e2f8be3a10b266453fe5ece
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 27/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-4408d924562199a178ba845e008f5d37
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 28/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-a7733c29ab0e6a4a0fb6ef28f2df21ae
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 29/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-2365a1640d5c468e61a222757bf9a9a3
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 30/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-ade1e9a11e0b71bd097b7293e82b1481
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 31/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-dcc5dc956040ef830f78b4b248c6e8bf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1562 - Extracting stage 32/32: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:35:25,590 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-27f45f2067f465e587e2bc2522cad39f
+2026-04-07 03:35:28,700 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:63773d29774ae06489ae0194b82ff29a
+2026-04-07 03:35:29,391 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:1512fa0adaa7bde39322fdb6518cf35a
+2026-04-07 03:35:29,759 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:9fce72bf29603686b9d13185c1d135f6
+2026-04-07 03:35:29,799 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0c486e20a4ffa701a16f795647cf942a
+2026-04-07 03:35:29,850 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:bf686467ec55b9825142c356317963b0
+2026-04-07 03:35:29,918 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0a1c7628535fe6be103098f9888fb48c
+2026-04-07 03:35:30,059 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:ca3475fa9fad6b4dba4dc64c7da365a6
+2026-04-07 03:35:30,479 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:e082591c6f50fe15fc697b0a7a5fd5c2
+2026-04-07 03:35:30,483 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:72aee48acb8bdd43abc5015d4770f2cf
+2026-04-07 03:35:30,569 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:6c4fc0160510a24d96866336e4264f31
+2026-04-07 03:35:30,629 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:440618354011dd7c9fa5eacec125978d
+2026-04-07 03:35:30,728 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:fd7ed9836cb248e21676e4edbe09700b
+2026-04-07 03:35:30,871 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:ab451fe0ea72d4e8aaaab6f24db9aced
+2026-04-07 03:35:30,917 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:14682d76db833951f66e6ce3089ecf9d
+2026-04-07 03:35:31,029 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:bdf99ab18984f703d8d34657494c7103
+2026-04-07 03:35:31,057 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:63a27f7dda3473f65f08bb12fe2b14d8
+2026-04-07 03:35:31,340 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:91fe9f7205b75f208bf37a3c91658b03
+2026-04-07 03:35:31,388 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:27be3e1384cc1e22e76d7a7d29511cd5
+2026-04-07 03:35:31,549 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:29f71baee78fb188cb880fe7e9adf986
+2026-04-07 03:35:31,609 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:e9af06be127d05f37b17b6980820e42e
+2026-04-07 03:35:31,665 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:155d0000bd3a3886ab0f432ee1c83c93
+2026-04-07 03:35:31,677 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:3e18e3508db1b310023a45a2b4362fb9
+2026-04-07 03:35:31,959 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:02081ce68f67052d5c2bce28077eb1c9
+2026-04-07 03:35:32,028 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:44ee1ce52dea61e3ffcfc269417f6914
+2026-04-07 03:35:32,940 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:86f6bf9ed40ff8d23dc321f13e0f9db2
+2026-04-07 03:35:33,088 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:edfad962254b454c4b98918138f34874
+2026-04-07 03:35:33,097 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:beb31e1ae4c9cee90a0bfd4e15174673
+2026-04-07 03:35:33,269 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:f685e9db0ee9df0748713379a62631d5
+2026-04-07 03:35:33,650 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:c9243043b3f1c2baace24887d04810e5
+2026-04-07 03:35:33,658 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:01c94832d8f29691e6bb7ee9ba9e689a
+2026-04-07 03:35:33,658 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-04-07 03:35:33,660 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:f9b7e57303e262dd320925c4dabd2b27
+2026-04-07 03:35:33,661 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-04-07 03:35:34,069 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:cd9fa58aff2ab6050eeb417c662057a3
+2026-04-07 03:35:34,070 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 6 Rel
+2026-04-07 03:35:34,072 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:a3b98e5f25f59c75f2172d7ed651bed5
+2026-04-07 03:35:34,370 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:668068ad2cf0aaf6d11fd9723cefef64
+2026-04-07 03:35:34,680 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:a925d6d9d366e1c4e754c51b2ecaf932
+2026-04-07 03:35:34,680 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-04-07 03:35:34,718 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:8c785673f0466e08d28cb4d029c31040
+2026-04-07 03:35:34,719 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-04-07 03:35:35,299 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:a7df7fafc996dc6f8589d88e51e3b592
+2026-04-07 03:35:35,300 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-04-07 03:35:35,480 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:93289b7f88df230a0103d017db93a04c
+2026-04-07 03:35:35,481 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-04-07 03:35:35,486 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:755b58ee89964113c7853573e78e8f5b
+2026-04-07 03:35:35,486 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-04-07 03:35:35,598 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:d18c1d7f0eccab44ac3510540b4a4366
+2026-04-07 03:35:35,948 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:7daeea817f1d4ebe2dedd012dc4b69f4
+2026-04-07 03:35:35,949 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-04-07 03:35:36,069 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:7da2463c6afb4e71e40b2be348e38a3a
+2026-04-07 03:35:36,070 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 7 Rel
+2026-04-07 03:35:36,149 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:539ca99b48c1be8b97e7d623e91d4406
+2026-04-07 03:35:36,150 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-04-07 03:35:36,309 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:7d61ca2e12342b8927bd58041007d567
+2026-04-07 03:35:36,310 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-04-07 03:35:36,490 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:71e00d26f96d84cf11305ec07abc2d49
+2026-04-07 03:35:36,491 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-04-07 03:35:36,518 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:f08be8b354702240b6e5127af85c1b55
+2026-04-07 03:35:36,519 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 8 Ent + 8 Rel
+2026-04-07 03:35:36,690 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:d0d243b7882487ee8ef7ed48cb8010f1
+2026-04-07 03:35:36,690 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-04-07 03:35:36,738 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:5468e93b44ad3b17b53ea74d9450d935
+2026-04-07 03:35:36,739 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-04-07 03:35:37,340 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:1c4f8941ab27705790314dd1039d70ad
+2026-04-07 03:35:37,341 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-04-07 03:35:37,549 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:11a5428bb2cd3ee7358fdef8c9725216
+2026-04-07 03:35:37,549 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 8 Rel
+2026-04-07 03:35:37,628 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:ca9f0ad4ad0720c4d31e87393a4e10f7
+2026-04-07 03:35:37,629 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-04-07 03:35:37,718 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:da24c6445e361a1359790c5d1f699783
+2026-04-07 03:35:37,719 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 8 Rel
+2026-04-07 03:35:37,958 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:d8e6656c6b6254f3dcb23943a5981b5d
+2026-04-07 03:35:37,959 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 7 Rel
+2026-04-07 03:35:38,671 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:6c744f6eb781192efd7998a7dca53bcd
+2026-04-07 03:35:38,671 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 6 Ent + 5 Rel
+2026-04-07 03:35:38,673 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:c41cc3e57aa65d273a7f3751eefafac0
+2026-04-07 03:35:38,674 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 11 Rel
+2026-04-07 03:35:39,701 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:ac1f4387b3a2360bb970abb104a6d170
+2026-04-07 03:35:39,702 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 9 Ent + 13 Rel
+2026-04-07 03:35:40,097 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0ce85fa48e29c0b3c5e8860d69929f8b
+2026-04-07 03:35:40,098 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 10 Ent + 9 Rel
+2026-04-07 03:35:40,521 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:3efba9d81a36061d2316345039eee926
+2026-04-07 03:35:40,522 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 8 Rel
+2026-04-07 03:35:40,525 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:5b1f0810afe81c949c9eeb77ce798a29
+2026-04-07 03:35:40,525 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 10 Ent + 11 Rel
+2026-04-07 03:35:41,129 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:91fc57675315d7c9b48771869a204d56
+2026-04-07 03:35:41,130 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 8 Ent + 13 Rel
+2026-04-07 03:35:41,189 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:4f35b37c33d1438644b52ebf04faf4bc
+2026-04-07 03:35:41,190 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 10 Ent + 7 Rel
+2026-04-07 03:35:42,570 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:0261e415525ef49dbcb912d6b96880a7
+2026-04-07 03:35:42,571 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 10 Ent + 13 Rel
+2026-04-07 03:35:48,610 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:4bd900faa1f37ce5c7ecf26a9b66494c
+2026-04-07 03:35:48,611 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 14 Ent + 27 Rel
+2026-04-07 03:35:50,138 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:93e349842f6d07b8dae90836baca6d81
+2026-04-07 03:35:50,138 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 10 Ent + 8 Rel
+2026-04-07 03:35:50,140 | INFO | ragent:merge_nodes_and_edges:933 - Merging stage 32/32: GBT22106-2008dz
+2026-04-07 03:35:50,140 | INFO | ragent:merge_nodes_and_edges:944 - Processing: 149 entities and 399 relations (async: 32)
+2026-04-07 03:35:50,146 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: GBT22106-2008dz.pdf | 26+1
+2026-04-07 03:35:50,151 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-fermented Soybean Products | 15+1
+2026-04-07 03:35:50,153 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Soy Milk Products | 1+2
+2026-04-07 03:35:50,153 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Pure Soy Milk | 1+2
+2026-04-07 03:35:50,153 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Flavored Soy Milk | 1+2
+2026-04-07 03:35:50,153 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Physical and Chemical Indicators | 6+1
+2026-04-07 03:35:50,154 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: GB 2711 | 4+1
+2026-04-07 03:35:50,155 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-fermented Soy Products | 6+1
+2026-04-07 03:35:50,156 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Urease Test | 2+0
+2026-04-07 03:35:50,156 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Hygiene Indicators | 5+0
+2026-04-07 03:35:50,157 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Sensory Requirements | 6+2
+2026-04-07 03:35:50,158 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Table 3 | 2+0
+2026-04-07 03:35:50,158 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 豆腐类产品 | 2+0
+2026-04-07 03:35:50,158 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 豆花 | 1+1
+2026-04-07 03:35:50,158 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 内酯豆腐 | 1+1
+2026-04-07 03:35:50,158 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 嫩豆腐 | 1+2
+2026-04-07 03:35:50,158 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: 非发酵豆制品 | 5+2
+2026-04-07 03:35:50,159 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-Fermented Soybean Products | 4+1
+2026-04-07 03:35:50,160 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Frozen Tofu | 2+1
+2026-04-07 03:35:50,160 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Dehydrated Tofu | 1+1
+2026-04-07 03:35:50,160 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Tofu | 1+1
+2026-04-07 03:35:50,160 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Seasoned Tofu | 1+1
+2026-04-07 03:35:50,160 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Moisture Content | 3+1
+2026-04-07 03:35:50,161 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Protein Content | 3+1
+2026-04-07 03:35:50,161 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: 水分 | 2+2
+2026-04-07 03:35:50,162 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: 蛋白质 | 2+2
+2026-04-07 03:35:50,166 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Table 5 | 2+0
+2026-04-07 03:35:50,167 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Tofu Dry Products | 2+0
+2026-04-07 03:35:50,167 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Dried Tofu | 1+1
+2026-04-07 03:35:50,167 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Smoked Dried Tofu | 1+2
+2026-04-07 03:35:50,167 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Fried Dried Tofu | 1+2
+2026-04-07 03:35:50,167 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Seasoned Dried Tofu | 1+1
+2026-04-07 03:35:50,167 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Dehydrated Dried Tofu | 1+1
+2026-04-07 03:35:50,167 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Table 7 | 2+0
+2026-04-07 03:35:50,168 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Color | 1+1
+2026-04-07 03:35:50,168 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Aroma | 1+1
+2026-04-07 03:35:50,168 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Taste | 1+1
+2026-04-07 03:35:50,168 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Bean Curd Skin | 1+1
+2026-04-07 03:35:50,168 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: 腐竹 | 1+3
+2026-04-07 03:35:50,169 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 干燥 | 1+2
+2026-04-07 03:35:50,169 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: 定量包装商品计量监督管理办法 | 1+2
+2026-04-07 03:35:50,169 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Sensory Evaluation | 2+0
+2026-04-07 03:35:50,169 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: JJF 1070 | 1+3
+2026-04-07 03:35:50,170 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB/T 5009.5 | 1+1
+2026-04-07 03:35:50,170 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Protein | 1+1
+2026-04-07 03:35:50,170 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB/T 5009.6-2003 | 1+1
+2026-04-07 03:35:50,171 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB/T 5009.183 | 1+1
+2026-04-07 03:35:50,171 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Factory Inspection | 2+0
+2026-04-07 03:35:50,171 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Net Content | 1+1
+2026-04-07 03:35:50,171 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Type Inspection | 1+2
+2026-04-07 03:35:50,171 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Production Suspension | 1+1
+2026-04-07 03:35:50,172 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Chapter 5 | 1+1
+2026-04-07 03:35:50,172 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Non-Fermented Soy Products | 1+2
+2026-04-07 03:35:50,172 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Pure Soy Milk - Soy Milk Products | 1+1
+2026-04-07 03:35:50,172 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Flavored Soy Milk - Soy Milk Products | 1+1
+2026-04-07 03:35:51,067 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:6781e1a470f30ce43d7d3013fad91733
+2026-04-07 03:35:51,118 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:61825552c7553c2ad60a7072f60b3811
+2026-04-07 03:35:51,209 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:8bc6ed6be0c8f48bb31f920440ea52e2
+2026-04-07 03:35:51,310 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:8cf03251d47fad5b1c9a661aa476ca83
+2026-04-07 03:35:51,316 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:46762f1d27ef03626e2d48b0db088256
+2026-04-07 03:35:51,390 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:d28c21f47010065a6193053cd5c573c6
+2026-04-07 03:35:51,468 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:4e439d9d35b55c0ca5ee5cc0902e5b8e
+2026-04-07 03:35:51,640 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:c1a7bde67c782a394b615186bb8a94c9
+2026-04-07 03:35:51,647 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:70952e7f60725586d1b9cb9fa47c0095
+2026-04-07 03:35:51,679 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:9e65c8020d8f338b69b1750537a2e23e
+2026-04-07 03:35:51,779 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:99e9561cb0813b9db37377d53f94e333
+2026-04-07 03:35:51,781 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Seasoned Tofu - Tofu | 1+1
+2026-04-07 03:35:51,781 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Frozen Tofu - Tofu | 1+1
+2026-04-07 03:35:51,797 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:342ed4305946f41bac2508cb75674094
+2026-04-07 03:35:52,400 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:3438d852f09041c41e5a777c09f4bd2e
+2026-04-07 03:35:52,402 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:d9d5bcc210541d45b9394624bd68fd96
+2026-04-07 03:35:52,403 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Physical and Chemical Indicators | 5+1
+2026-04-07 03:35:52,406 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Non-fermented Soy Products | 7+1
+2026-04-07 03:35:52,407 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Non-fermented Soybean Products - Sensory Requirements | 3+0
+2026-04-07 03:35:52,408 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Urease Test | 2+0
+2026-04-07 03:35:52,408 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Hygiene Indicators - Non-fermented Soy Products | 3+0
+2026-04-07 03:35:52,409 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GB 2711 - Hygiene Indicators | 3+0
+2026-04-07 03:35:52,411 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GB 2711 - GBT22106-2008dz.pdf | 3+0
+2026-04-07 03:35:52,412 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Sensory Requirements | 6+2
+2026-04-07 03:35:52,414 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - 非发酵豆制品 | 5+2
+2026-04-07 03:35:52,415 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Non-fermented Soybean Products | 14+3
+2026-04-07 03:35:52,417 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - 豆腐类产品 | 2+0
+2026-04-07 03:35:52,421 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Non-Fermented Soybean Products | 4+1
+2026-04-07 03:35:52,423 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Bean Curd Skin - Non-fermented Soy Products | 2+0
+2026-04-07 03:35:52,424 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Non-fermented Soy Products - Yuba | 2+0
+2026-04-07 03:35:52,426 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Tofu Dry Products | 2+0
+2026-04-07 03:35:52,427 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Non-fermented Soybean Products - Sensory Evaluation | 2+0
+2026-04-07 03:35:52,429 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Factory Inspection - Non-fermented Soybean Products | 2+0
+2026-04-07 03:35:52,431 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Production Suspension - Type Inspection | 1+1
+2026-04-07 03:35:52,432 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: Factory Inspection - GBT22106-2008dz.pdf | 2+0
+2026-04-07 03:35:52,433 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Non-Fermented Soy Products | 1+2
+2026-04-07 03:35:53,419 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:5b519f3c008ec9f14859488df961664e
+2026-04-07 03:35:53,422 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:55db66dbfb273d6c906584459ff00e55
+2026-04-07 03:35:53,423 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:5ff2897349a84b39642aa07fd9f6f398
+2026-04-07 03:35:53,731 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:9b234d0e4da7c5f485f0442e0e2f5834
+2026-04-07 03:35:53,733 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:1ae4208b8ae118e37b5c9e9064c86efc
+2026-04-07 03:35:54,030 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:8e1c3d00cb128aff14f394d972c94d3f
+2026-04-07 03:35:59,259 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:48fe486bb32952db9d0061f63251acad
+2026-04-07 03:36:03,972 | INFO | ragent:write_nx_graph:34 - Writing graph with 16004 nodes, 55981 edges
+2026-04-07 03:36:04,795 | INFO | ragent:_insert_done:1961 - In memory DB persist to disk
+2026-04-07 03:36:04,796 | INFO | ragent:process_source_group:1838 - Completed processing source group 32/32: GBT22106-2008dz
+2026-04-07 03:36:04,796 | INFO | ragent:apipeline_process_enqueue_documents:1912 - Document processing pipeline completed
+2026-04-07 03:36:04,842 | INFO | ragent:apipeline_enqueue_documents:1034 - Stored 5 new unique documents
+2026-04-07 03:36:04,843 | INFO | ragent:apipeline_process_enqueue_documents:1496 - Processing 5 document(s)
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1562 - Extracting stage 1/5: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-0572747fa88cf321c61cd7fc796fc521
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1562 - Extracting stage 2/5: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-19542c57b34cdc64418c88d162dc3557
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1562 - Extracting stage 3/5: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-9a0930a67c9cfe143348d4edf9c2165c
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1562 - Extracting stage 4/5: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-2ee6aa72cdade8e808a28eeb319f26fd
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1562 - Extracting stage 5/5: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz.pdf
+2026-04-07 03:36:04,843 | INFO | ragent:_stage_document:1565 - Processing d-id: doc-6c19b0b9236236760209f656e92cb530
+2026-04-07 03:36:07,238 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:80ebbcc645f240061b9abf33cbd38f7d
+2026-04-07 03:36:07,852 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:c96f64773041a968f6784bd1381b1135
+2026-04-07 03:36:08,001 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:e0b01c697d9f0ce41588ef89cdeaffa5
+2026-04-07 03:36:08,268 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:703bfee6b290283d4b0690bdfacbdf25
+2026-04-07 03:36:10,930 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:c4bc0752f41787efce287268fac2b51a
+2026-04-07 03:36:11,950 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:ac58aab1ad94bee3a88a65f1323e715f
+2026-04-07 03:36:11,951 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-04-07 03:36:12,881 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:e532ab57270534515af253aca19f3dee
+2026-04-07 03:36:12,882 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-04-07 03:36:16,721 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:79ffb974fba993c2ad12836933259303
+2026-04-07 03:36:16,722 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 10 Ent + 11 Rel
+2026-04-07 03:36:16,970 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:71053195d6a46ced921c044dba4c7ff0
+2026-04-07 03:36:16,971 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 11 Ent + 11 Rel
+2026-04-07 03:36:17,561 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:6ea5e8b68436a96745175d8fadf532f9
+2026-04-07 03:36:17,562 | INFO | ragent:_process_single_content:1309 - Chunk 1 of 1 extracted 7 Ent + 8 Rel
+2026-04-07 03:36:17,563 | INFO | ragent:merge_nodes_and_edges:933 - Merging stage 5/5: GBT22106-2008dz
+2026-04-07 03:36:17,564 | INFO | ragent:merge_nodes_and_edges:944 - Processing: 32 entities and 73 relations (async: 32)
+2026-04-07 03:36:17,564 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: GBT22106-2008dz.pdf | 5+1
+2026-04-07 03:36:17,567 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Non-fermented Soybean Products | 2+1
+2026-04-07 03:36:17,567 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: GB7718 | 1+1
+2026-04-07 03:36:17,567 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Non-Fermented Soy Products | 2+3
+2026-04-07 03:36:17,568 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Labeling | 1+2
+2026-04-07 03:36:17,568 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Dry Products | 2+0
+2026-04-07 03:36:17,568 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: High-Temperature Sterilized Products | 2+0
+2026-04-07 03:36:17,569 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Pre-packaged Products | 2+0
+2026-04-07 03:36:17,569 | INFO | ragent:_merge_nodes_then_upsert:672 - Merge N: Non-Fermented Soybean Products | 1+1
+2026-04-07 03:36:17,569 | INFO | ragent:_merge_nodes_then_upsert:659 - LLM merge N: Storage | 1+3
+2026-04-07 03:36:18,713 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:58bb88f273d4f6e96776bcfbd054879b
+2026-04-07 03:36:18,713 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:03564e9b21d0be2e774e8e65cd592c35
+2026-04-07 03:36:20,661 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:c491c4be0925f6b6dd6cd95c3c7da25c
+2026-04-07 03:36:20,661 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Non-fermented Soybean Products | 2+1
+2026-04-07 03:36:20,663 | INFO | ragent:_merge_edges_then_upsert:839 - LLM merge E: GBT22106-2008dz.pdf - Non-Fermented Soy Products | 2+3
+2026-04-07 03:36:20,667 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Non-Fermented Soybean Products | 1+1
+2026-04-07 03:36:20,667 | INFO | ragent:_merge_edges_then_upsert:852 - Merge E: GBT22106-2008dz.pdf - Storage | 1+1
+2026-04-07 03:36:21,641 | INFO | ragent:save_to_cache:1062 -  == LLM cache == saving: default:extract:685d3d54107121aa3f0c674cc7b999fa
+2026-04-07 03:36:23,571 | INFO | ragent:write_nx_graph:34 - Writing graph with 16030 nodes, 56050 edges
+2026-04-07 03:36:24,401 | INFO | ragent:_insert_done:1961 - In memory DB persist to disk
+2026-04-07 03:36:24,401 | INFO | ragent:process_source_group:1838 - Completed processing source group 5/5: GBT22106-2008dz
+2026-04-07 03:36:24,402 | INFO | ragent:apipeline_process_enqueue_documents:1912 - Document processing pipeline completed
+2026-04-07 03:36:24,402 | INFO | ragent:shutdown:625 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-07 03:36:24,402 | INFO | ragent:shutdown:660 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-07 03:36:24,402 | INFO | ragent:shutdown:625 - limit_async[llm]: Shutting down priority queue workers
+2026-04-07 03:36:24,402 | INFO | ragent:shutdown:660 - limit_async[llm]: Priority queue workers shutdown complete
+2026-04-07 03:36:24,409 | INFO | ragent:_write_usage_report_if_needed:671 - Model usage report written: /Users/liguowei/ubuntu/ragent/example/GBT22106-2008dz_md/model_usage_parse_20260407_033624.md
+2026-04-07 03:36:24,409 | INFO | ragent:parse:627 - PDF提取与知识库构建完成。
+2026-04-07 03:36:24,409 | INFO | ragent:<lambda>:666 - Storage Finalization completed!

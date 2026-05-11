@@ -1,0 +1,8 @@
+objc[1102]: Class AVFFrameReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x1318243a8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x17a9843a8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+objc[1102]: Class AVFAudioReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x1318243f8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x17a9843f8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+INFO:     Started server process [1102]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:18100 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57982 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57987 - "GET /health HTTP/1.1" 200 OK

@@ -1,0 +1,13 @@
+service_url=http://127.0.0.1:18103
+project_dir=example/demo_diet_kg_5
+runs=1
+query=我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？
+modes=hybrid
+rerank_options=on
+response_type=Multiple Paragraphs
+LLM_MODEL=qwen3-32b
+EMBEDDING_MODEL=text-embedding-v3
+RERANK_MODEL=qwen3-rerank
+RAG_ANSWER_PROMPT_MODE=single_prompt
+LLM_API_TIMEOUT_SECONDS=600
+IMAGE_MODEL_TIMEOUT=600

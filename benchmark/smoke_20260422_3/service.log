@@ -1,0 +1,30 @@
+objc[1914]: Class AVFFrameReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x126a6c3a8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x15611c3a8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+objc[1914]: Class AVFAudioReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x126a6c3f8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x15611c3f8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+INFO:     Started server process [1914]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:18102 (Press CTRL+C to quit)
+INFO:     127.0.0.1:58339 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58340 - "GET /health HTTP/1.1" 200 OK
+2026-04-22 09:53:15,503 | WARNING | ragent:__post_init__:538 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-22 09:53:17,010 | INFO | ragent:__post_init__:60 - Loaded graph from /Volumes/SSD1/ragent/example/demo_diet_kg_5/graph_chunk_entity_relation.graphml with 16030 nodes, 56050 edges
+INFO:nano-vectordb:Load (15656, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_entities.json'} 15656 data
+INFO:nano-vectordb:Load (56050, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_relationships.json'} 56050 data
+INFO:nano-vectordb:Load (2610, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_chunks.json'} 2610 data
+2026-04-22 09:53:17,836 | INFO | ragent:initialize:61 - Process 1914 doc status load doc_status with 2335 records
+INFO:     127.0.0.1:58340 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+2026-04-22 09:53:17,847 | INFO | ragent:<lambda>:713 - Storage Initialization completed!
+INFO:     127.0.0.1:58340 - "POST /v1/benchmark/cache/clear HTTP/1.1" 200 OK
+2026-04-22 09:53:17,855 | INFO | ragent:shutdown:785 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-22 09:53:17,855 | INFO | ragent:shutdown:820 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-22 09:53:17,855 | INFO | ragent:shutdown:785 - limit_async[llm]: Shutting down priority queue workers
+2026-04-22 09:53:17,855 | INFO | ragent:shutdown:820 - limit_async[llm]: Priority queue workers shutdown complete
+INFO:     127.0.0.1:58340 - "POST /v1/benchmark/project/reset HTTP/1.1" 200 OK
+2026-04-22 09:53:17,866 | INFO | ragent:<lambda>:713 - Storage Finalization completed!
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1914]

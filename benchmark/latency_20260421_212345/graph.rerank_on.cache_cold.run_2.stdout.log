@@ -1,0 +1,28 @@
+objc[29485]: Class AVFFrameReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x1229b43a8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x16c8503a8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+objc[29485]: Class AVFAudioReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x1229b43f8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x16c8503f8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+2026-04-21 21:24:33,913 | WARNING | ragent:__post_init__:538 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-21 21:24:35,441 | INFO | ragent:__post_init__:60 - Loaded graph from example/demo_diet_kg_5/graph_chunk_entity_relation.graphml with 16030 nodes, 56050 edges
+2026-04-21 21:24:36,278 | INFO | ragent:initialize:61 - Process 29485 doc status load doc_status with 2335 records
+2026-04-21 21:24:36,280 | INFO | ragent:ensure_workers:781 - limit_async[llm]: 32 new workers initialized
+2026-04-21 21:24:36,280 | INFO | ragent:<lambda>:713 - Storage Initialization completed!
+2026-04-21 21:24:37,666 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: graph:keywords:32f22dce6b45ae5b953f15940cca86f0
+2026-04-21 21:24:37,666 | INFO | ragent:_get_node_data:4593 - Query nodes: 含糖饮料, 中速步行, 爬楼, variants: ['含糖饮料, 中速步行, 爬楼', '含糖饮料', '中速步行', '爬楼'], top_k: 40, cosine: 0.2
+2026-04-21 21:24:37,669 | INFO | ragent:ensure_workers:781 - limit_async[embedding]: 8 new workers initialized
+2026-04-21 21:24:38,111 | INFO | ragent:_get_node_data:4648 - Local query: 40 entites, 345 relations
+2026-04-21 21:24:38,112 | INFO | ragent:_get_edge_data:4910 - Query edges: 能量平衡, 运动补偿, 含糖饮料影响, variants: ['能量平衡, 运动补偿, 含糖饮料影响', '能量平衡', '运动补偿', '含糖饮料影响'], top_k: 40, cosine: 0.2
+2026-04-21 21:24:38,557 | INFO | ragent:_get_edge_data:4977 - Global query: 53 entites, 40 relations
+2026-04-21 21:24:38,558 | INFO | ragent:_build_graph_context_debug_data_from_hits:3048 - Process 29485 building graph retrieval context...
+2026-04-21 21:24:38,558 | INFO | ragent:_build_graph_context_debug_data_from_hits:3064 - Initial graph context: 92 entities, 371 relations, 0 chunks
+2026-04-21 21:24:38,583 | INFO | ragent:_build_graph_context_debug_data_from_hits:3145 - Getting text chunks based on truncated entities and relations...
+2026-04-21 21:24:38,596 | WARNING | ragent:_find_related_text_unit_from_relationships:5158 - No valid text chunks after filtering
+2026-04-21 21:24:38,597 | WARNING | ragent:_find_most_related_text_unit_from_entities:4808 - No valid text units found
+2026-04-21 21:24:38,597 | INFO | ragent:_build_graph_context_debug_data_from_hits:3306 - Final graph retrieval context: 40 entities, 113 relations, 0 chunks
+2026-04-21 21:24:38,599 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: graph:retrieval:3f5ab9b82fc4f2a4db44bd4d8a8754b8
+2026-04-21 21:24:38,603 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: graph:render:9a0e6afbebfdac687f311a1f88fee884
+2026-04-21 21:24:38,608 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: graph:render:f2cc1aeb69d2aed49d459ba901c5f4b0
+2026-04-21 21:24:56,345 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: graph:answer:9b147e291a3c7e402807bbc5b93e062a
+2026-04-21 21:24:56,356 | INFO | ragent:shutdown:785 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-21 21:24:56,358 | INFO | ragent:shutdown:820 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-21 21:24:56,359 | INFO | ragent:shutdown:785 - limit_async[llm]: Shutting down priority queue workers
+2026-04-21 21:24:56,359 | INFO | ragent:shutdown:820 - limit_async[llm]: Priority queue workers shutdown complete
+2026-04-21 21:24:56,376 | INFO | ragent:<lambda>:713 - Storage Finalization completed!
