@@ -1,0 +1,11 @@
+objc[32560]: Class AVFFrameReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x1127c43a8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x1425fc3a8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+objc[32560]: Class AVFAudioReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x1127c43f8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x1425fc3f8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+2026-04-21 21:31:04,291 | WARNING | ragent:__post_init__:538 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-21 21:31:05,724 | INFO | ragent:__post_init__:60 - Loaded graph from example/demo_diet_kg_5/graph_chunk_entity_relation.graphml with 16030 nodes, 56050 edges
+2026-04-21 21:31:06,536 | INFO | ragent:initialize:61 - Process 32560 doc status load doc_status with 2335 records
+2026-04-21 21:31:06,546 | INFO | ragent:shutdown:785 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-21 21:31:06,546 | INFO | ragent:shutdown:820 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-21 21:31:06,546 | INFO | ragent:shutdown:785 - limit_async[llm]: Shutting down priority queue workers
+2026-04-21 21:31:06,546 | INFO | ragent:shutdown:820 - limit_async[llm]: Priority queue workers shutdown complete
+2026-04-21 21:31:06,551 | INFO | ragent:<lambda>:713 - Storage Initialization completed!
+2026-04-21 21:31:06,553 | INFO | ragent:<lambda>:713 - Storage Finalization completed!

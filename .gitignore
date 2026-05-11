@@ -20,21 +20,6 @@ requirements.txt.bak
 vendor/mineru-models/
 vendor/modelscope/
 vendor/wheelhouse/
-mep/model_packages/**/modelDir/data/deps/python/
-mep/model_packages/**/modelDir/data/deps/pythonpath/
-mep/model_packages/**/modelDir/data/deps/site-packages/
-mep/model_packages/**/modelDir/data/deps/keyword_wheelhouse/**/*.whl
-mep/model_packages/**/modelDir/data/deps/keyword_wheelhouse/**/*.tar.gz
-mep/model_packages/**/modelDir/data/deps/keyword_wheelhouse/**/*.tgz
-mep/model_packages/**/modelDir/data/deps/keyword_wheelhouse/**/*.zip
-mep/model_packages/**/modelDir/data/deps/wheelhouse/**/*.whl
-mep/model_packages/**/modelDir/data/deps/wheelhouse/**/*.tar.gz
-mep/model_packages/**/modelDir/data/deps/wheelhouse/**/*.tgz
-mep/model_packages/**/modelDir/data/deps/wheelhouse/**/*.zip
-mep/model_packages/**/modelDir/data/models/keyword_extraction/**
-!mep/model_packages/**/modelDir/data/models/keyword_extraction/
-!mep/model_packages/**/modelDir/data/models/keyword_extraction/**/
-!mep/model_packages/**/modelDir/data/models/keyword_extraction/**/.gitkeep
 ragent-offline*.tar*
 
 # Python 编译文件
@@ -64,24 +49,5 @@ htmlcov/
 # macOS
 .DS_Store
 
-# sample
-benchmark/
-!benchmark/
-benchmark/*
-!benchmark/verify_query_cache_hits.py
-!benchmark/README.md
-example_v1/
-example/
-!example/
-example/*
-!example/mep_requests/
-!example/mep_requests/*.json
-example_test/
-mep/model_packages/**/*.bin
-script/
-!script/
-script/*
-!script/latency_service.sh
-!script/latency_test.sh
 .env_bak
 .env_onehop

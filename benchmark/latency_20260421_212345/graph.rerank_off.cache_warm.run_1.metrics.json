@@ -1,0 +1,29 @@
+{
+  "mode": "graph",
+  "rerank_enabled": false,
+  "in_process_wall_seconds": 4.053694,
+  "rag_initialization_seconds": 4.036,
+  "onehop_query_seconds": 0.007,
+  "startup_model_check_seconds": 2.004,
+  "cache_hit_stages": [
+    "answer_cache_hit"
+  ],
+  "cache_hit_count": 1,
+  "referenced_file_paths": [
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/8e71acd83db415155fe6763d0da8c011cb306be8658643188de92646dcf5738e.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/d0ba2937bb16d2a9633f5eba17e741d47f0839205eadc1a37b299c56f13574ee.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/d94ae420920aac7a543de5418f1b18636021690532fb5227b88fe7240dfce5c0.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/d94ae420920aac7a543de5418f1b18636021690532fb5227b88fe7240dfce5c0.jpg;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/b2e8b1c5c9a916ef9882ace6cf01b86723039f77be727c7bd9934b8d6100bd21.jpg;/Users/liguowei/ubuntu/ragent/example/成人肥胖食养指南_2024.pdf",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/成人高血压食养指南_2022.pdf",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/成人高血压食养指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/c46910dd4d68545dbd2d01a451718aaa4ab52caddfd611dd3022fd51664fa022.jpg;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/8e71acd83db415155fe6763d0da8c011cb306be8658643188de92646dcf5738e.jpg;/Users/liguowei/ubuntu/ragent/example/成人肥胖食养指南_2024.pdf;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/d0ba2937bb16d2a9633f5eba17e741d47f0839205eadc1a37b299c56f13574ee.jpg;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/3f90d2f5b16da75c88be0f4de5b7275e99416b6fba7aa2776960b20162336e1a.jpg;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/20107ee8049efbf45cdcbc67059a7815adeb63d41e6509a2fe49adeb517675d7.jpg;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/b919983fe24c2ae2e3671b2933363131355f63de5e685df7464701839a15bf7f.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/3221c854a39ae6e7239fc809ade486deef0822d31ea950dcaf6347d6cb16f45c.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/3221c854a39ae6e7239fc809ade486deef0822d31ea950dcaf6347d6cb16f45c.jpg;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf;/Users/liguowei/ubuntu/ragent/example/成人肥胖食养指南_2024.pdf",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/3f90d2f5b16da75c88be0f4de5b7275e99416b6fba7aa2776960b20162336e1a.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/560c0fd9b565049b352b726d1ac90ca3f5637471781b65cb67d5b70bb921a0ab.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022_md/txt/images/cc7810abd24b6d3ad0810982c4b75af139b3db46a7485dfd7ff06b7dc68b5685.jpg;/Users/liguowei/ubuntu/ragent/example/中国居民膳食指南_2022.pdf",
+    "/Users/liguowei/ubuntu/ragent/example/成人肥胖食养指南_2024.pdf",
+    "/Users/liguowei/ubuntu/ragent/example/成人肥胖食养指南_2024_md/txt/images/e9772e706e0a129caf22f2a012f1f372590c5682ac819043c515eddbc0ff327c.jpg",
+    "/Users/liguowei/ubuntu/ragent/example/成人高血压食养指南_2022.pdf"
+  ]
+}

@@ -1,0 +1,3072 @@
+[
+    {
+        "type": "text",
+        "text": "中华人民共和国国家标准",
+        "text_level": 1,
+        "bbox": [
+            112,
+            135,
+            933,
+            173
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "text",
+        "text": "GB/T 1354-2018",
+        "bbox": [
+            714,
+            197,
+            909,
+            214
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "text",
+        "text": "代替GB/T1354—2009",
+        "bbox": [
+            721,
+            214,
+            909,
+            229
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "text",
+        "text": "大 米",
+        "bbox": [
+            403,
+            385,
+            642,
+            421
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "text",
+        "text": "Milled rice",
+        "bbox": [
+            462,
+            447,
+            585,
+            468
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "text",
+        "text": "2018-10-10发布",
+        "bbox": [
+            114,
+            845,
+            285,
+            864
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "text",
+        "text": "2019-05-01实施",
+        "bbox": [
+            761,
+            845,
+            932,
+            865
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "header",
+        "text": "ICS 67.060 B22",
+        "bbox": [
+            114,
+            32,
+            206,
+            59
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "header",
+        "text": ". . 电",
+        "bbox": [
+            677,
+            41,
+            876,
+            112
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "footer",
+        "text": "中管理 发布",
+        "bbox": [
+            317,
+            887,
+            729,
+            935
+        ],
+        "page_idx": 0
+    },
+    {
+        "type": "text",
+        "text": "前 言",
+        "text_level": 2,
+        "bbox": [
+            450,
+            145,
+            562,
+            167
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准按照GB/T1.1—2009 给出的规则起草。",
+        "bbox": [
+            148,
+            203,
+            513,
+            220
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准代替GB/T1354—2009《大米》。",
+        "bbox": [
+            148,
+            222,
+            451,
+            238
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准与GB/T1354—2009 的主要技术差异如下：",
+        "bbox": [
+            148,
+            241,
+            542,
+            257
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "调整了适用范围；",
+        "bbox": [
+            149,
+            260,
+            325,
+            275
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "二调 同整了部分术语；",
+        "bbox": [
+            150,
+            278,
+            325,
+            294
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "调整了定等指标，突出了适度加工；",
+        "bbox": [
+            149,
+            297,
+            457,
+            313
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "调整了部分指标；",
+        "bbox": [
+            150,
+            316,
+            324,
+            331
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "调整了判定规则；",
+        "bbox": [
+            150,
+            334,
+            324,
+            350
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "调整了标签要求。",
+        "bbox": [
+            149,
+            353,
+            324,
+            368
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准由国家粮食和物资储备局提出。",
+        "bbox": [
+            148,
+            372,
+            448,
+            387
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准由全国粮油标准化技术委员会(SAC/TC 270)归口。",
+        "bbox": [
+            148,
+            391,
+            601,
+            406
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准起草单位：国家粮食局标准质量中心、国粮武汉科学研究设计院有限公司、湖南粮食集团公司、湖南金健米业股份有限公司、湖北省粮油食品质量监督检测中心。",
+        "bbox": [
+            115,
+            409,
+            896,
+            444
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准主要起草人：唐瑞明、龙伶俐、谢健、熊宁、王正友、刘化、徐广超、张艳、杨卫民、谢文辉、李启盛、王辉、程科、张朝富、于素平、谢天、李志方、杨会宾、左家瑞、郭亚丽。",
+        "bbox": [
+            114,
+            447,
+            897,
+            482
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "本标准所代替标准的历次版本发布情况为：",
+        "bbox": [
+            148,
+            484,
+            483,
+            500
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "GB 1354—1978、GB 1354—1986,GB/T 1354—2009。",
+        "bbox": [
+            148,
+            503,
+            593,
+            518
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354—2018",
+        "bbox": [
+            750,
+            83,
+            897,
+            98
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "page_number",
+        "text": "I",
+        "bbox": [
+            861,
+            922,
+            873,
+            934
+        ],
+        "page_idx": 1
+    },
+    {
+        "type": "text",
+        "text": "大 米",
+        "text_level": 2,
+        "bbox": [
+            435,
+            145,
+            576,
+            166
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "1范围",
+        "text_level": 2,
+        "bbox": [
+            115,
+            203,
+            184,
+            218
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "本标准规定了大米的术语和定义、分类、质量要求、检验方法、检验规则及包装、标签、储存和运输的要求。",
+        "bbox": [
+            112,
+            241,
+            897,
+            275
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "本标准适用于以稻谷、糙米或半成品大米为原料经碾磨加工成的食用商品大米。",
+        "bbox": [
+            146,
+            281,
+            756,
+            297
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "2规范性引用文件",
+        "text_level": 2,
+        "bbox": [
+            114,
+            319,
+            272,
+            335
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "下列文件对于本文件的应用是必不可少的。凡是注日期的引用文件，仅注日期的版本适用于本文件。凡是不注日期的引用文件，其最新版本(包括所有的修改单)适用于本文件。",
+        "bbox": [
+            112,
+            358,
+            897,
+            395
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T191包装储运图示标志",
+        "bbox": [
+            147,
+            398,
+            397,
+            414
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB 2715食品安全国家标准粮食",
+        "bbox": [
+            147,
+            418,
+            436,
+            434
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB 5009.3食品安全国家标准食品中水分的测定",
+        "bbox": [
+            146,
+            438,
+            554,
+            454
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 5490粮油检验一般规则",
+        "bbox": [
+            147,
+            459,
+            422,
+            474
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 5491粮食、油料检验扦样、分样法",
+        "bbox": [
+            147,
+            479,
+            493,
+            495
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T5492粮油检验粮食、油料的色泽、气味、口味鉴定",
+        "bbox": [
+            147,
+            499,
+            606,
+            515
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 5493粮油检验类型及互混检验",
+        "bbox": [
+            147,
+            519,
+            476,
+            535
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 5494粮油检验粮食、油料的杂质、不完善粒检验",
+        "bbox": [
+            147,
+            539,
+            598,
+            555
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 5496粮食、油料检验黄粒米及裂纹粒检验法",
+        "bbox": [
+            148,
+            559,
+            572,
+            575
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 5502粮油检验米类加工精度检验",
+        "bbox": [
+            148,
+            579,
+            493,
+            595
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 5503粮油检验碎米检验法",
+        "bbox": [
+            148,
+            600,
+            440,
+            615
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB 7718食品安全国家标准预包装食品标签通则",
+        "bbox": [
+            148,
+            620,
+            559,
+            636
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T15682粮油检验稻谷、大米蒸煮食用品质感官评价方法",
+        "bbox": [
+            148,
+            640,
+            650,
+            656
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 15683大米直链淀粉含量的测定",
+        "bbox": [
+            148,
+            660,
+            483,
+            676
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T17109粮食销售包装",
+        "bbox": [
+            148,
+            680,
+            378,
+            695
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 26631粮油名词术语理化特性和质量",
+        "bbox": [
+            148,
+            700,
+            518,
+            716
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB 28050食品安全国家标准预包装食品营养标签通则",
+        "bbox": [
+            148,
+            720,
+            602,
+            737
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "GB/T 35881粮油检验稻谷黄粒米含量测定图像分析法",
+        "bbox": [
+            148,
+            741,
+            622,
+            757
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "JJF 1070定量包装商品净含量计量检验规则",
+        "bbox": [
+            148,
+            761,
+            508,
+            777
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "LS/T1533大米颜色黄度指数标准样品",
+        "bbox": [
+            149,
+            781,
+            472,
+            797
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "LS/T1534粳米品尝评分参照样品",
+        "bbox": [
+            149,
+            801,
+            436,
+            817
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "LS/T1535灿米品尝评分参照样品",
+        "bbox": [
+            149,
+            821,
+            436,
+            837
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "LS/T 15121早粘米加工精度标准样品",
+        "bbox": [
+            149,
+            841,
+            461,
+            857
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "LS/T15122晚粘米加工精度标准样品",
+        "bbox": [
+            149,
+            862,
+            462,
+            878
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "LS/T15123粳米加工精度标准样品",
+        "bbox": [
+            148,
+            882,
+            444,
+            898
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "定量包装商品计量监督管理办法(国家质量监督检验检疫总局令[2005]第75号)",
+        "bbox": [
+            148,
+            902,
+            765,
+            918
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354—2018",
+        "bbox": [
+            751,
+            83,
+            896,
+            97
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "page_number",
+        "text": "1",
+        "bbox": [
+            861,
+            922,
+            872,
+            933
+        ],
+        "page_idx": 2
+    },
+    {
+        "type": "text",
+        "text": "3术语和定义",
+        "text_level": 2,
+        "bbox": [
+            101,
+            135,
+            222,
+            150
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "GB/T 26631界定的以及下列术语和定义适用于本文件。",
+        "bbox": [
+            135,
+            175,
+            569,
+            191
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.1",
+        "text_level": 2,
+        "bbox": [
+            102,
+            197,
+            131,
+            211
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "半成品米semi-finished rice",
+        "text_level": 2,
+        "bbox": [
+            136,
+            218,
+            364,
+            233
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "糙米加工为大米过程中经过一定生产加工、仍需进一步加工才能达到本标准要求的中间品。",
+        "bbox": [
+            135,
+            239,
+            830,
+            255
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.2",
+        "text_level": 2,
+        "bbox": [
+            101,
+            261,
+            132,
+            275
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "碎米broken kernel",
+        "text_level": 2,
+        "bbox": [
+            136,
+            283,
+            301,
+            297
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "长度小于同批试样完整米粒(3.4)平均长度(3.3)四分之三、留存在直径1.0 mm 圆孔筛上的不完整米粒。",
+        "bbox": [
+            100,
+            304,
+            883,
+            341
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.2.1",
+        "text_level": 2,
+        "bbox": [
+            102,
+            346,
+            145,
+            361
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "大碎米large broken kernel",
+        "text_level": 2,
+        "bbox": [
+            136,
+            368,
+            360,
+            383
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "长度小于同批试样完整米粒(3.4)平均长度(3.3)四分之三、留存在直径2.0 mm 圆孔筛上的不完整米粒。",
+        "bbox": [
+            100,
+            389,
+            884,
+            426
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.2.2",
+        "text_level": 2,
+        "bbox": [
+            102,
+            432,
+            146,
+            446
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "小碎米 small broken kernel",
+        "text_level": 2,
+        "bbox": [
+            136,
+            454,
+            369,
+            468
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "通过直径2.0mm圆孔筛，留存在直径1.0 mm圆孔筛上的不完整米粒。",
+        "bbox": [
+            136,
+            475,
+            682,
+            491
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.3",
+        "text_level": 2,
+        "bbox": [
+            101,
+            496,
+            131,
+            510
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "平均长度average length",
+        "text_level": 2,
+        "bbox": [
+            136,
+            518,
+            338,
+            533
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "试样中完整米粒(3.4)长度的算术平均值。",
+        "bbox": [
+            137,
+            539,
+            457,
+            554
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.4",
+        "text_level": 2,
+        "bbox": [
+            102,
+            561,
+            131,
+            574
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "完整米粒whole kernel",
+        "text_level": 2,
+        "bbox": [
+            137,
+            582,
+            327,
+            596
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "除胚外其余部分未破损的完善米粒。",
+        "bbox": [
+            136,
+            603,
+            416,
+            618
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.5",
+        "text_level": 2,
+        "bbox": [
+            102,
+            625,
+            131,
+            638
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "加工精度 milling degree",
+        "text_level": 2,
+        "bbox": [
+            136,
+            646,
+            337,
+            661
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "加工后米胚残留以及米粒表面和背沟残留皮层的程度，包括精碾(3.5.1)和适碾(3.5.2)。",
+        "bbox": [
+            135,
+            667,
+            798,
+            683
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.5.1",
+        "text_level": 2,
+        "bbox": [
+            102,
+            689,
+            145,
+            703
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "精碾well milled",
+        "text_level": 2,
+        "bbox": [
+            136,
+            710,
+            279,
+            725
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "背沟基本无皮、或有皮不成线，米胚和粒面皮层去净的占80%～90%；或留皮度(3.5.3)在2.0%",
+        "bbox": [
+            101,
+            731,
+            883,
+            768
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.5.2",
+        "text_level": 2,
+        "bbox": [
+            102,
+            774,
+            146,
+            788
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "适碾reasonably well milled",
+        "text_level": 2,
+        "bbox": [
+            136,
+            795,
+            363,
+            810
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "背沟有皮，粒面皮层残留不超过1/5的占75%～85%，其中粳米、优质粳米中有胚的米粒在 20%以下；或留皮度(3.5.3)为2.0%～7.0%。",
+        "bbox": [
+            100,
+            817,
+            883,
+            853
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.5.3",
+        "text_level": 2,
+        "bbox": [
+            101,
+            860,
+            147,
+            874
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "留皮度bran degree",
+        "text_level": 2,
+        "bbox": [
+            137,
+            882,
+            302,
+            896
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "试样平放，残留皮层、米胚投影面积之和占试样投影面积的百分率。",
+        "bbox": [
+            137,
+            903,
+            645,
+            918
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354—2018",
+        "bbox": [
+            102,
+            84,
+            248,
+            97
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "page_number",
+        "text": "",
+        "bbox": [
+            125,
+            923,
+            138,
+            933
+        ],
+        "page_idx": 3
+    },
+    {
+        "type": "text",
+        "text": "3.6",
+        "text_level": 2,
+        "bbox": [
+            115,
+            116,
+            145,
+            130
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "不完善粒 defective kernel",
+        "text_level": 2,
+        "bbox": [
+            149,
+            137,
+            363,
+            153
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "包括未熟粒(3.6.1)、虫蚀粒(3.6.2）、病斑粒(3.6.3）、生霉粒(3.6.4)和糙米粒(3.6.5)等尚有食用价值的米粒。",
+        "bbox": [
+            113,
+            159,
+            896,
+            195
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.6.1",
+        "text_level": 2,
+        "bbox": [
+            115,
+            201,
+            159,
+            216
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "未熟粒immature kernel",
+        "text_level": 2,
+        "bbox": [
+            149,
+            222,
+            352,
+            238
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "米粒不饱满，外观全部呈粉质的米粒。",
+        "bbox": [
+            149,
+            244,
+            438,
+            260
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.6.2",
+        "text_level": 2,
+        "bbox": [
+            115,
+            265,
+            160,
+            279
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "虫蚀粒wormy kernel",
+        "bbox": [
+            150,
+            287,
+            330,
+            302
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "被虫蛀蚀的米粒。",
+        "bbox": [
+            150,
+            308,
+            288,
+            323
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.6.3",
+        "text_level": 2,
+        "bbox": [
+            115,
+            329,
+            160,
+            343
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "病斑粒spotted kernel",
+        "text_level": 2,
+        "bbox": [
+            149,
+            350,
+            333,
+            366
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "粒面有病斑的米粒。",
+        "bbox": [
+            149,
+            371,
+            307,
+            387
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.6.4",
+        "text_level": 2,
+        "bbox": [
+            115,
+            393,
+            160,
+            407
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "生霉粒moldy kernel，mildewed kernel",
+        "text_level": 2,
+        "bbox": [
+            149,
+            413,
+            459,
+            429
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "粒面有霉斑的米粒。",
+        "bbox": [
+            149,
+            435,
+            307,
+            451
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.6.5",
+        "text_level": 2,
+        "bbox": [
+            115,
+            456,
+            160,
+            471
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "糙米粒husked rice",
+        "text_level": 2,
+        "bbox": [
+            148,
+            477,
+            313,
+            493
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "稻谷经脱壳、完全未脱皮层的米粒。",
+        "bbox": [
+            149,
+            498,
+            420,
+            514
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.7",
+        "text_level": 2,
+        "bbox": [
+            115,
+            520,
+            145,
+            534
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "杂质extraneous matter",
+        "text_level": 2,
+        "bbox": [
+            150,
+            541,
+            343,
+            557
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "除米粒之外的其他物质，包括有机杂质(3.7.1)和无机杂质(3.7.2)等。",
+        "bbox": [
+            148,
+            562,
+            671,
+            579
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.7.1",
+        "text_level": 2,
+        "bbox": [
+            115,
+            584,
+            159,
+            598
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "有机杂质organic extraneous matter",
+        "text_level": 2,
+        "bbox": [
+            149,
+            605,
+            438,
+            620
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "糠粉(3.7.3)、带壳稗粒、稻谷粒、异种粮粒及其他动、植物源有机物质。",
+        "bbox": [
+            148,
+            626,
+            677,
+            642
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.7.2",
+        "text_level": 2,
+        "bbox": [
+            115,
+            648,
+            160,
+            662
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "无机杂质inorganic extraneous matter",
+        "text_level": 2,
+        "bbox": [
+            150,
+            669,
+            452,
+            684
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "泥土、砂石、砖瓦块及其他无机物质。",
+        "bbox": [
+            149,
+            690,
+            430,
+            706
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.7.3",
+        "text_level": 2,
+        "bbox": [
+            115,
+            712,
+            160,
+            725
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "糠粉rice bran powder",
+        "text_level": 2,
+        "bbox": [
+            150,
+            733,
+            337,
+            747
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "通过直径1.0mm 圆孔筛的筛下物，以及粘附在筛上的粉状物质。",
+        "bbox": [
+            148,
+            753,
+            646,
+            769
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.8",
+        "text_level": 2,
+        "bbox": [
+            115,
+            775,
+            145,
+            789
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "黄粒米yellow-colored kernel",
+        "text_level": 2,
+        "bbox": [
+            150,
+            796,
+            385,
+            811
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "胚乳呈黄色，与正常米粒色泽明显不同、与大米颜色黄度指数标准样品(LS/T1533)颜色一致或更深的米粒。",
+        "bbox": [
+            113,
+            817,
+            896,
+            854
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.9",
+        "text_level": 2,
+        "bbox": [
+            115,
+            860,
+            145,
+            874
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "互混率other kind rice kernel percentage",
+        "text_level": 2,
+        "bbox": [
+            150,
+            881,
+            472,
+            896
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "试样中混入的粒型、外观与本批次大米不同的这类米粒占试样的质量分数。",
+        "bbox": [
+            150,
+            903,
+            720,
+            918
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354-2018",
+        "bbox": [
+            751,
+            84,
+            896,
+            97
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "page_number",
+        "text": "",
+        "bbox": [
+            861,
+            923,
+            873,
+            933
+        ],
+        "page_idx": 4
+    },
+    {
+        "type": "text",
+        "text": "3.10",
+        "text_level": 2,
+        "bbox": [
+            101,
+            116,
+            141,
+            131
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "垩白度 chalkiness degree",
+        "text_level": 2,
+        "bbox": [
+            136,
+            137,
+            349,
+            152
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "胚乳中有白色不透明部分(包括腹白、心白和背白)的米粒为垩白粒;垩白粒试样平放时垩白投影面积总和占试样投影面积的百分率。",
+        "bbox": [
+            100,
+            157,
+            883,
+            193
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "3.11",
+        "text_level": 2,
+        "bbox": [
+            101,
+            198,
+            139,
+            212
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "品尝评分值sensory evaluation score",
+        "text_level": 2,
+        "bbox": [
+            136,
+            218,
+            428,
+            233
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "试样在规定条件下制得米饭的气味、色泽、外观结构、滋味等各项因素评分值的总和。",
+        "bbox": [
+            136,
+            237,
+            778,
+            253
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "3.12",
+        "text_level": 2,
+        "bbox": [
+            102,
+            258,
+            141,
+            272
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "直链淀粉含量amylose content",
+        "text_level": 2,
+        "bbox": [
+            136,
+            279,
+            386,
+            293
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "试样所含直链淀粉的质量占试样总质量的百分率。",
+        "bbox": [
+            136,
+            298,
+            522,
+            314
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "3.13",
+        "text_level": 2,
+        "bbox": [
+            101,
+            319,
+            141,
+            333
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "糯米milled long-grain nonglutinous rice，indica rice",
+        "text_level": 2,
+        "bbox": [
+            136,
+            339,
+            546,
+            354
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "用釉型非糯性稻谷制成的大米。",
+        "bbox": [
+            136,
+            359,
+            380,
+            374
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "3.14",
+        "text_level": 2,
+        "bbox": [
+            102,
+            379,
+            141,
+            393
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "粳米milled medium to short-grain nonglutinous rice, japonica rice",
+        "text_level": 2,
+        "bbox": [
+            136,
+            400,
+            653,
+            415
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "用粳型非糯性稻谷制成的大米。",
+        "bbox": [
+            136,
+            420,
+            380,
+            435
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "3.15",
+        "text_level": 2,
+        "bbox": [
+            102,
+            440,
+            141,
+            454
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "糯米milled waxy rice, milled glutinous rice",
+        "text_level": 2,
+        "bbox": [
+            136,
+            460,
+            479,
+            475
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "用糯性稻谷制成的大米，包括粘糯米(3.15.1)和粳糯米(3.15.2)。",
+        "bbox": [
+            136,
+            480,
+            622,
+            495
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "3.15.1",
+        "text_level": 2,
+        "bbox": [
+            101,
+            501,
+            154,
+            515
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "精糯米milled long-grain waxy rice,milled long-grain glutinous rice",
+        "text_level": 2,
+        "bbox": [
+            136,
+            521,
+            656,
+            536
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "用灿型糯性稻谷制成的大米。米粒一般呈长椭圆形或细长形，乳白色，不透明，也有的呈半透明状(阴糯米)，粘性大。",
+        "bbox": [
+            101,
+            541,
+            883,
+            577
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "3.15.2",
+        "text_level": 2,
+        "bbox": [
+            101,
+            582,
+            155,
+            596
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "粳糯米milled medium to short-grain waxy rice,milled medium to short-grain glutinous rice",
+        "text_level": 2,
+        "bbox": [
+            136,
+            602,
+            836,
+            617
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "用粳型糯性稻谷制成的大米。米粒一般呈椭圆形，乳白色，不透明，也有的呈半透明状(阴糯米)，粘",
+        "bbox": [
+            100,
+            622,
+            883,
+            658
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "4分类",
+        "text_level": 2,
+        "bbox": [
+            100,
+            681,
+            170,
+            696
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "按食用品质分为大米和优质大米。",
+        "bbox": [
+            136,
+            720,
+            398,
+            735
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "按原料稻谷类型，大米分为粘米、粳米、粘糯米、粳糯米四类；优质大米分为优质灿米和优质粳米两类。",
+        "bbox": [
+            100,
+            740,
+            883,
+            776
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "5质量要求",
+        "text_level": 2,
+        "bbox": [
+            100,
+            799,
+            206,
+            814
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "5.1质量指标",
+        "text_level": 2,
+        "bbox": [
+            100,
+            835,
+            220,
+            850
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "text",
+        "text": "5.1.1大米质量指标见表1,其中碎米(总量及其中小碎米含量)、加工精度和不完善粒含量为定等指标。",
+        "bbox": [
+            99,
+            864,
+            884,
+            900
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354—2018",
+        "bbox": [
+            102,
+            83,
+            248,
+            97
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "page_number",
+        "text": "",
+        "bbox": [
+            124,
+            923,
+            138,
+            933
+        ],
+        "page_idx": 5
+    },
+    {
+        "type": "table",
+        "img_path": "images/b39012cc443cba3b1a5e58e835f292b27bc98273a3ce33361e9fc88da8caf4a7.jpg",
+        "table_caption": [
+            "表1大米质量指标"
+        ],
+        "table_footnote": [
+            "5.1.2优质大米质量指标见表2,其中碎米(总量及其中小碎米含量)、加工精度、垩白度和品尝评分值为定等指标。"
+        ],
+        "table_body": "<table><tr><td rowspan=1 colspan=2>品种</td><td rowspan=1 colspan=3>粘米</td><td rowspan=1 colspan=3>粳米</td><td rowspan=1 colspan=2>灿糯米</td><td rowspan=1 colspan=2>粳糯米</td></tr><tr><td rowspan=1 colspan=2>等级</td><td rowspan=1 colspan=1>1级</td><td rowspan=1 colspan=1>二级</td><td rowspan=1 colspan=1>三级</td><td rowspan=1 colspan=1>、级</td><td rowspan=1 colspan=1>二级</td><td rowspan=1 colspan=1>三级</td><td rowspan=1 colspan=1>1级</td><td rowspan=1 colspan=1>二级</td><td rowspan=1 colspan=1>1级</td><td rowspan=1 colspan=1>二级</td></tr><tr><td rowspan=2 colspan=1>碎米</td><td rowspan=1 colspan=1>总量/%                                            ≤</td><td rowspan=1 colspan=1>15.0</td><td rowspan=1 colspan=1>20.0</td><td rowspan=1 colspan=1>30.0</td><td rowspan=1 colspan=1>10.0</td><td rowspan=1 colspan=1>15.0</td><td rowspan=1 colspan=1>20.0</td><td rowspan=1 colspan=1>15.0</td><td rowspan=1 colspan=1>25.0</td><td rowspan=1 colspan=1>10.0</td><td rowspan=1 colspan=1>15.0</td></tr><tr><td rowspan=1 colspan=1>其中：小碎米含量/%                       八</td><td rowspan=1 colspan=1>1.0</td><td rowspan=1 colspan=1>1.5</td><td rowspan=1 colspan=1>2.0</td><td rowspan=1 colspan=1>1.0</td><td rowspan=1 colspan=1>1.5</td><td rowspan=1 colspan=1>2.0</td><td rowspan=1 colspan=1>2.0</td><td rowspan=1 colspan=1>2.5</td><td rowspan=1 colspan=1>1.5</td><td rowspan=1 colspan=1>2.0</td></tr><tr><td rowspan=1 colspan=2>加工精度</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>适碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>适碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>适碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>适碾</td></tr><tr><td rowspan=1 colspan=2>不完善粒含量/%                                        八</td><td rowspan=1 colspan=1>3.0</td><td rowspan=1 colspan=1>4.0</td><td rowspan=1 colspan=1>6.0</td><td rowspan=1 colspan=1>3.0</td><td rowspan=1 colspan=1>4.0</td><td rowspan=1 colspan=1>6.0</td><td rowspan=1 colspan=1>4.0</td><td rowspan=1 colspan=1>6.0</td><td rowspan=1 colspan=1>4.0</td><td rowspan=1 colspan=1>6.0</td></tr><tr><td rowspan=1 colspan=2>水分含量/%                                               《</td><td rowspan=1 colspan=3>14.5</td><td rowspan=1 colspan=3>15.5</td><td rowspan=1 colspan=2>14.5</td><td rowspan=1 colspan=2>15.5</td></tr><tr><td rowspan=2 colspan=1>杂质</td><td rowspan=1 colspan=1>总量/%                                           ≤</td><td rowspan=1 colspan=10>0.25</td></tr><tr><td rowspan=1 colspan=1>其中：无机杂质含量/%                   ≤</td><td rowspan=1 colspan=10>0.02</td></tr><tr><td rowspan=1 colspan=2>黄粒米含量/%                                            ≤</td><td rowspan=1 colspan=10>1.0</td></tr><tr><td rowspan=1 colspan=2>互混率/%                                                   ≤</td><td rowspan=1 colspan=10>5.0</td></tr><tr><td rowspan=1 colspan=2>色泽、气味</td><td rowspan=1 colspan=10>正常</td></tr></table>",
+        "bbox": [
+            116,
+            153,
+            895,
+            434
+        ],
+        "page_idx": 6
+    },
+    {
+        "type": "table",
+        "img_path": "images/ac942f6f8e4158cbfb9a9c44b58ce6c4946010d88c96e3623e3e71234ca54398.jpg",
+        "table_caption": [
+            "表2优质大米质量指标"
+        ],
+        "table_footnote": [],
+        "table_body": "<table><tr><td rowspan=1 colspan=2>品种</td><td rowspan=1 colspan=3>优质粘米</td><td rowspan=1 colspan=3>优质粳米</td></tr><tr><td rowspan=1 colspan=2>等级</td><td rowspan=1 colspan=1>一级</td><td rowspan=1 colspan=1>二级</td><td rowspan=1 colspan=1>三级</td><td rowspan=1 colspan=1>一级</td><td rowspan=1 colspan=1>二级</td><td rowspan=1 colspan=1>三级</td></tr><tr><td rowspan=2 colspan=1>碎米</td><td rowspan=1 colspan=1>总量/%                                            ≤</td><td rowspan=1 colspan=1>10.0</td><td rowspan=1 colspan=1>12.5</td><td rowspan=1 colspan=1>15.0</td><td rowspan=1 colspan=1>5.0</td><td rowspan=1 colspan=1>7.5</td><td rowspan=1 colspan=1>10.0</td></tr><tr><td rowspan=1 colspan=1>其中：小碎米含量/%                        ≤</td><td rowspan=1 colspan=1>0.2</td><td rowspan=1 colspan=1>0.5</td><td rowspan=1 colspan=1>1.0</td><td rowspan=1 colspan=1>0.1</td><td rowspan=1 colspan=1>0.3</td><td rowspan=1 colspan=1>0.5</td></tr><tr><td rowspan=1 colspan=2>加工精度</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>适碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>精碾</td><td rowspan=1 colspan=1>适碾</td></tr><tr><td rowspan=1 colspan=2>垩白度/%                                                    ≤</td><td rowspan=1 colspan=1>2.0</td><td rowspan=1 colspan=1>5.0</td><td rowspan=1 colspan=1>8.0</td><td rowspan=1 colspan=1>2.0</td><td rowspan=1 colspan=1>4.0</td><td rowspan=1 colspan=1>6.0</td></tr><tr><td rowspan=1 colspan=2>品尝评分值/分                                            》</td><td rowspan=1 colspan=1>90</td><td rowspan=1 colspan=1>80</td><td rowspan=1 colspan=1>70</td><td rowspan=1 colspan=1>90</td><td rowspan=1 colspan=1>80</td><td rowspan=1 colspan=1>70</td></tr><tr><td rowspan=1 colspan=2>直链淀粉含量/%</td><td rowspan=1 colspan=3>13.0~22.0</td><td rowspan=1 colspan=3>13.0~20.0</td></tr><tr><td rowspan=1 colspan=2>水分含量/%                                                ≤</td><td rowspan=1 colspan=3>14.5</td><td rowspan=1 colspan=3>15.5</td></tr><tr><td rowspan=1 colspan=2>不完善粒含量/%                                        ≤</td><td rowspan=1 colspan=6>3.0</td></tr><tr><td rowspan=1 colspan=1>杂质</td><td rowspan=1 colspan=1>总量/%                                            ≤</td><td rowspan=1 colspan=6>0.25</td></tr><tr><td rowspan=1 colspan=1>限量</td><td rowspan=1 colspan=1>其中：无机杂质含量/%                    ≤</td><td rowspan=1 colspan=6>0.02</td></tr><tr><td rowspan=1 colspan=2>黄粒米含量/%                                            ≤口</td><td rowspan=1 colspan=6>0.5</td></tr><tr><td rowspan=1 colspan=2>口互混率/%                                                    ≤</td><td rowspan=1 colspan=6>5.0</td></tr><tr><td rowspan=1 colspan=2>色泽、气味</td><td rowspan=1 colspan=6>正常</td></tr></table>",
+        "bbox": [
+            116,
+            525,
+            895,
+            848
+        ],
+        "page_idx": 6
+    },
+    {
+        "type": "text",
+        "text": "5.2卫生要求",
+        "text_level": 2,
+        "bbox": [
+            114,
+            874,
+            232,
+            889
+        ],
+        "page_idx": 6
+    },
+    {
+        "type": "text",
+        "text": "5.2.1按食品安全标准和法律法规要求规定执行。",
+        "bbox": [
+            113,
+            902,
+            501,
+            917
+        ],
+        "page_idx": 6
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354-2018",
+        "bbox": [
+            751,
+            84,
+            896,
+            97
+        ],
+        "page_idx": 6
+    },
+    {
+        "type": "page_number",
+        "text": "",
+        "bbox": [
+            860,
+            922,
+            873,
+            933
+        ],
+        "page_idx": 6
+    },
+    {
+        "type": "text",
+        "text": "5.2.2植物检疫按有关标准和国家有关规定执行。",
+        "bbox": [
+            100,
+            116,
+            488,
+            132
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "5.3净含量",
+        "text_level": 2,
+        "bbox": [
+            101,
+            144,
+            202,
+            159
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "应符合《定量包装商品计量监督管理办法》的规定，为产品最大允许水分状况下的质量。",
+        "bbox": [
+            136,
+            172,
+            795,
+            187
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6检验方法",
+        "text_level": 2,
+        "bbox": [
+            100,
+            209,
+            205,
+            224
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.1平均长度检验：随机取完整米粒10粒,平放于黑色背景的平板上,按照头对头、尾对尾、不重叠、不留隙的方式，紧靠直尺排成一行，读出长度。双试验误差不应超过0.5mm,求其平均值再除以10 即为大米的平均长度。",
+        "bbox": [
+            99,
+            246,
+            884,
+            299
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.2碎米含量检验：按GB/T 5503 规定的方法执行，在称量碎米、大碎米前将混入其中的长度不小于完整米粒平均长度四分之三的米粒拣出。",
+        "bbox": [
+            99,
+            302,
+            883,
+            336
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.3加工精度检验：按GB/T5502 规定的方法执行,加工精度标准样品应执行当年颁布的LS/T15121、LS/T15122 或LS/T15123。",
+        "bbox": [
+            99,
+            339,
+            883,
+            372
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.4杂质、不完善粒含量检验：按GB/T5494 规定的方法执行。",
+        "bbox": [
+            100,
+            376,
+            587,
+            391
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.5垩白度检验：按附录A规定的方法执行。",
+        "bbox": [
+            100,
+            395,
+            453,
+            410
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.6水分含量检验：按GB 5009.3规定的方法执行。",
+        "bbox": [
+            100,
+            414,
+            501,
+            428
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.7黄粒米含量检验：按GB/T 5496 或GB/T35881规定的方法执行。",
+        "bbox": [
+            100,
+            432,
+            647,
+            447
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.8互混率检验：按GB/T 5493 规定的方法执行。",
+        "bbox": [
+            100,
+            451,
+            491,
+            465
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.9色泽、气味检验：按GB/T 5492 规定的方法执行。",
+        "bbox": [
+            100,
+            470,
+            516,
+            484
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.10品尝评分值检验：按GB/T 15682 规定的方法执行,应使用参照样品LS/T 1534和LS/T 1535。",
+        "bbox": [
+            99,
+            488,
+            873,
+            503
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.11直链淀粉含量检验：按GB/T15683 规定的方法执行。",
+        "bbox": [
+            100,
+            507,
+            561,
+            521
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "6.12净含量检验：按JJF 1070 规定执行。",
+        "bbox": [
+            100,
+            525,
+            426,
+            540
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "7检验规则",
+        "text_level": 2,
+        "bbox": [
+            100,
+            562,
+            206,
+            577
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "7.1扦样、分样",
+        "text_level": 2,
+        "bbox": [
+            101,
+            596,
+            229,
+            611
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "按GB/T 5491执行。",
+        "bbox": [
+            136,
+            625,
+            300,
+            639
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "7.2检验的一般规则",
+        "text_level": 2,
+        "bbox": [
+            101,
+            652,
+            272,
+            667
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "按GB/T 5490 执行。",
+        "bbox": [
+            136,
+            680,
+            300,
+            695
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "7.3产品组批",
+        "text_level": 2,
+        "bbox": [
+            101,
+            708,
+            220,
+            722
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "同原料、同工艺、同设备、同班次加工的产品为一批。",
+        "bbox": [
+            137,
+            736,
+            529,
+            751
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "7.4出厂检验",
+        "text_level": 2,
+        "bbox": [
+            101,
+            763,
+            220,
+            778
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "出厂检验项目按5.1的规定检验。",
+        "bbox": [
+            137,
+            791,
+            394,
+            806
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "7.5型式检验",
+        "text_level": 2,
+        "bbox": [
+            101,
+            819,
+            220,
+            833
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "image",
+        "img_path": "images/56e5031bc3402c24634112539af720ac7577d9939854b80f2fc09aba93293505.jpg",
+        "image_caption": [],
+        "image_footnote": [],
+        "bbox": [
+            101,
+            836,
+            131,
+            855
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "按第5章的规定检验。有下列情况之一的应进行型式检验：",
+        "bbox": [
+            136,
+            847,
+            592,
+            862
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "a）新产品投产；",
+        "bbox": [
+            136,
+            866,
+            274,
+            879
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "b）产品投产后，当原料、工艺、装备有较大改动，可能影响产品性能；",
+        "bbox": [
+            136,
+            884,
+            662,
+            899
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "c）产品停产一年以上,恢复生产；",
+        "bbox": [
+            137,
+            903,
+            407,
+            917
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354—2018",
+        "bbox": [
+            102,
+            83,
+            248,
+            97
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "page_number",
+        "text": "",
+        "bbox": [
+            125,
+            923,
+            137,
+            933
+        ],
+        "page_idx": 7
+    },
+    {
+        "type": "text",
+        "text": "d）连续生产三年；",
+        "bbox": [
+            148,
+            116,
+            305,
+            131
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "e）出厂检验结果与上次型式检验有较大差异；",
+        "bbox": [
+            148,
+            135,
+            517,
+            150
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "f）国家有关质量管理部门提出检验要求。",
+        "bbox": [
+            148,
+            154,
+            481,
+            169
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "7.6判定规则",
+        "text_level": 2,
+        "bbox": [
+            114,
+            182,
+            232,
+            197
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "7.6.1凡不符合GB 2715 以及国家卫生检验和植物检疫有关规定的产品，判为非食用产品。",
+        "bbox": [
+            112,
+            210,
+            813,
+            225
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "7.6.2加工精度不符合本标准要求的，判为非等级产品。",
+        "bbox": [
+            113,
+            229,
+            546,
+            244
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "7.6.3优质大米的定等指标中有一项及以上达不到表2该等级质量要求的，逐级降至符合的等级；低于最低等级指标的，可根据表1中大米质量指标进行判定。",
+        "bbox": [
+            113,
+            247,
+            896,
+            281
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "7.6.4大米的定等指标中有一项及以上达不到表1该等级质量要求的，逐级降至符合的等级；不符合最低等级指标要求的，作为非等级产品。其他指标有一项及以上不符合表1要求的，作为非等级产品。",
+        "bbox": [
+            112,
+            285,
+            896,
+            320
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8包装和标签",
+        "text_level": 2,
+        "bbox": [
+            114,
+            341,
+            237,
+            356
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.1包装",
+        "text_level": 2,
+        "bbox": [
+            114,
+            375,
+            199,
+            390
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.1.1包装应符合GB/T17109 的规定和食品安全要求。",
+        "bbox": [
+            112,
+            403,
+            553,
+            418
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.1.2若采用包装袋，则包装袋应坚固结实，封口或者缝口应严密。",
+        "bbox": [
+            113,
+            422,
+            625,
+            437
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.2标签",
+        "text_level": 2,
+        "bbox": [
+            114,
+            450,
+            198,
+            465
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.2.1包装大米的标签标识应符合GB7718 和GB 28050的规定。产品名称应按本标准规定的名称和等级标注。",
+        "bbox": [
+            114,
+            478,
+            897,
+            512
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.2.2外包装物包装储运标识应符合GB/T191的要求。",
+        "bbox": [
+            114,
+            516,
+            554,
+            530
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.2.3标注的净含量应为产品最大允许水分状况下的质量。",
+        "bbox": [
+            113,
+            534,
+            573,
+            549
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "8.2.4优质大米建议标注最佳食用期(品尝评分值为产品最佳食用期内数值)。",
+        "bbox": [
+            112,
+            553,
+            713,
+            568
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "9储存和运输",
+        "text_level": 2,
+        "bbox": [
+            114,
+            591,
+            236,
+            605
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "9.1袋装产品应储存在清洁、干燥、防雨、防潮、防虫、防鼠、无异味的合格仓库内，不得与有毒有害物质或水分较高的物质混存。",
+        "bbox": [
+            112,
+            628,
+            896,
+            662
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "9.2应使用符合食品安全要求的运输工具和容器运送大米产品，运输过程中应注意防止雨淋和被",
+        "bbox": [
+            112,
+            665,
+            897,
+            699
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "9.3在满足上述包装、运输和储存条件下，保质期不应低于3个月。",
+        "bbox": [
+            113,
+            703,
+            629,
+            718
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354-2018",
+        "bbox": [
+            751,
+            84,
+            896,
+            97
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "page_number",
+        "text": "",
+        "bbox": [
+            861,
+            922,
+            872,
+            933
+        ],
+        "page_idx": 8
+    },
+    {
+        "type": "text",
+        "text": "垩白度检验方法",
+        "text_level": 1,
+        "bbox": [
+            428,
+            183,
+            558,
+            198
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.1感官检验法(仲裁法)",
+        "text_level": 2,
+        "bbox": [
+            101,
+            231,
+            309,
+            246
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.1.1用具",
+        "text_level": 2,
+        "bbox": [
+            101,
+            265,
+            202,
+            280
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.1.1.1 分析盘。",
+        "bbox": [
+            101,
+            294,
+            240,
+            308
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.1.1.2镊子。",
+        "bbox": [
+            101,
+            313,
+            225,
+            327
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.1.2操作方法",
+        "text_level": 2,
+        "bbox": [
+            101,
+            341,
+            237,
+            356
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "从大米试样中随机数取完整米粒100粒 $\\left( \\boldsymbol { n } _ { 0 } \\right)$ ，拣出有垩白的米粒（粒数 $n _ { 1 } )$ ，再从拣出的垩白米粒中,随机取10粒(不足10粒者按实有粒数取),将垩白米粒平放，正视观察，逐粒目测垩白投影面积占完整米粒粒投影面积的百分率，并计算其平均值，即为垩白米粒垩白大小 $( W _ { \\mathrm { { D } } } )$ 的数值(%)。重复一次，两次测定结果平均值为垩白大小。",
+        "bbox": [
+            100,
+            369,
+            885,
+            442
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.1.3结果计算",
+        "text_level": 2,
+        "bbox": [
+            101,
+            455,
+            237,
+            470
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "垩白度(D)按式(A.1)计算，数值以百分数(%)计：",
+        "bbox": [
+            136,
+            483,
+            520,
+            498
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "equation",
+        "img_path": "images/8f463ca465d0d5b44be475bf3e690d546c4177b9dad40e9da5c8d7ac523b15ec.jpg",
+        "text": "$$\nD = W _ { \\mathrm { p } } \\times \\frac { n _ { \\mathrm { l } } } { n _ { \\mathrm { o } } }\n$$",
+        "text_format": "latex",
+        "bbox": [
+            438,
+            506,
+            546,
+            533
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "",
+        "bbox": [
+            645,
+            510,
+            882,
+            525
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "式中：",
+        "bbox": [
+            136,
+            537,
+            186,
+            552
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "D 垩白度，%；",
+        "bbox": [
+            137,
+            556,
+            294,
+            570
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "$W _ { \\textrm { D } }$ 垩白大小，%；",
+        "bbox": [
+            137,
+            575,
+            312,
+            589
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "$n _ { 1 }$ 试样中垩白米粒粒数；",
+        "bbox": [
+            136,
+            595,
+            373,
+            609
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "$n _ { \\mathrm { ~ 0 ~ } }$ 试样粒数。",
+        "bbox": [
+            137,
+            614,
+            284,
+            628
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.1.4重复性",
+        "text_level": 2,
+        "bbox": [
+            102,
+            642,
+            220,
+            657
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "在重复性条件下获得的两次独立测试结果的绝对差值不得超过0.5%。测定结果以双试验结果的平均值表示，保留小数点后一位。",
+        "bbox": [
+            101,
+            670,
+            883,
+            705
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.2图像处理测定法",
+        "text_level": 2,
+        "bbox": [
+            101,
+            727,
+            275,
+            741
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.2.1仪器和用具",
+        "text_level": 2,
+        "bbox": [
+            101,
+            761,
+            254,
+            776
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.2.1.1 分析盘。",
+        "bbox": [
+            102,
+            789,
+            242,
+            804
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.2.1.2镊子。",
+        "bbox": [
+            102,
+            808,
+            224,
+            822
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.2.1.3大米外观品质检测仪：具有图像采集和分析功能，能对全垩白的糯米准确测定。",
+        "bbox": [
+            100,
+            827,
+            769,
+            842
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.2.2检验原理",
+        "text_level": 2,
+        "bbox": [
+            101,
+            855,
+            237,
+            870
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "利用数字图像采集装置采集被测样品的数字图像信息，通过图像分析软件自动计算，得到样品米粒垩白总面积占样品总面积的百分比，即为样品垩白度的值。",
+        "bbox": [
+            102,
+            883,
+            883,
+            918
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354—2018",
+        "bbox": [
+            102,
+            83,
+            247,
+            97
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "page_number",
+        "text": "8",
+        "bbox": [
+            124,
+            923,
+            138,
+            933
+        ],
+        "page_idx": 9
+    },
+    {
+        "type": "text",
+        "text": "A.2.3操作方法",
+        "text_level": 2,
+        "bbox": [
+            116,
+            126,
+            250,
+            141
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "text",
+        "text": "A.2.3.1按照仪器说明书安装调试好仪器,分取约12g样品置于检测仪扫描板上，轻微晃动致米粒平摊散开而不重叠。",
+        "bbox": [
+            113,
+            154,
+            896,
+            187
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "text",
+        "text": "A.2.3.2按照仪器说明书操作，采集样品图像，仪器自动进行图像信息分析判定，测定样品的垩白度。  \n必要时可进行人工辅助判定。",
+        "bbox": [
+            114,
+            191,
+            895,
+            225
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "text",
+        "text": "A.2.4结果表示",
+        "text_level": 2,
+        "bbox": [
+            115,
+            238,
+            250,
+            253
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "text",
+        "text": "测定结果以双试验结果的平均值表示，保留小数点后一位。",
+        "bbox": [
+            149,
+            266,
+            596,
+            281
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "text",
+        "text": "A.2.5重复性",
+        "text_level": 2,
+        "bbox": [
+            115,
+            295,
+            232,
+            309
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "text",
+        "text": "在同一实验室，由同一操作者使用相同的设备，按相同的测试方法，并在短时间内对同一被测对象相互独立进行测试，获得的两次独立测试结果的绝对差值：当试样垩白度<5%时、在重复性条件下获得的两次独立测试结果的绝对误差<0.5%，当垩白度≥5%时、在重复性条件下获得的两次独立测试结果的绝对误差<1%。",
+        "bbox": [
+            113,
+            322,
+            897,
+            394
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354-2018",
+        "bbox": [
+            751,
+            84,
+            896,
+            97
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "page_number",
+        "text": "9",
+        "bbox": [
+            861,
+            923,
+            872,
+            933
+        ],
+        "page_idx": 10
+    },
+    {
+        "type": "text",
+        "text": "参考文献",
+        "text_level": 2,
+        "bbox": [
+            428,
+            145,
+            558,
+            159
+        ],
+        "page_idx": 11
+    },
+    {
+        "type": "text",
+        "text": "",
+        "bbox": [
+            136,
+            172,
+            471,
+            188
+        ],
+        "page_idx": 11
+    },
+    {
+        "type": "text",
+        "text": "[2]CODEX STAN 198-1995 Codex Standard for Rice.",
+        "bbox": [
+            136,
+            190,
+            587,
+            207
+        ],
+        "page_idx": 11
+    },
+    {
+        "type": "header",
+        "text": "GB/T 1354—2018",
+        "bbox": [
+            102,
+            84,
+            247,
+            97
+        ],
+        "page_idx": 11
+    },
+    {
+        "type": "page_number",
+        "text": "",
+        "bbox": [
+            126,
+            922,
+            145,
+            933
+        ],
+        "page_idx": 11
+    }
+]

@@ -1,0 +1,11 @@
+service_url=http://127.0.0.1:18103
+project_dir=example/demo_diet_kg_5
+query=我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？
+runs=1
+response_type=Multiple Paragraphs
+
+[scenarios]
+first_request=Service process is already up, but the project session is unloaded and the query cache is cleared before each measured request.
+steady_cold=Service process and project session stay warm, while the query cache is cleared before each measured request.
+steady_retrieval_warm=Service process and project session stay warm, the target query is primed, and only answer-cache entries are cleared before each measured request so retrieval/render/prompt caches remain warm.
+steady_answer_warm=Service process and project session stay warm, the target query is primed, and measured requests should hit the direct answer cache.

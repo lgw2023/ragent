@@ -1,0 +1,147 @@
+objc[2158]: Class AVFFrameReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x129be83a8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x1781e03a8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+objc[2158]: Class AVFAudioReceiver is implemented in both /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/cv2/.dylibs/libavdevice.61.3.100.dylib (0x129be83f8) and /Volumes/SSD1/ragent/.venv/lib/python3.13/site-packages/av/.dylibs/libavdevice.62.1.100.dylib (0x1781e03f8). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+INFO:     Started server process [2158]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:18103 (Press CTRL+C to quit)
+INFO:     127.0.0.1:58448 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/project/reset HTTP/1.1" 200 OK
+2026-04-22 09:54:01,490 | WARNING | ragent:__post_init__:538 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-22 09:54:03,018 | INFO | ragent:__post_init__:60 - Loaded graph from /Volumes/SSD1/ragent/example/demo_diet_kg_5/graph_chunk_entity_relation.graphml with 16030 nodes, 56050 edges
+INFO:nano-vectordb:Load (15656, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_entities.json'} 15656 data
+INFO:nano-vectordb:Load (56050, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_relationships.json'} 56050 data
+INFO:nano-vectordb:Load (2610, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_chunks.json'} 2610 data
+2026-04-22 09:54:03,854 | INFO | ragent:initialize:61 - Process 2158 doc status load doc_status with 2335 records
+2026-04-22 09:54:03,855 | INFO | ragent:ensure_workers:781 - limit_async[embedding]: 8 new workers initialized
+2026-04-22 09:54:03,855 | INFO | ragent:<lambda>:713 - Storage Initialization completed!
+2026-04-22 09:54:04,249 | INFO | ragent:ensure_workers:781 - limit_async[llm]: 32 new workers initialized
+2026-04-22 09:54:05,614 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keywords:f3a4a7aec205c6486e7c1d6e5f3287f7
+2026-04-22 09:54:05,615 | INFO | ragent:_get_node_data:4593 - Query nodes: 含糖饮料, 中速步行, 爬楼, variants: ['含糖饮料, 中速步行, 爬楼', '含糖饮料', '中速步行', '爬楼'], top_k: 40, cosine: 0.2
+2026-04-22 09:54:06,149 | INFO | ragent:_get_node_data:4648 - Local query: 40 entites, 345 relations
+2026-04-22 09:54:06,150 | INFO | ragent:_get_edge_data:4910 - Query edges: 能量平衡, 运动补偿, 含糖饮料影响, variants: ['能量平衡, 运动补偿, 含糖饮料影响', '能量平衡', '运动补偿', '含糖饮料影响'], top_k: 40, cosine: 0.2
+2026-04-22 09:54:06,716 | INFO | ragent:_get_edge_data:4977 - Global query: 53 entites, 40 relations
+2026-04-22 09:54:06,734 | WARNING | ragent:_find_related_text_unit_from_relationships:5158 - No valid text chunks after filtering
+2026-04-22 09:54:06,737 | WARNING | ragent:_find_most_related_text_unit_from_entities:4808 - No valid text units found
+2026-04-22 09:54:07,166 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:3456fbf292572a8f384896887b25c92e
+2026-04-22 09:54:07,170 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:346374d3a3708c2cb2f8480400b14a92
+2026-04-22 09:54:07,174 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:57adf37c2b201ca74945ffb991a206aa
+2026-04-22 09:54:26,275 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:31212fefe6f63712290bc22a8e789498
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+2026-04-22 09:54:26,289 | INFO | ragent:shutdown:785 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-22 09:54:26,290 | INFO | ragent:shutdown:820 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-22 09:54:26,290 | INFO | ragent:shutdown:785 - limit_async[llm]: Shutting down priority queue workers
+2026-04-22 09:54:26,290 | INFO | ragent:shutdown:820 - limit_async[llm]: Priority queue workers shutdown complete
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/project/reset HTTP/1.1" 200 OK
+2026-04-22 09:54:26,312 | INFO | ragent:<lambda>:713 - Storage Finalization completed!
+2026-04-22 09:54:26,313 | WARNING | ragent:__post_init__:538 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-22 09:54:27,830 | INFO | ragent:__post_init__:60 - Loaded graph from /Volumes/SSD1/ragent/example/demo_diet_kg_5/graph_chunk_entity_relation.graphml with 16030 nodes, 56050 edges
+INFO:nano-vectordb:Load (15656, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_entities.json'} 15656 data
+INFO:nano-vectordb:Load (56050, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_relationships.json'} 56050 data
+INFO:nano-vectordb:Load (2610, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_chunks.json'} 2610 data
+2026-04-22 09:54:28,649 | INFO | ragent:initialize:61 - Process 2158 doc status load doc_status with 2335 records
+2026-04-22 09:54:28,650 | INFO | ragent:ensure_workers:781 - limit_async[embedding]: 8 new workers initialized
+2026-04-22 09:54:28,650 | INFO | ragent:<lambda>:713 - Storage Initialization completed!
+2026-04-22 09:54:29,169 | INFO | ragent:ensure_workers:781 - limit_async[llm]: 32 new workers initialized
+2026-04-22 09:54:32,582 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keywords:f3a4a7aec205c6486e7c1d6e5f3287f7
+2026-04-22 09:54:32,584 | INFO | ragent:_get_node_data:4593 - Query nodes: 含糖饮料, 中速步行, 爬楼, 能量摄入, 能量消耗, variants: ['含糖饮料, 中速步行, 爬楼, 能量摄入, 能量消耗', '含糖饮料', '中速步行', '爬楼', '能量摄入', '能量消耗'], top_k: 40, cosine: 0.2
+2026-04-22 09:54:33,189 | INFO | ragent:_get_node_data:4648 - Local query: 40 entites, 489 relations
+2026-04-22 09:54:33,190 | INFO | ragent:_get_edge_data:4910 - Query edges: 能量平衡, 运动补偿, 含糖饮料影响, variants: ['能量平衡, 运动补偿, 含糖饮料影响', '能量平衡', '运动补偿', '含糖饮料影响'], top_k: 40, cosine: 0.2
+2026-04-22 09:54:33,718 | INFO | ragent:_get_edge_data:4977 - Global query: 53 entites, 40 relations
+2026-04-22 09:54:33,741 | WARNING | ragent:_find_related_text_unit_from_relationships:5158 - No valid text chunks after filtering
+2026-04-22 09:54:33,745 | WARNING | ragent:_find_most_related_text_unit_from_entities:4808 - No valid text units found
+2026-04-22 09:54:34,154 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:3456fbf292572a8f384896887b25c92e
+2026-04-22 09:54:34,158 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:346374d3a3708c2cb2f8480400b14a92
+2026-04-22 09:54:34,162 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:57adf37c2b201ca74945ffb991a206aa
+2026-04-22 09:54:49,411 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:31212fefe6f63712290bc22a8e789498
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/cache/clear HTTP/1.1" 200 OK
+2026-04-22 09:54:51,513 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keywords:f3a4a7aec205c6486e7c1d6e5f3287f7
+2026-04-22 09:54:51,513 | INFO | ragent:_get_node_data:4593 - Query nodes: 含糖饮料, 中速步行, 爬楼, 能量摄入, 能量消耗, variants: ['含糖饮料, 中速步行, 爬楼, 能量摄入, 能量消耗', '含糖饮料', '中速步行', '爬楼', '能量摄入', '能量消耗'], top_k: 40, cosine: 0.2
+2026-04-22 09:54:52,004 | INFO | ragent:_get_node_data:4648 - Local query: 40 entites, 489 relations
+2026-04-22 09:54:52,005 | INFO | ragent:_get_edge_data:4910 - Query edges: 能量平衡, 运动补偿, 含糖饮料影响, variants: ['能量平衡, 运动补偿, 含糖饮料影响', '能量平衡', '运动补偿', '含糖饮料影响'], top_k: 40, cosine: 0.2
+2026-04-22 09:54:52,505 | INFO | ragent:_get_edge_data:4977 - Global query: 53 entites, 40 relations
+2026-04-22 09:54:52,522 | WARNING | ragent:_find_related_text_unit_from_relationships:5158 - No valid text chunks after filtering
+2026-04-22 09:54:52,525 | WARNING | ragent:_find_most_related_text_unit_from_entities:4808 - No valid text units found
+2026-04-22 09:54:53,029 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:3456fbf292572a8f384896887b25c92e
+2026-04-22 09:54:53,033 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:346374d3a3708c2cb2f8480400b14a92
+2026-04-22 09:54:53,052 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:57adf37c2b201ca74945ffb991a206aa
+2026-04-22 09:55:05,593 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:31212fefe6f63712290bc22a8e789498
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+2026-04-22 09:55:05,611 | INFO | ragent:shutdown:785 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-22 09:55:05,611 | INFO | ragent:shutdown:820 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-22 09:55:05,611 | INFO | ragent:shutdown:785 - limit_async[llm]: Shutting down priority queue workers
+2026-04-22 09:55:05,611 | INFO | ragent:shutdown:820 - limit_async[llm]: Priority queue workers shutdown complete
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/project/reset HTTP/1.1" 200 OK
+2026-04-22 09:55:05,630 | INFO | ragent:<lambda>:713 - Storage Finalization completed!
+2026-04-22 09:55:05,631 | WARNING | ragent:__post_init__:538 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-22 09:55:07,199 | INFO | ragent:__post_init__:60 - Loaded graph from /Volumes/SSD1/ragent/example/demo_diet_kg_5/graph_chunk_entity_relation.graphml with 16030 nodes, 56050 edges
+INFO:nano-vectordb:Load (15656, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_entities.json'} 15656 data
+INFO:nano-vectordb:Load (56050, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_relationships.json'} 56050 data
+INFO:nano-vectordb:Load (2610, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_chunks.json'} 2610 data
+2026-04-22 09:55:08,001 | INFO | ragent:initialize:61 - Process 2158 doc status load doc_status with 2335 records
+2026-04-22 09:55:08,002 | INFO | ragent:ensure_workers:781 - limit_async[embedding]: 8 new workers initialized
+2026-04-22 09:55:08,002 | INFO | ragent:<lambda>:713 - Storage Initialization completed!
+2026-04-22 09:55:08,329 | INFO | ragent:ensure_workers:781 - limit_async[llm]: 32 new workers initialized
+2026-04-22 09:55:12,107 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keywords:f3a4a7aec205c6486e7c1d6e5f3287f7
+2026-04-22 09:55:12,108 | INFO | ragent:_get_node_data:4593 - Query nodes: 含糖饮料, 中速步行, 爬楼, 热量摄入, 热量消耗, variants: ['含糖饮料, 中速步行, 爬楼, 热量摄入, 热量消耗', '含糖饮料', '中速步行', '爬楼', '热量摄入', '热量消耗'], top_k: 40, cosine: 0.2
+2026-04-22 09:55:12,653 | INFO | ragent:_get_node_data:4648 - Local query: 40 entites, 428 relations
+2026-04-22 09:55:12,653 | INFO | ragent:_get_edge_data:4910 - Query edges: 能量平衡, 运动补偿, 含糖饮料影响, variants: ['能量平衡, 运动补偿, 含糖饮料影响', '能量平衡', '运动补偿', '含糖饮料影响'], top_k: 40, cosine: 0.2
+2026-04-22 09:55:13,297 | INFO | ragent:_get_edge_data:4977 - Global query: 53 entites, 40 relations
+2026-04-22 09:55:13,323 | WARNING | ragent:_find_related_text_unit_from_relationships:5158 - No valid text chunks after filtering
+2026-04-22 09:55:13,326 | WARNING | ragent:_find_most_related_text_unit_from_entities:4808 - No valid text units found
+2026-04-22 09:55:13,858 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:3456fbf292572a8f384896887b25c92e
+2026-04-22 09:55:13,862 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:346374d3a3708c2cb2f8480400b14a92
+2026-04-22 09:55:13,865 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:57adf37c2b201ca74945ffb991a206aa
+2026-04-22 09:55:22,637 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:31212fefe6f63712290bc22a8e789498
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/cache/clear HTTP/1.1" 200 OK
+2026-04-22 09:55:27,505 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:31212fefe6f63712290bc22a8e789498
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+2026-04-22 09:55:27,521 | INFO | ragent:shutdown:785 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-22 09:55:27,521 | INFO | ragent:shutdown:820 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-22 09:55:27,521 | INFO | ragent:shutdown:785 - limit_async[llm]: Shutting down priority queue workers
+2026-04-22 09:55:27,521 | INFO | ragent:shutdown:820 - limit_async[llm]: Priority queue workers shutdown complete
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/project/reset HTTP/1.1" 200 OK
+2026-04-22 09:55:27,532 | INFO | ragent:<lambda>:713 - Storage Finalization completed!
+2026-04-22 09:55:27,533 | WARNING | ragent:__post_init__:538 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-04-22 09:55:29,193 | INFO | ragent:__post_init__:60 - Loaded graph from /Volumes/SSD1/ragent/example/demo_diet_kg_5/graph_chunk_entity_relation.graphml with 16030 nodes, 56050 edges
+INFO:nano-vectordb:Load (15656, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_entities.json'} 15656 data
+INFO:nano-vectordb:Load (56050, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_relationships.json'} 56050 data
+INFO:nano-vectordb:Load (2610, 256) data
+INFO:nano-vectordb:Init {'embedding_dim': 256, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/example/demo_diet_kg_5/vdb_chunks.json'} 2610 data
+2026-04-22 09:55:30,016 | INFO | ragent:initialize:61 - Process 2158 doc status load doc_status with 2335 records
+2026-04-22 09:55:30,017 | INFO | ragent:ensure_workers:781 - limit_async[embedding]: 8 new workers initialized
+2026-04-22 09:55:30,017 | INFO | ragent:<lambda>:713 - Storage Initialization completed!
+2026-04-22 09:55:30,351 | INFO | ragent:ensure_workers:781 - limit_async[llm]: 32 new workers initialized
+2026-04-22 09:55:32,211 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keywords:f3a4a7aec205c6486e7c1d6e5f3287f7
+2026-04-22 09:55:32,212 | INFO | ragent:_get_node_data:4593 - Query nodes: 含糖饮料, 中速步行, 爬楼, 能量摄入, 能量消耗, variants: ['含糖饮料, 中速步行, 爬楼, 能量摄入, 能量消耗', '含糖饮料', '中速步行', '爬楼', '能量摄入', '能量消耗'], top_k: 40, cosine: 0.2
+2026-04-22 09:55:32,681 | INFO | ragent:_get_node_data:4648 - Local query: 40 entites, 489 relations
+2026-04-22 09:55:32,682 | INFO | ragent:_get_edge_data:4910 - Query edges: 能量平衡, 运动补偿, 含糖饮料影响, variants: ['能量平衡, 运动补偿, 含糖饮料影响', '能量平衡', '运动补偿', '含糖饮料影响'], top_k: 40, cosine: 0.2
+2026-04-22 09:55:33,177 | INFO | ragent:_get_edge_data:4977 - Global query: 53 entites, 40 relations
+2026-04-22 09:55:33,201 | WARNING | ragent:_find_related_text_unit_from_relationships:5158 - No valid text chunks after filtering
+2026-04-22 09:55:33,205 | WARNING | ragent:_find_most_related_text_unit_from_entities:4808 - No valid text units found
+2026-04-22 09:55:33,686 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:3456fbf292572a8f384896887b25c92e
+2026-04-22 09:55:33,690 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:346374d3a3708c2cb2f8480400b14a92
+2026-04-22 09:55:33,694 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:57adf37c2b201ca74945ffb991a206aa
+2026-04-22 09:55:50,683 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:31212fefe6f63712290bc22a8e789498
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58453 - "POST /v1/benchmark/query HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-04-22 09:55:55,477 | INFO | ragent:shutdown:785 - limit_async[embedding]: Shutting down priority queue workers
+2026-04-22 09:55:55,477 | INFO | ragent:shutdown:820 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-04-22 09:55:55,477 | INFO | ragent:shutdown:785 - limit_async[llm]: Shutting down priority queue workers
+2026-04-22 09:55:55,477 | INFO | ragent:shutdown:820 - limit_async[llm]: Priority queue workers shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2158]

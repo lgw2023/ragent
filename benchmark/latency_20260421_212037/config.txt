@@ -1,0 +1,6 @@
+repo_root=/Volumes/SSD1/ragent
+project_dir=example/demo_diet_kg_5
+cache_targets=/Volumes/SSD1/ragent/example/demo_diet_kg_5/kv_store_llm_response_cache.sqlite
+runs=5
+query=我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？
+notes=wall_seconds is external /usr/bin/time; init_seconds is rag_initialization_total; query_seconds is onehop_total
