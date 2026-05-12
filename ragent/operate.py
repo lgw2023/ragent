@@ -958,6 +958,26 @@ _STANDALONE_NUMERIC_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 _LOW_SIGNAL_LOW_LEVEL_KEYWORDS = {"补回", "超量", "达标"}
+_NO_LLM_GENERIC_QUERY_KEYWORDS = {
+    "什么",
+    "文档",
+    "文件",
+    "资料",
+    "内容",
+    "主题",
+    "主要主题",
+    "核心主题",
+    "文档主题",
+    "文档主要主题",
+    "文档的主要主题",
+    "主要内容",
+    "文档内容",
+    "这篇文档",
+    "这份文档",
+    "是什么",
+}
+_CJK_PHRASE_RE = re.compile(r"[\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9_（）()《》\-]{1,24}")
+_HASH_LIKE_RE = re.compile(r"^[0-9a-fA-F]{16,}$")
 
 
 def _clean_keyword_text(keyword: Any) -> str:
@@ -965,6 +985,27 @@ def _clean_keyword_text(keyword: Any) -> str:
     cleaned = cleaned.replace("，", ",")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip(" ,;；、。.()（）[]【】")
+
+
+def _keyword_generic_key(keyword: Any) -> str:
+    return re.sub(r"[\s,，;；、。.?!！？:：()（）\[\]【】《》\"'“”‘’]+", "", str(keyword or ""))
+
+
+def _is_no_llm_generic_keyword(keyword: Any) -> bool:
+    normalized = _keyword_generic_key(keyword)
+    if not normalized:
+        return True
+    if normalized in _NO_LLM_GENERIC_QUERY_KEYWORDS:
+        return True
+    return normalized.endswith("是什么") and len(normalized) <= 12
+
+
+def _filter_no_llm_informative_keywords(keywords: list[str]) -> list[str]:
+    return [
+        keyword
+        for keyword in _dedupe_keywords([_clean_keyword_text(item) for item in keywords])
+        if keyword and not _is_no_llm_generic_keyword(keyword)
+    ]
 
 
 def _normalize_retrieval_query_text(value: Any) -> str:
@@ -1151,6 +1192,243 @@ def _dedupe_keywords(keywords: list[str]) -> list[str]:
         seen.add(normalized)
         deduped.append(keyword)
     return deduped
+
+
+def _strip_generated_suffix(value: str) -> str:
+    cleaned = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", value)
+    cleaned = re.sub(r"[_-]?\d{4}(?:版)?$", "", cleaned)
+    cleaned = re.sub(r"[_-]?[0-9a-fA-F]{8,}$", "", cleaned)
+    return cleaned.strip(" _-")
+
+
+def _split_derived_keyword_phrases(value: Any) -> list[str]:
+    raw_text = clean_str(str(value or ""))
+    if not raw_text:
+        return []
+    raw_text = raw_text.replace(GRAPH_FIELD_SEP, " ")
+    raw_text = raw_text.replace("\\n", " ")
+    phrases: list[str] = []
+    for match in _CJK_PHRASE_RE.finditer(raw_text):
+        phrase = match.group()
+        phrase = re.sub(r"^#+", "", phrase)
+        phrase = re.sub(r"^准则[一二三四五六七八九十\d]+", "", phrase)
+        phrase = re.sub(r"^[一二三四五六七八九十\d]+[、.．]", "", phrase)
+        phrase = _strip_generated_suffix(_clean_keyword_text(phrase))
+        if (
+            2 <= len(phrase) <= 18
+            and not _is_no_llm_generic_keyword(phrase)
+            and not _HASH_LIKE_RE.match(phrase)
+        ):
+            phrases.append(phrase)
+    return _dedupe_keywords(phrases)
+
+
+def _file_title_keywords(file_path: Any) -> list[str]:
+    raw_path = str(file_path or "").split(GRAPH_FIELD_SEP)[0]
+    if not raw_path:
+        return []
+    stem = _strip_generated_suffix(os.path.basename(raw_path))
+    if _HASH_LIKE_RE.match(stem):
+        parent = os.path.basename(os.path.dirname(raw_path))
+        stem = _strip_generated_suffix(parent)
+    return _split_derived_keyword_phrases(stem)
+
+
+def _derive_vector_context_keywords(
+    vector_weights: dict[str, float],
+    vector_texts: dict[str, str],
+    vector_file_paths: dict[str, str],
+    vector_metadata_map: dict[str, dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    high_level: list[str] = []
+    low_level: list[str] = []
+    sorted_chunk_ids = [
+        chunk_id
+        for chunk_id, _score in sorted(
+            vector_weights.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+    ][:8]
+    for chunk_id in sorted_chunk_ids:
+        metadata = vector_metadata_map.get(chunk_id, {})
+        low_level.extend(_file_title_keywords(vector_file_paths.get(chunk_id)))
+        low_level.extend(_file_title_keywords(metadata.get("file_path")))
+        source_ref = metadata.get("source_ref")
+        if source_ref:
+            parts = [part.strip() for part in str(source_ref).split("|") if part.strip()]
+            if parts:
+                low_level.extend(_split_derived_keyword_phrases(parts[0]))
+            high_level.extend(
+                phrase
+                for part in parts[1:]
+                for phrase in _split_derived_keyword_phrases(part)
+            )
+        high_level.extend(_split_derived_keyword_phrases(metadata.get("section_path")))
+
+        text = str(vector_texts.get(chunk_id) or "")
+        for heading in re.findall(r"#{1,6}\s*([^#\n]{2,80})", text[:1200]):
+            high_level.extend(_split_derived_keyword_phrases(heading))
+        first_line = text.splitlines()[0] if text else ""
+        low_level.extend(_split_derived_keyword_phrases(first_line.split("#####", 1)[0]))
+
+    high_level = _filter_no_llm_informative_keywords(high_level)
+    low_level = _filter_no_llm_informative_keywords(low_level)
+    high_set = {item.casefold() for item in high_level}
+    low_level = [item for item in low_level if item.casefold() not in high_set]
+    return high_level[:8], low_level[:8]
+
+
+def _build_vector_keyword_context(
+    vector_weights: dict[str, float],
+    vector_texts: dict[str, str],
+    vector_file_paths: dict[str, str],
+    vector_metadata_map: dict[str, dict[str, Any]],
+) -> str:
+    snippets: list[str] = []
+    sorted_chunk_ids = [
+        chunk_id
+        for chunk_id, _score in sorted(
+            vector_weights.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+    ][:5]
+    for chunk_id in sorted_chunk_ids:
+        metadata = vector_metadata_map.get(chunk_id, {})
+        fields = [
+            vector_file_paths.get(chunk_id),
+            metadata.get("source_ref"),
+            metadata.get("section_path"),
+            str(vector_texts.get(chunk_id) or "")[:500],
+        ]
+        snippets.append(" ".join(str(item) for item in fields if item))
+    return "\n".join(snippets)
+
+
+async def _derive_no_llm_keywords_from_vector_context(
+    *,
+    vector_weights: dict[str, float],
+    vector_texts: dict[str, str],
+    vector_file_paths: dict[str, str],
+    vector_metadata_map: dict[str, dict[str, Any]],
+    global_config: dict[str, Any],
+) -> keyword_extraction.KeywordResolution | None:
+    reason = (
+        "query-only GLiNER keywords were non-informative; derived no-LLM "
+        "keywords from first-pass vector evidence"
+    )
+    context_text = _build_vector_keyword_context(
+        vector_weights,
+        vector_texts,
+        vector_file_paths,
+        vector_metadata_map,
+    )
+
+    gliner_resolution: keyword_extraction.KeywordResolution | None = None
+    if context_text.strip():
+        gliner_resolution = await keyword_extraction.extract_keywords_with_gliner(
+            context_text,
+            global_config,
+            fallback_reason=reason,
+        )
+        high_level = _filter_no_llm_informative_keywords(
+            gliner_resolution.high_level_keywords
+        )
+        low_level = _filter_no_llm_informative_keywords(
+            gliner_resolution.low_level_keywords
+        )
+    else:
+        high_level = []
+        low_level = []
+
+    heuristic_high, heuristic_low = _derive_vector_context_keywords(
+        vector_weights,
+        vector_texts,
+        vector_file_paths,
+        vector_metadata_map,
+    )
+    high_level = _dedupe_keywords([*high_level, *heuristic_high])[:8]
+    high_set = {item.casefold() for item in high_level}
+    low_level = [
+        item
+        for item in _dedupe_keywords([*low_level, *heuristic_low])
+        if item.casefold() not in high_set
+    ][:8]
+    if not high_level and not low_level:
+        return None
+
+    return keyword_extraction.KeywordResolution(
+        high_level_keywords=high_level,
+        low_level_keywords=low_level,
+        keyword_source=keyword_extraction.KEYWORD_SOURCE_GLINER_FALLBACK,
+        keyword_strategy=keyword_extraction.KEYWORD_STRATEGY_TOKEN_CLASSIFICATION,
+        keyword_fallback_reason=reason,
+        keyword_model=(
+            gliner_resolution.keyword_model
+            if gliner_resolution is not None
+            else keyword_extraction.get_gliner_keyword_model_name(global_config)
+        ),
+        keyword_model_device=(
+            gliner_resolution.keyword_model_device
+            if gliner_resolution is not None
+            else keyword_extraction.get_gliner_keyword_device(global_config)
+        ),
+        keyword_model_error=(
+            gliner_resolution.keyword_model_error
+            if gliner_resolution is not None
+            else None
+        ),
+    )
+
+
+async def _refresh_no_llm_keywords_from_vector_context(
+    query_param: QueryParam,
+    *,
+    vector_weights: dict[str, float],
+    vector_texts: dict[str, str],
+    vector_file_paths: dict[str, str],
+    vector_metadata_map: dict[str, dict[str, Any]],
+    global_config: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    if (
+        getattr(query_param, "keyword_source", None)
+        != keyword_extraction.KEYWORD_SOURCE_GLINER_FALLBACK
+    ):
+        return query_param.hl_keywords, query_param.ll_keywords
+
+    informative_hl = _filter_no_llm_informative_keywords(query_param.hl_keywords)
+    informative_ll = _filter_no_llm_informative_keywords(query_param.ll_keywords)
+    if informative_hl or informative_ll:
+        if (
+            informative_hl != query_param.hl_keywords
+            or informative_ll != query_param.ll_keywords
+        ):
+            keyword_extraction.apply_keyword_resolution(
+                query_param,
+                keyword_extraction.KeywordResolution(
+                    high_level_keywords=informative_hl,
+                    low_level_keywords=informative_ll,
+                    keyword_source=query_param.keyword_source,
+                    keyword_strategy=query_param.keyword_strategy,
+                    keyword_fallback_reason=query_param.keyword_fallback_reason,
+                    keyword_model=query_param.keyword_model,
+                    keyword_model_device=query_param.keyword_model_device,
+                    keyword_model_error=query_param.keyword_model_error,
+                ),
+            )
+        return query_param.hl_keywords, query_param.ll_keywords
+
+    derived_resolution = await _derive_no_llm_keywords_from_vector_context(
+        vector_weights=vector_weights,
+        vector_texts=vector_texts,
+        vector_file_paths=vector_file_paths,
+        vector_metadata_map=vector_metadata_map,
+        global_config=global_config,
+    )
+    if derived_resolution is not None:
+        keyword_extraction.apply_keyword_resolution(query_param, derived_resolution)
+    return query_param.hl_keywords, query_param.ll_keywords
 
 
 def _normalize_high_level_keyword(keyword: Any) -> str | None:
@@ -5437,6 +5715,15 @@ async def _build_hybrid_retrieval_debug_data(
         hl_keywords, ll_keywords = await get_keywords_from_query(
             query, query_param, global_config, hashing_kv
         )
+        if not _llm_keyword_extraction_allowed(query_param):
+            hl_keywords, ll_keywords = await _refresh_no_llm_keywords_from_vector_context(
+                query_param,
+                vector_weights=vector_weights,
+                vector_texts=vector_texts,
+                vector_file_paths=vector_file_paths,
+                vector_metadata_map=vector_metadata_map,
+                global_config=global_config,
+            )
     _record_stage_timing(
         stage_timings,
         "keyword_extraction",
