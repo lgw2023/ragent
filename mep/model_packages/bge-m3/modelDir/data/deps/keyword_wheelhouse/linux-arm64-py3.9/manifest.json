@@ -1,0 +1,28 @@
+{
+  "platform_tag": "linux-arm64-py3.9",
+  "pip_platform": "manylinux2014_aarch64",
+  "python_version": "3.9",
+  "abi": "cp39",
+  "binary_requirements": [
+    "gliner==0.2.26",
+    "stanza==1.10.1",
+    "onnxruntime==1.16.3",
+    "coloredlogs==15.0.1",
+    "flatbuffers==25.12.19",
+    "humanfriendly==10.0",
+    "emoji==2.14.1"
+  ],
+  "pure_wheel_requirements": [
+    "langdetect==1.0.9"
+  ],
+  "wheels": [
+    "coloredlogs-15.0.1-py2.py3-none-any.whl",
+    "emoji-2.14.1-py3-none-any.whl",
+    "flatbuffers-25.12.19-py2.py3-none-any.whl",
+    "gliner-0.2.26-py3-none-any.whl",
+    "humanfriendly-10.0-py2.py3-none-any.whl",
+    "langdetect-1.0.9-py3-none-any.whl",
+    "onnxruntime-1.16.3-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+    "stanza-1.10.1-py3-none-any.whl"
+  ]
+}
