@@ -220,8 +220,12 @@ def request_keyword_info(request: dict[str, Any]) -> RequestKeywordInfo:
         )
     )
 
+    retrieval_only_default = retrieval_only is None and only_need_context is None
+
     return RequestKeywordInfo(
-        retrieval_only=bool(retrieval_only) or bool(only_need_context),
+        retrieval_only=(
+            retrieval_only_default or bool(retrieval_only) or bool(only_need_context)
+        ),
         high_level_keywords=high_level_keywords,
         low_level_keywords=low_level_keywords,
     )

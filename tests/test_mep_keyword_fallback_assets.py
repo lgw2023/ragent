@@ -294,6 +294,28 @@ def test_summarize_requests_uses_process_spec_aliases(tmp_path: Path):
     assert summary["requests_have_retrieval_only"] is True
 
 
+def test_summarize_requests_defaults_unset_mode_to_retrieval_only(tmp_path: Path):
+    request_dir = tmp_path / "example" / "mep_requests"
+    request_dir.mkdir(parents=True)
+    (request_dir / "onehop_request.json").write_text(
+        json.dumps(
+            {
+                "data": {
+                    "query_type": "onehop",
+                    "query": "文档的主要主题是什么？",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_requests(tmp_path, "onehop_request.json")
+
+    assert summary["requests_require_llm"] is False
+    assert summary["requests_have_retrieval_only"] is True
+    assert summary["requests"][0]["retrieval_only"] is True
+
+
 @pytest.mark.parametrize(
     ("retrieval_result", "match"),
     [
