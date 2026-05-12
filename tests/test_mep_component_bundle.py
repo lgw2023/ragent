@@ -17,6 +17,11 @@ from mep_dependency_bootstrap import (
 )
 
 
+def _write_minimal_wheel(path: Path) -> None:
+    with zipfile.ZipFile(path, "w") as wheel:
+        wheel.writestr("demo_dep/__init__.py", "")
+
+
 def test_root_component_files_exist():
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -328,7 +333,7 @@ def test_mep_offline_requirements_install_uses_platform_wheelhouse(
     deps_dir = runtime_root / "data" / "deps"
     wheelhouse = deps_dir / "wheelhouse" / "test-platform"
     wheelhouse.mkdir(parents=True)
-    (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake")
+    _write_minimal_wheel(wheelhouse / "demo_dep-1.0.0-py3-none-any.whl")
     requirements = deps_dir / "requirements-test-platform.txt"
     requirements.write_text("demo-dep\n", encoding="utf-8")
     constraints = deps_dir / "constraints-test-platform.txt"
@@ -369,6 +374,46 @@ def test_mep_offline_requirements_install_uses_platform_wheelhouse(
     assert command[command.index("-r") + 1] == str(requirements.resolve())
 
 
+def test_mep_offline_requirements_install_rejects_corrupt_wheel(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    deps_dir = runtime_root / "data" / "deps"
+    wheelhouse = deps_dir / "wheelhouse" / "test-platform"
+    wheelhouse.mkdir(parents=True)
+    corrupt_wheel = wheelhouse / "demo_dep-1.0.0-py3-none-any.whl"
+    corrupt_wheel.write_bytes(b"not a zip")
+    requirements = deps_dir / "requirements-test-platform.txt"
+    requirements.write_text("demo-dep\n", encoding="utf-8")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_OFFLINE_PIP_INSTALL", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setattr(mep_dependency_bootstrap, "_OFFLINE_REQUIREMENTS_DONE", set())
+    monkeypatch.setattr(
+        mep_dependency_bootstrap.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected pip")),
+    )
+
+    try:
+        ensure_mep_offline_requirements(component_dir)
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected corrupt wheelhouse to fail before pip")
+
+    assert "offline MEP wheelhouse contains invalid wheel file(s)" in message
+    assert str(corrupt_wheel) in message
+
+
 def test_mep_offline_requirements_install_can_be_disabled(
     monkeypatch,
     tmp_path: Path,
@@ -383,7 +428,7 @@ def test_mep_offline_requirements_install_can_be_disabled(
     deps_dir = runtime_root / "data" / "deps"
     wheelhouse = deps_dir / "wheelhouse" / "test-platform"
     wheelhouse.mkdir(parents=True)
-    (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake")
+    _write_minimal_wheel(wheelhouse / "demo_dep-1.0.0-py3-none-any.whl")
     (deps_dir / "requirements-test-platform.txt").write_text(
         "demo-dep\n",
         encoding="utf-8",

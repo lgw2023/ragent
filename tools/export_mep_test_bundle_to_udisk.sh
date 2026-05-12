@@ -230,7 +230,9 @@ find "$DEST" -name '._*' -delete
   "$KEYWORD_WHEELHOUSE_SRC" \
   "$KEYWORD_WHEELHOUSE_DEST" <<'PY'
 from pathlib import Path
+import hashlib
 import sys
+import zipfile
 
 wheelhouse_src = Path(sys.argv[1])
 wheelhouse_dest = Path(sys.argv[2])
@@ -241,12 +243,43 @@ keyword_wheelhouse_src = Path(sys.argv[6])
 keyword_wheelhouse_dest = Path(sys.argv[7])
 
 
-def visible_files(root: Path) -> dict[str, int]:
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def visible_files(root: Path) -> dict[str, dict[str, object]]:
     return {
-        item.name: item.stat().st_size
+        item.name: {
+            "size": item.stat().st_size,
+            "sha256": file_sha256(item),
+        }
         for item in root.iterdir()
         if item.is_file() and not item.name.startswith("._")
     }
+
+
+def validate_wheels(root: Path, label: str) -> None:
+    invalid: list[str] = []
+    for wheel_path in sorted(root.glob("*.whl")):
+        if wheel_path.name.startswith("._"):
+            continue
+        try:
+            with zipfile.ZipFile(wheel_path) as wheel:
+                corrupt_member = wheel.testzip()
+        except (OSError, zipfile.BadZipFile) as exc:
+            invalid.append(f"{wheel_path.name}: {exc}")
+            continue
+        if corrupt_member is not None:
+            invalid.append(f"{wheel_path.name}: corrupt archive member {corrupt_member}")
+    if invalid:
+        raise SystemExit(
+            f"{label} contains invalid wheel files under {root}\n"
+            + "\n".join(f"- {detail}" for detail in invalid[:20])
+        )
 
 
 src_files = visible_files(wheelhouse_src)
@@ -256,15 +289,23 @@ extra = sorted(set(dest_files) - set(src_files))
 size_mismatch = sorted(
     name
     for name in set(src_files) & set(dest_files)
-    if src_files[name] != dest_files[name]
+    if src_files[name]["size"] != dest_files[name]["size"]
 )
-if missing or extra or size_mismatch:
+hash_mismatch = sorted(
+    name
+    for name in set(src_files) & set(dest_files)
+    if src_files[name]["sha256"] != dest_files[name]["sha256"]
+)
+if missing or extra or size_mismatch or hash_mismatch:
     raise SystemExit(
         "wheelhouse verification failed\n"
         f"missing={missing[:20]}\n"
         f"extra={extra[:20]}\n"
-        f"size_mismatch={size_mismatch[:20]}"
+        f"size_mismatch={size_mismatch[:20]}\n"
+        f"hash_mismatch={hash_mismatch[:20]}"
     )
+validate_wheels(wheelhouse_src, "source wheelhouse")
+validate_wheels(wheelhouse_dest, "exported wheelhouse")
 
 required_root_wheels = [
     "triton_ascend-3.2.0",
@@ -280,8 +321,11 @@ for prefix in required_root_wheels:
     source_size = src_files.get(name)
     if source_size is None:
         raise SystemExit(f"root repair wheel is not present in wheelhouse: {name}")
-    if root_files[name] != source_size:
+    if root_files[name]["size"] != source_size["size"]:
         raise SystemExit(f"root repair wheel size mismatch: {name}")
+    if root_files[name]["sha256"] != source_size["sha256"]:
+        raise SystemExit(f"root repair wheel hash mismatch: {name}")
+validate_wheels(dest, "root repair wheel directory")
 
 for required_name in ("gliner_config.json", "tokenizer_config.json"):
     source_file = keyword_model_src / required_name
@@ -303,15 +347,23 @@ keyword_extra = sorted(set(keyword_dest_files) - set(keyword_src_files))
 keyword_size_mismatch = sorted(
     name
     for name in set(keyword_src_files) & set(keyword_dest_files)
-    if keyword_src_files[name] != keyword_dest_files[name]
+    if keyword_src_files[name]["size"] != keyword_dest_files[name]["size"]
 )
-if keyword_missing or keyword_extra or keyword_size_mismatch:
+keyword_hash_mismatch = sorted(
+    name
+    for name in set(keyword_src_files) & set(keyword_dest_files)
+    if keyword_src_files[name]["sha256"] != keyword_dest_files[name]["sha256"]
+)
+if keyword_missing or keyword_extra or keyword_size_mismatch or keyword_hash_mismatch:
     raise SystemExit(
         "keyword wheelhouse verification failed\n"
         f"missing={keyword_missing[:20]}\n"
         f"extra={keyword_extra[:20]}\n"
-        f"size_mismatch={keyword_size_mismatch[:20]}"
+        f"size_mismatch={keyword_size_mismatch[:20]}\n"
+        f"hash_mismatch={keyword_hash_mismatch[:20]}"
     )
+validate_wheels(keyword_wheelhouse_src, "source keyword wheelhouse")
+validate_wheels(keyword_wheelhouse_dest, "exported keyword wheelhouse")
 for prefix in ("gliner-", "stanza-", "onnxruntime-", "langdetect-"):
     matches = [
         name
