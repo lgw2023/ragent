@@ -17,6 +17,7 @@ try:
         write_archive,
     )
     from tools.mep_site_packages import materialize_model_site_packages
+    from tools.mep_site_packages import resolve_site_packages_platform_tag
 except ModuleNotFoundError:
     from mep_package_utils import (
         ARCHIVE_FORMATS,
@@ -29,6 +30,7 @@ except ModuleNotFoundError:
         write_archive,
     )
     from mep_site_packages import materialize_model_site_packages
+    from mep_site_packages import resolve_site_packages_platform_tag
 
 REQUIRED_COMPONENT_FILES = (
     "process.py",
@@ -149,6 +151,7 @@ def build_mep_layout(
     materialize: bool = False,
     archive_format: str | None = None,
     archive_output: Path | None = None,
+    site_packages_platform_tag: str | None = None,
 ) -> dict[str, str]:
     repo_root = repo_root.expanduser().resolve()
     output = output.expanduser().resolve()
@@ -175,7 +178,10 @@ def build_mep_layout(
         source_model_package_dir=source_model_package_dir,
         output=output,
     )
-    materialize_model_site_packages(model_dir_root)
+    materialize_model_site_packages(
+        model_dir_root,
+        platform_tag=resolve_site_packages_platform_tag(site_packages_platform_tag),
+    )
 
     required_dirs = {
         "model": model_dir_root / "model",
@@ -250,6 +256,14 @@ def main() -> None:
         type=Path,
         help="Archive output path. Defaults beside --output using the selected extension.",
     )
+    parser.add_argument(
+        "--site-packages-platform-tag",
+        help=(
+            "Platform tag to pre-extract selected pure-Python wheels for. "
+            "Defaults to the current Python/platform, for example "
+            "linux-arm64-py3.9. Use 'all' for legacy all-platform behavior."
+        ),
+    )
     args = parser.parse_args()
 
     repo_root = args.repo_root.expanduser().resolve()
@@ -265,6 +279,7 @@ def main() -> None:
         materialize=args.materialize,
         archive_format=args.archive_format,
         archive_output=args.archive_output,
+        site_packages_platform_tag=args.site_packages_platform_tag,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
