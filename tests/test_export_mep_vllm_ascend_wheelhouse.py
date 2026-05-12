@@ -21,6 +21,13 @@ def test_default_extra_requirements_include_mep_runtime_gaps():
     }.issubset(set(exporter.DEFAULT_EXTRA_REQUIREMENTS))
 
 
+def test_default_resolvable_local_prefixes_support_full_repo_mount():
+    assert exporter.DEFAULT_RESOLVABLE_LOCAL_FILE_PREFIXES == (
+        "/tmp/ragent",
+        "/tmp/ragent-mep-test",
+    )
+
+
 def test_export_wheelhouse_resolves_only_validated_tmp_local_wheels(
     monkeypatch,
     tmp_path: Path,

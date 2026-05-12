@@ -18,8 +18,8 @@ inside the model package `data/` payload so they are available when the MEP
 server has no network access:
 
 ```text
-mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10/
-mep/model_packages/bge-m3/modelDir/data/deps/site-packages/linux-arm64-py3.10/
+mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.9/
+mep/model_packages/bge-m3/modelDir/data/deps/site-packages/linux-arm64-py3.9/
 ```
 
 Use `wheelhouse/<platform>/` for universal pure-Python wheels and for native
@@ -69,7 +69,7 @@ For the current MEP Ascend 910B target, build or copy target-compatible
 dependencies into the model package data directory:
 
 ```bash
-mkdir -p mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10
+mkdir -p mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.9
 ```
 
 The component bootstrap directly imports only pure-Python wheels. Native wheels
@@ -92,7 +92,7 @@ python3 tools/export_mep_vllm_ascend_wheelhouse.py \
 The target tags are Python `cp310` on `aarch64` / `linux-arm64`. The exporter
 writes the exact downloaded wheel filenames, any present `.tar.gz` source
 archives, and a `manifest.json`. `@ file://` freeze entries under
-`/tmp/ragent-mep-test` are resolved from the configured package indexes by default; this covers the validated
+`/tmp/ragent` and legacy `/tmp/ragent-mep-test` are resolved from the configured package indexes by default; this covers the validated
 `triton-ascend==3.2.0` wheel used by the startup repair step. Other `file://`
 entries from `/home/mep/...` or `/usr/local/Ascend/...` are recorded in
 `local-file-requirements.txt` and treated as image-provided by default. If these
@@ -111,7 +111,7 @@ launching vLLM. The equivalent manual command sequence is:
 ```bash
 pip uninstall vllm vllm-ascend -y
 pip install --no-index --no-deps --force-reinstall \
-  /tmp/ragent-mep-test/mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10/*.whl
+  /tmp/ragent/mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10/*.whl
 ```
 
 The service command that was validated is:
