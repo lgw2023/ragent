@@ -244,7 +244,7 @@ def test_execute_retrieval_only_skips_llm_check_and_returns_retrieval_payload(
 
     request = inference_runtime.InferenceRequest(
         query_type="onehop",
-        query="文档的主要主题是什么？",
+        query="我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
         retrieval_only=True,
         enable_rerank=True,
         high_level_keywords=["指南"],
@@ -304,7 +304,7 @@ def test_hybrid_retrieval_debug_skips_missing_rerank_config(monkeypatch):
 
     result = asyncio.run(
         operate._build_hybrid_retrieval_debug_data(
-            query="文档的主要主题是什么？",
+            query="我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
             chunks_vdb=object(),
             knowledge_graph_inst=object(),
             relationships_vdb=object(),

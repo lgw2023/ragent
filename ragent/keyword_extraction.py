@@ -17,7 +17,10 @@ DEFAULT_GLINER_KEYWORD_MODEL = "knowledgator/gliner-x-small"
 DEFAULT_GLINER_KEYWORD_DEVICE = "cpu"
 DEFAULT_GLINER_KEYWORD_THRESHOLD = 0.35
 DEFAULT_GLINER_MAX_KEYWORDS = 12
-DEFAULT_GLINER_WARMUP_TEXT = "文档的主要主题是什么？"
+DEFAULT_GLINER_WARMUP_TEXT = (
+    "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，"
+    "我先 中速步行30 分钟，再爬楼多久能补回来？"
+)
 
 KEYWORD_SOURCE_REQUEST = "request"
 KEYWORD_SOURCE_LLM = "llm"

@@ -40,7 +40,7 @@ def test_main_passes_model_root_and_prints_resolved_paths(
     request_payload = {
         "data": {
             "query_type": "onehop",
-            "query": "文档的主要主题是什么？",
+            "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
         }
     }
     request_path.write_text(

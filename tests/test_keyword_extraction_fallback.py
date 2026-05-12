@@ -11,6 +11,12 @@ from ragent import operate
 from ragent.base import QueryParam
 
 
+TEST_QUERY = (
+    "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，"
+    "我先 中速步行30 分钟，再爬楼多久能补回来？"
+)
+
+
 class _FakeTokenizer:
     def encode(self, text):
         return list(str(text))
@@ -213,9 +219,9 @@ def test_gliner_loader_uses_local_words_splitter_without_model_kwargs(
     words_splitter = keyword_extraction._MODEL_CACHE[
         (str(model_dir), "cpu")
     ].data_processor.words_splitter
-    tokens = [token for token, _start, _end in words_splitter("文档的主要主题是什么？")]
+    tokens = [token for token, _start, _end in words_splitter(TEST_QUERY)]
     assert captured["model_name"] == str(model_dir)
-    assert tokens[:2] == ["文", "档"]
+    assert tokens[:2] == ["我", "已"]
     keyword_extraction._MODEL_CACHE.clear()
 
 
@@ -277,26 +283,26 @@ def test_ensure_gliner_keyword_model_ready_warms_cached_model(
     keyword_extraction._MODEL_CACHE.clear()
 
 
-def test_chinese_no_space_fallback_keyword_candidates_are_not_empty():
-    assert keyword_extraction._fallback_keyword_candidates("文档的主要主题是什么？") == [
-        "文档的主要主题",
-        "文档",
-        "主要主题",
+def test_domain_query_fallback_keyword_candidates_are_not_empty():
+    assert keyword_extraction._fallback_keyword_candidates(TEST_QUERY) == [
+        "我已经是个成年男人了",
+        "但是下午多喝了一听含糖饮料",
+        "330ml",
+        "我先",
+        "中速步行30",
+        "分钟",
+        "再爬楼多久能补回来",
     ]
 
 
-def test_no_llm_generic_query_keywords_are_derived_from_vector_context(monkeypatch):
-    async def fake_extract_keywords_with_gliner(text, _global_config, *, fallback_reason=None):
-        assert "中国居民膳食指南" in text
-        return keyword_extraction.KeywordResolution(
-            high_level_keywords=["平衡膳食", "文档"],
-            low_level_keywords=["中国居民膳食指南"],
-            keyword_source="gliner_fallback",
-            keyword_strategy="token_classification_fallback",
-            keyword_fallback_reason=fallback_reason,
-            keyword_model="/models/gliner",
-            keyword_model_device="cpu",
-        )
+def test_no_llm_query_keywords_are_kept_without_generic_filter(monkeypatch):
+    async def fake_extract_keywords_with_gliner(
+        text,
+        _global_config,
+        *,
+        fallback_reason=None,
+    ):
+        raise AssertionError("vector context keyword derivation should not run")
 
     monkeypatch.setattr(
         keyword_extraction,
@@ -336,8 +342,68 @@ def test_no_llm_generic_query_keywords_are_derived_from_vector_context(monkeypat
         )
     )
 
-    assert "什么" not in hl_keywords
-    assert "文档" not in hl_keywords
+    assert hl_keywords == ["什么", "文档"]
+    assert ll_keywords == []
+    assert param.keyword_source == "gliner_fallback"
+
+
+def test_no_llm_empty_query_keywords_are_derived_from_vector_context(monkeypatch):
+    async def fake_extract_keywords_with_gliner(
+        text,
+        _global_config,
+        *,
+        fallback_reason=None,
+    ):
+        assert "中国居民膳食指南" in text
+        return keyword_extraction.KeywordResolution(
+            high_level_keywords=["平衡膳食", "文档"],
+            low_level_keywords=["中国居民膳食指南"],
+            keyword_source="gliner_fallback",
+            keyword_strategy="token_classification_fallback",
+            keyword_fallback_reason=fallback_reason,
+            keyword_model="/models/gliner",
+            keyword_model_device="cpu",
+        )
+
+    monkeypatch.setattr(
+        keyword_extraction,
+        "extract_keywords_with_gliner",
+        fake_extract_keywords_with_gliner,
+    )
+
+    param = QueryParam(mode="hybrid", only_need_context=True)
+    keyword_extraction.apply_keyword_resolution(
+        param,
+        keyword_extraction.KeywordResolution(
+            high_level_keywords=[],
+            low_level_keywords=[],
+            keyword_source="gliner_fallback",
+            keyword_strategy="token_classification_fallback",
+            keyword_fallback_reason="query fallback",
+            keyword_model="/models/gliner",
+            keyword_model_device="cpu",
+        ),
+    )
+
+    hl_keywords, ll_keywords = asyncio.run(
+        operate._refresh_no_llm_keywords_from_vector_context(
+            param,
+            vector_weights={"chunk-1": 0.9},
+            vector_texts={
+                "chunk-1": "中国居民膳食指南_2022.pdf###### 准则一 食物多样，合理搭配"
+            },
+            vector_file_paths={"chunk-1": "/tmp/中国居民膳食指南_2022.pdf"},
+            vector_metadata_map={
+                "chunk-1": {
+                    "source_ref": "中国居民膳食指南_2022.pdf | p.62 | 准则一 食物多样，合理搭配",
+                    "section_path": "准则一 食物多样，合理搭配",
+                }
+            },
+            global_config={},
+        )
+    )
+
+    assert "文档" in hl_keywords
     assert "平衡膳食" in hl_keywords
     assert "食物多样" in hl_keywords
     assert "中国居民膳食指南" in ll_keywords
@@ -600,7 +666,7 @@ def test_run_one_hop_no_longer_prefills_raw_query(monkeypatch):
     result = asyncio.run(
         inference_runtime._run_one_hop_with_rag(
             FakeRag(),
-            "文档的主要主题是什么？",
+            TEST_QUERY,
             "hybrid",
             retrieval_only=True,
             only_need_context=True,

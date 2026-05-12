@@ -1360,7 +1360,11 @@ class RagentApp:
         if not target_project_dir:
             raise ValueError("Missing required argument: project_dir")
         resolved_mode = _normalize_query_mode(mode)
-        query = "文档的主要主题是什么？" if not simple_query else simple_query
+        default_query = (
+            "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，"
+            "我先 中速步行30 分钟，再爬楼多久能补回来？"
+        )
+        query = default_query if not simple_query else simple_query
         if show_trace:
             if quiet:
                 with _temporary_log_level(["ragent", "nano-vectordb"], logging.WARNING):
@@ -1646,7 +1650,7 @@ if __name__ == "__main__":
         if len(sys.argv) < 4:
             raise ValueError("Usage: onehop <project_dir> <query> [mode]")
         PROJECT_DIR = sys.argv[2] # "my_ragent_project"  # 存储知识库的目录
-        simple_query = sys.argv[3] # "文档的主要主题是什么？"
+        simple_query = sys.argv[3]
         MODE = _normalize_query_mode(sys.argv[4] if len(sys.argv) > 4 else "hybrid")
     elif MODULE == "chat":
         if len(sys.argv) < 5:

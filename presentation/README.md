@@ -310,7 +310,7 @@ async def main():
 
     answer1 = await inference_one_hop_problem(
         PROJECT_DIR,
-        "文档的主要主题是什么？",
+        "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
         mode="hybrid",
     )
     print(answer1)
