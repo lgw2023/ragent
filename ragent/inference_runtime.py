@@ -101,7 +101,7 @@ _KEYWORD_FALLBACK_PRELOAD_DONE: set[str] = set()
 _KEYWORD_FALLBACK_PRELOAD_LOCK = asyncio.Lock()
 
 
-@dataclass(slots=True)
+@dataclass
 class InferenceRequest:
     query_type: QueryType
     query: str
