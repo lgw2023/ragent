@@ -19,6 +19,15 @@ IGNORE_PATTERNS = (
 )
 HF_CONFIG_MARKER = "config.json"
 HF_TOKENIZER_MARKERS = ("tokenizer.json", "tokenizer_config.json")
+HF_WEIGHT_MARKERS = (
+    "pytorch_model.bin",
+    "model.safetensors",
+    "tf_model.h5",
+    "model.ckpt.index",
+    "flax_model.msgpack",
+    "pytorch_model.bin.index.json",
+    "model.safetensors.index.json",
+)
 ARCHIVE_FORMATS = {
     "zip": ("zip", ".zip"),
     "tar": ("tar", ".tar"),
@@ -199,7 +208,8 @@ def validate_model_root(model_root: Path, *, model_root_label: str) -> None:
 
     has_config = (model_root / HF_CONFIG_MARKER).is_file()
     has_tokenizer = any((model_root / marker).is_file() for marker in HF_TOKENIZER_MARKERS)
-    if has_config and has_tokenizer:
+    has_weights = any((model_root / marker).is_file() for marker in HF_WEIGHT_MARKERS)
+    if has_config and has_tokenizer and has_weights:
         return
 
     nested_model_dirs = [
@@ -216,7 +226,14 @@ def validate_model_root(model_root: Path, *, model_root_label: str) -> None:
             f"nested model directories are not allowed: {nested_text}"
         )
 
-    required = f"{HF_CONFIG_MARKER} and one of {', '.join(HF_TOKENIZER_MARKERS)}"
+    missing_requirements: list[str] = []
+    if not has_config:
+        missing_requirements.append(HF_CONFIG_MARKER)
+    if not has_tokenizer:
+        missing_requirements.append(f"one of {', '.join(HF_TOKENIZER_MARKERS)}")
+    if not has_weights:
+        missing_requirements.append(f"one of {', '.join(HF_WEIGHT_MARKERS)}")
+    required = ", ".join(missing_requirements)
     raise FileNotFoundError(
         f"{model_root_label} must be a Hugging Face model directory containing "
         f"{required}: {model_root}"

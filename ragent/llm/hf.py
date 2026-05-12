@@ -1,16 +1,14 @@
 import copy
+import importlib.util
 import os
 from functools import lru_cache
 
-import pipmaster as pm  # Pipmaster for dynamic library install
-
-# install specific modules
-if not pm.is_installed("transformers"):
-    pm.install("transformers")
-if not pm.is_installed("torch"):
-    pm.install("torch")
-if not pm.is_installed("numpy"):
-    pm.install("numpy")
+for module_name in ("transformers", "torch", "numpy"):
+    if importlib.util.find_spec(module_name) is None:
+        raise RuntimeError(
+            f"{module_name} is required for the HuggingFace LLM provider. "
+            "Install it before runtime instead of using dynamic pip installation."
+        )
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tenacity import (

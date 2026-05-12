@@ -12,7 +12,6 @@ future
 litellm
 nano-vectordb
 openai
-pipmaster
 pyuca
 tenacity
 tiktoken

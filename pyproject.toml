@@ -32,7 +32,6 @@ dependencies = [
     "nano-vectordb",
     "networkx",
     "numpy",
-    "pipmaster",
     "pydantic",
     "python-dotenv",
     "pyuca",

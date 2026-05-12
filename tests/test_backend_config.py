@@ -17,9 +17,14 @@ def _import_with_fake_optional_dependency(
     dependency_name: str,
     dependency: types.ModuleType,
 ):
-    import pipmaster
+    original_find_spec = importlib.util.find_spec
 
-    monkeypatch.setattr(pipmaster, "is_installed", lambda package: True)
+    def fake_find_spec(name, package=None):
+        if name == dependency_name:
+            return importlib.machinery.ModuleSpec(name, loader=None)
+        return original_find_spec(name, package)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
     monkeypatch.setitem(sys.modules, dependency_name, dependency)
     sys.modules.pop(module_name, None)
     try:

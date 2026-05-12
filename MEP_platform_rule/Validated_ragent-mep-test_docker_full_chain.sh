@@ -185,6 +185,32 @@ validate_host_wheelhouse() {
     --platform-tag "$MEP_WHEELHOUSE_PLATFORM_TAG"
 }
 
+validate_host_model_package() {
+  local model_dir_root="$HOST_TEST_DIR/mep/model_packages/$MODEL_PACKAGE/modelDir"
+
+  require_command python3
+  [ -d "$model_dir_root" ] || die "missing MEP modelDir root: $model_dir_root"
+
+  step "Validate host MEP model package"
+  python3 - "$HOST_TEST_DIR" "$model_dir_root" <<'PY'
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+model_dir_root = Path(sys.argv[2]).resolve()
+sys.path.insert(0, str(repo_root))
+
+from tools.mep_package_utils import validate_model_dir
+
+validate_model_dir(
+    model_dir_root,
+    required_dir_label="MEP modelDir/{name}/",
+    model_root_label="MEP modelDir/model/",
+)
+print(f"validated model package: {model_dir_root}")
+PY
+}
+
 require_command docker
 [ -d "$HOST_TEST_DIR" ] || die "HOST_TEST_DIR does not exist: $HOST_TEST_DIR"
 [ -f "$HOST_TEST_DIR/MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh" ] || \
@@ -215,6 +241,7 @@ if [ -z "$MEP_REQUIRE_ASCEND_ENV" ]; then
 fi
 
 validate_host_wheelhouse
+validate_host_model_package
 
 if [ "$SKIP_VLLM_VALIDATION" != "1" ]; then
   step "Run validated vLLM Ascend embedding check"

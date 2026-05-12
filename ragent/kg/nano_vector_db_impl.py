@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ast
+import importlib.util
 import json
 import os
 from typing import Any, final
@@ -13,11 +14,13 @@ from ragent.utils import (
     logger,
     compute_mdhash_id,
 )
-import pipmaster as pm
 from ragent.base import BaseVectorStorage
 
-if not pm.is_installed("nano-vectordb"):
-    pm.install("nano-vectordb")
+if importlib.util.find_spec("nano_vectordb") is None:
+    raise RuntimeError(
+        "nano-vectordb is required for NanoVectorDBStorage. Install it in the "
+        "offline runtime wheelhouse instead of using runtime pip installation."
+    )
 
 from nano_vectordb import NanoVectorDB
 from .shared_storage import (

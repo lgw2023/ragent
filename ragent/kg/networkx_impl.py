@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 from dataclasses import dataclass
 from typing import final
@@ -9,10 +10,11 @@ from ragent.utils import logger
 from ragent.base import BaseGraphStorage
 from ragent.constants import GRAPH_FIELD_SEP
 
-import pipmaster as pm
-
-if not pm.is_installed("networkx"):
-    pm.install("networkx")
+if importlib.util.find_spec("networkx") is None:
+    raise RuntimeError(
+        "networkx is required for NetworkXStorage. Install it in the offline "
+        "runtime wheelhouse instead of using runtime pip installation."
+    )
 
 import networkx as nx
 from .shared_storage import (

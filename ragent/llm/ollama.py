@@ -1,3 +1,4 @@
+import importlib.util
 import sys
 
 if sys.version_info < (3, 9):
@@ -5,11 +6,11 @@ if sys.version_info < (3, 9):
 else:
     from collections.abc import AsyncIterator
 
-import pipmaster as pm  # Pipmaster for dynamic library install
-
-# install specific modules
-if not pm.is_installed("ollama"):
-    pm.install("ollama")
+if importlib.util.find_spec("ollama") is None:
+    raise RuntimeError(
+        "ollama is required for the Ollama LLM provider. Install it before "
+        "runtime instead of using dynamic pip installation."
+    )
 
 import ollama
 
