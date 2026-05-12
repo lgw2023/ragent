@@ -958,24 +958,6 @@ _STANDALONE_NUMERIC_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 _LOW_SIGNAL_LOW_LEVEL_KEYWORDS = {"补回", "超量", "达标"}
-_NO_LLM_GENERIC_QUERY_KEYWORDS = {
-    "什么",
-    "文档",
-    "文件",
-    "资料",
-    "内容",
-    "主题",
-    "主要主题",
-    "核心主题",
-    "文档主题",
-    "文档主要主题",
-    "文档的主要主题",
-    "主要内容",
-    "文档内容",
-    "这篇文档",
-    "这份文档",
-    "是什么",
-}
 _CJK_PHRASE_RE = re.compile(r"[\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9_（）()《》\-]{1,24}")
 _HASH_LIKE_RE = re.compile(r"^[0-9a-fA-F]{16,}$")
 
@@ -987,24 +969,11 @@ def _clean_keyword_text(keyword: Any) -> str:
     return cleaned.strip(" ,;；、。.()（）[]【】")
 
 
-def _keyword_generic_key(keyword: Any) -> str:
-    return re.sub(r"[\s,，;；、。.?!！？:：()（）\[\]【】《》\"'“”‘’]+", "", str(keyword or ""))
-
-
-def _is_no_llm_generic_keyword(keyword: Any) -> bool:
-    normalized = _keyword_generic_key(keyword)
-    if not normalized:
-        return True
-    if normalized in _NO_LLM_GENERIC_QUERY_KEYWORDS:
-        return True
-    return normalized.endswith("是什么") and len(normalized) <= 12
-
-
-def _filter_no_llm_informative_keywords(keywords: list[str]) -> list[str]:
+def _clean_no_llm_keywords(keywords: list[str]) -> list[str]:
     return [
         keyword
         for keyword in _dedupe_keywords([_clean_keyword_text(item) for item in keywords])
-        if keyword and not _is_no_llm_generic_keyword(keyword)
+        if keyword
     ]
 
 
@@ -1216,7 +1185,6 @@ def _split_derived_keyword_phrases(value: Any) -> list[str]:
         phrase = _strip_generated_suffix(_clean_keyword_text(phrase))
         if (
             2 <= len(phrase) <= 18
-            and not _is_no_llm_generic_keyword(phrase)
             and not _HASH_LIKE_RE.match(phrase)
         ):
             phrases.append(phrase)
@@ -1272,8 +1240,8 @@ def _derive_vector_context_keywords(
         first_line = text.splitlines()[0] if text else ""
         low_level.extend(_split_derived_keyword_phrases(first_line.split("#####", 1)[0]))
 
-    high_level = _filter_no_llm_informative_keywords(high_level)
-    low_level = _filter_no_llm_informative_keywords(low_level)
+    high_level = _clean_no_llm_keywords(high_level)
+    low_level = _clean_no_llm_keywords(low_level)
     high_set = {item.casefold() for item in high_level}
     low_level = [item for item in low_level if item.casefold() not in high_set]
     return high_level[:8], low_level[:8]
@@ -1315,7 +1283,7 @@ async def _derive_no_llm_keywords_from_vector_context(
     global_config: dict[str, Any],
 ) -> keyword_extraction.KeywordResolution | None:
     reason = (
-        "query-only GLiNER keywords were non-informative; derived no-LLM "
+        "query-only GLiNER keywords were empty; derived no-LLM "
         "keywords from first-pass vector evidence"
     )
     context_text = _build_vector_keyword_context(
@@ -1332,10 +1300,10 @@ async def _derive_no_llm_keywords_from_vector_context(
             global_config,
             fallback_reason=reason,
         )
-        high_level = _filter_no_llm_informative_keywords(
+        high_level = _clean_no_llm_keywords(
             gliner_resolution.high_level_keywords
         )
-        low_level = _filter_no_llm_informative_keywords(
+        low_level = _clean_no_llm_keywords(
             gliner_resolution.low_level_keywords
         )
     else:
@@ -1397,18 +1365,18 @@ async def _refresh_no_llm_keywords_from_vector_context(
     ):
         return query_param.hl_keywords, query_param.ll_keywords
 
-    informative_hl = _filter_no_llm_informative_keywords(query_param.hl_keywords)
-    informative_ll = _filter_no_llm_informative_keywords(query_param.ll_keywords)
-    if informative_hl or informative_ll:
+    cleaned_hl = _clean_no_llm_keywords(query_param.hl_keywords)
+    cleaned_ll = _clean_no_llm_keywords(query_param.ll_keywords)
+    if cleaned_hl or cleaned_ll:
         if (
-            informative_hl != query_param.hl_keywords
-            or informative_ll != query_param.ll_keywords
+            cleaned_hl != query_param.hl_keywords
+            or cleaned_ll != query_param.ll_keywords
         ):
             keyword_extraction.apply_keyword_resolution(
                 query_param,
                 keyword_extraction.KeywordResolution(
-                    high_level_keywords=informative_hl,
-                    low_level_keywords=informative_ll,
+                    high_level_keywords=cleaned_hl,
+                    low_level_keywords=cleaned_ll,
                     keyword_source=query_param.keyword_source,
                     keyword_strategy=query_param.keyword_strategy,
                     keyword_fallback_reason=query_param.keyword_fallback_reason,

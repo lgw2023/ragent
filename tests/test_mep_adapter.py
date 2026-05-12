@@ -87,7 +87,7 @@ def test_normalize_mep_request_retrieval_only_aliases_enable_trace(tmp_path: Pat
         "data": {
             "taskId": "retrieval-001",
             "query_type": "onehop",
-            "query": "文档的主要主题是什么？",
+            "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
             "mode": "hybrid",
             "only_need_context": "true",
             "enable_rerank": "false",
@@ -112,7 +112,7 @@ def test_normalize_mep_request_defaults_to_retrieval_only_when_unset():
         {
             "data": {
                 "query_type": "onehop",
-                "query": "文档的主要主题是什么？",
+                "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
             }
         }
     )
@@ -753,7 +753,7 @@ def test_build_result_payload_contains_stable_fields(monkeypatch, tmp_path: Path
             "data": {
                 "taskId": "100002455",
                 "query_type": "onehop",
-                "query": "文档的主要主题是什么？",
+                "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
                 "mode": "hybrid",
                 "conversation_history": [{"role": "user", "content": "hello"}],
             }
@@ -783,7 +783,7 @@ def test_build_result_payload_contains_stable_fields(monkeypatch, tmp_path: Path
     assert payload["code"] == "0"
     assert payload["des"] == "success"
     assert payload["taskId"] == "100002455"
-    assert payload["query"] == "文档的主要主题是什么？"
+    assert payload["query"] == "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？"
     assert payload["answer"] == "主题是饮食知识。"
     assert payload["referenced_file_paths"] == ["a.md"]
     assert payload["image_list"] == ["a.png"]
@@ -805,7 +805,7 @@ def test_build_result_payload_includes_retrieval_only_result(monkeypatch, tmp_pa
             "data": {
                 "taskId": "retrieval-001",
                 "query_type": "onehop",
-                "query": "文档的主要主题是什么？",
+                "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
                 "mode": "hybrid",
                 "retrieval_only": True,
             }

@@ -631,7 +631,7 @@ def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(
     class FakeRuntimeSession:
         async def run(self, inference_request):
             assert inference_request.query_type == "onehop"
-            assert inference_request.query == "文档的主要主题是什么？"
+            assert inference_request.query == "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？"
             return {
                 "answer": "主题是饮食知识。",
                 "referenced_file_paths": ["doc.md"],
@@ -656,7 +656,7 @@ def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(
                 "action": "create",
                 "basePath": str(tmp_path / "base"),
                 "query_type": "onehop",
-                "query": "文档的主要主题是什么？",
+                "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
                 "mode": "hybrid",
                 "fileInfo": [{"generatePath": str(generate_path), "processSpec": []}],
             },
@@ -677,7 +677,7 @@ def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(
     assert payload["code"] == "0"
     assert payload["des"] == "success"
     assert payload["taskId"] == "100002455"
-    assert payload["query"] == "文档的主要主题是什么？"
+    assert payload["query"] == "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？"
     assert payload["query_type"] == "onehop"
     assert payload["mode"] == "hybrid"
     assert payload["answer"] == "主题是饮食知识。"
@@ -756,7 +756,7 @@ def test_customer_model_calc_retrieval_only_writes_retrieval_result(
                 "taskId": "retrieval-001",
                 "action": "create",
                 "query_type": "onehop",
-                "query": "文档的主要主题是什么？",
+                "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
                 "mode": "hybrid",
                 "retrieval_only": True,
                 "fileInfo": [{"generatePath": str(generate_path), "processSpec": []}],
