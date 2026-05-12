@@ -302,7 +302,9 @@ python3 -m pip install --no-index --no-deps --force-reinstall "${WHEELHOUSE_WHEE
 
 step "Load Ascend runtime environment"
 source_if_exists /usr/local/Ascend/ascend-toolkit/set_env.sh
+source_if_exists /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
 source_if_exists /usr/local/Ascend/nnal/atb/set_env.sh
+source_if_exists /usr/local/Ascend/nnal/atb/latest/atb/set_env.sh
 export ASCEND_RT_VISIBLE_DEVICES
 export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-DEBUG}"
 export VLLM_PLUGINS="${VLLM_PLUGINS:-ascend}"

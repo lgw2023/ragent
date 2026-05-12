@@ -62,6 +62,7 @@ MEP_CLEAR_PATH_ENV="${MEP_CLEAR_PATH_ENV:-1}"
 MEP_ALLOW_TEST_EMBEDDING_TRUNCATION="${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-1}"
 MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-1}"
 MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"
+MEP_REQUIRE_ASCEND_ENV="${MEP_REQUIRE_ASCEND_ENV:-}"
 
 NO_PROXY_DEFAULT="localhost,127.0.0.1,::1,*.huawei.com,*.huaweicloud.com"
 http_proxy="${http_proxy:-}"
@@ -205,6 +206,13 @@ fi
 if [ "$MEP_REUSE_EXISTING_VLLM" != "1" ] && [ "$SKIP_VLLM_VALIDATION" != "1" ]; then
   die "MEP_REUSE_EXISTING_VLLM=0 requires SKIP_VLLM_VALIDATION=1 and a clean running container, otherwise the vLLM validation step will occupy the embedding port"
 fi
+if [ -z "$MEP_REQUIRE_ASCEND_ENV" ]; then
+  if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
+    MEP_REQUIRE_ASCEND_ENV=0
+  else
+    MEP_REQUIRE_ASCEND_ENV=1
+  fi
+fi
 
 validate_host_wheelhouse
 
@@ -306,7 +314,11 @@ for name in \
   HTTP_PROXY \
   HTTPS_PROXY \
   FTP_PROXY \
-  NO_PROXY
+  NO_PROXY \
+  RAGENT_ASCEND_SET_ENV_SH \
+  RAGENT_ASCEND_ENV_SHS \
+  ASCEND_ENV_SCRIPTS \
+  MEP_REQUIRE_ASCEND_ENV
 do
   add_exec_env_if_set "$name"
 done
@@ -359,6 +371,51 @@ require_env() {
     printf 'set them in the image environment or pass MEP_ENV_FILE=/path/to/.env to the host script.\n' >&2
     exit 2
   fi
+}
+
+source_if_exists() {
+  local path="$1"
+  if [ -f "$path" ]; then
+    # shellcheck disable=SC1090
+    set +u
+    source "$path"
+    set -u
+    echo "sourced Ascend env: $path"
+    return 0
+  fi
+  return 1
+}
+
+load_ascend_runtime_environment() {
+  local raw_scripts
+  if [ -n "${RAGENT_ASCEND_SET_ENV_SH:-}" ]; then
+    raw_scripts="$RAGENT_ASCEND_SET_ENV_SH"
+  elif [ -n "${RAGENT_ASCEND_ENV_SHS:-}" ]; then
+    raw_scripts="$RAGENT_ASCEND_ENV_SHS"
+  elif [ -n "${ASCEND_ENV_SCRIPTS:-}" ]; then
+    raw_scripts="$ASCEND_ENV_SCRIPTS"
+  else
+    raw_scripts="/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/set_env.sh /usr/local/Ascend/nnal/atb/set_env.sh /usr/local/Ascend/nnal/atb/latest/atb/set_env.sh"
+  fi
+
+  local loaded=0
+  local normalized="${raw_scripts//,/ }"
+  normalized="${normalized//:/ }"
+  local script_path
+  for script_path in $normalized; do
+    [ -n "$script_path" ] || continue
+    if source_if_exists "$script_path"; then
+      loaded=$((loaded + 1))
+    fi
+  done
+
+  if [ "$loaded" -eq 0 ]; then
+    if [ "${MEP_REQUIRE_ASCEND_ENV:-0}" = "1" ]; then
+      die "no Ascend runtime env script was sourced; checked: $raw_scripts"
+    fi
+    echo "warning: no Ascend runtime env script was sourced; checked: $raw_scripts"
+  fi
+  export ASCEND_RT_VISIBLE_DEVICES
 }
 
 complete_rerank_config() {
@@ -652,6 +709,9 @@ test -d "$RUNTIME_DIR/model" || die "missing model dir: $RUNTIME_DIR/model"
 test -d "$RUNTIME_DIR/data" || die "missing data dir: $RUNTIME_DIR/data"
 test -d "$RUNTIME_DIR/data/kg" || die "missing KG dir: $RUNTIME_DIR/data/kg"
 find "$RUNTIME_DIR/data/kg" -maxdepth 3 -type f | sort
+
+step "Load Ascend runtime environment"
+load_ascend_runtime_environment
 
 if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
   step "Verify existing vLLM embedding service"

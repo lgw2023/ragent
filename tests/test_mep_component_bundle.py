@@ -565,6 +565,10 @@ def test_offline_full_chain_validation_script_is_exported():
     assert 'CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"' in script_text
     assert 'MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"' in script_text
     assert "validate_host_wheelhouse()" in script_text
+    assert "load_ascend_runtime_environment()" in script_text
+    assert "sourced Ascend env:" in script_text
+    assert "ascend-toolkit/latest/set_env.sh" in script_text
+    assert "MEP_REQUIRE_ASCEND_ENV=1" in script_text
     assert "AUTO_START_CONTAINER" in script_text
     assert "start_plain_container()" in script_text
     assert "docker run -d" in script_text
