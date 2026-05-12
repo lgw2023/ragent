@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -607,6 +608,55 @@ def test_prepare_runtime_project_layout_copies_writable_snapshot_by_default_in_m
     cleanup_runtime_project_layout(layout)
 
 
+def test_prepare_runtime_project_layout_materializes_sqlite_kv_snapshot_in_mep(
+    monkeypatch,
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    snapshot_dir = data_dir / "demo_kg"
+    _write_snapshot(snapshot_dir)
+    (snapshot_dir / "kv_store_text_chunks.json").write_text(
+        json.dumps(
+            {
+                "chunk-1": {
+                    "content": "图谱证据",
+                    "file_path": "doc.md",
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (snapshot_dir / "kv_store_full_docs.json").write_text(
+        json.dumps({"doc-1": {"content": "全文"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    monkeypatch.delenv("RAGENT_ENV", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_USE_SOURCE_SNAPSHOT", raising=False)
+
+    layout = prepare_runtime_project_layout(
+        data_dir=data_dir,
+        runtime_root=tmp_path / "runtime",
+    )
+
+    sqlite_path = layout.runtime_project_dir / "kv_store_text_chunks.sqlite"
+    assert sqlite_path.is_file()
+    with sqlite3.connect(sqlite_path) as conn:
+        row = conn.execute(
+            "SELECT entry_json FROM kv_entries WHERE key = ?",
+            ("chunk-1",),
+        ).fetchone()
+
+    assert row is not None
+    entry = json.loads(row[0])
+    assert entry["content"] == "图谱证据"
+    assert entry["llm_cache_list"] == []
+
+    cleanup_runtime_project_layout(layout)
+
+
 def test_prepare_runtime_project_layout_mep_escape_hatch_keeps_writable_snapshot(
     monkeypatch,
     tmp_path: Path,
@@ -771,7 +821,7 @@ def test_build_result_payload_includes_retrieval_only_result(monkeypatch, tmp_pa
         "final_context_chunks": [{"content": "上下文", "file_path": "doc.md"}],
     }
     result = {
-        "answer": "",
+        "answer": "上下文",
         "retrieval_only": True,
         "only_need_context": True,
         "retrieval_result": retrieval_result,
@@ -789,7 +839,7 @@ def test_build_result_payload_includes_retrieval_only_result(monkeypatch, tmp_pa
 
     assert payload["retrieval_only"] is True
     assert payload["only_need_context"] is True
-    assert payload["answer"] == ""
+    assert payload["answer"] == "上下文"
     assert payload["retrieval_result"] == retrieval_result
     assert payload["referenced_file_paths"] == ["doc.md"]
 

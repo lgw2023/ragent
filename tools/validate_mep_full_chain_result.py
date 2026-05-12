@@ -331,6 +331,29 @@ def _validate_retrieval_only_keywords(
             )
 
 
+def _validate_retrieval_only_graph_context(
+    *,
+    retrieval_result: dict[str, Any],
+) -> None:
+    graph_chunk_candidates = retrieval_result.get("graph_chunk_candidates") or []
+    final_context_chunks = retrieval_result.get("final_context_chunks") or []
+    final_graph_chunks = [
+        item
+        for item in final_context_chunks
+        if isinstance(item, dict)
+        and (
+            item.get("source") == "graph"
+            or "graph" in (item.get("sources") or [])
+            or item.get("source_type") in {"graph", "entity", "relationship"}
+        )
+    ]
+    if not graph_chunk_candidates and not final_graph_chunks:
+        raise SystemExit(
+            "retrieval-only payload has no graph chunk candidates; "
+            "KG retrieval did not contribute document evidence"
+        )
+
+
 def validate_result(stdout_path: Path, request_work: Path) -> dict[str, Any]:
     result = json.loads(stdout_path.read_text(encoding="utf-8"))
     request = json.loads(request_work.read_text(encoding="utf-8"))
@@ -355,6 +378,8 @@ def validate_result(stdout_path: Path, request_work: Path) -> dict[str, Any]:
     if retrieval_only:
         if not isinstance(retrieval_result, dict):
             raise SystemExit("retrieval-only payload is missing retrieval_result")
+        if not str(answer or "").strip():
+            raise SystemExit("retrieval-only payload answer is empty")
         final_context_text = str(retrieval_result.get("final_context_text") or "").strip()
         final_context_chunks = retrieval_result.get("final_context_chunks") or []
         if not final_context_text and not final_context_chunks:
@@ -363,6 +388,7 @@ def validate_result(stdout_path: Path, request_work: Path) -> dict[str, Any]:
             retrieval_result=retrieval_result,
             request_info=request_info,
         )
+        _validate_retrieval_only_graph_context(retrieval_result=retrieval_result)
     elif not answer:
         raise SystemExit("MEP chain returned code=0 but answer is empty")
 

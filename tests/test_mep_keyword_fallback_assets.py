@@ -244,7 +244,7 @@ def _write_validation_files(
         json.dumps(
             {
                 "code": "0",
-                "answer": "",
+                "answer": retrieval_result.get("final_context_text") or "context",
                 "retrieval_result": retrieval_result,
             },
             ensure_ascii=False,
@@ -280,6 +280,9 @@ def test_validate_full_chain_retrieval_only_requires_successful_gliner_keywords(
         retrieval_result={
             "final_context_text": "context",
             "final_context_chunks": [],
+            "graph_chunk_candidates": [
+                {"chunk_id": "chunk-1", "content": "context", "source": "graph"}
+            ],
             "high_level_keywords": ["主题"],
             "low_level_keywords": [],
             "keyword_source": "gliner_fallback",
@@ -304,7 +307,7 @@ def test_validate_full_chain_accepts_camel_case_explicit_keywords(tmp_path: Path
         json.dumps(
             {
                 "code": "0",
-                "answer": "",
+                "answer": "context",
                 "retrieval_result": {
                     "final_context_text": "context",
                     "high_level_keywords": ["指南"],
@@ -312,6 +315,9 @@ def test_validate_full_chain_accepts_camel_case_explicit_keywords(tmp_path: Path
                     "keyword_source": "request",
                     "keyword_strategy": "request",
                     "keyword_model_error": None,
+                    "graph_chunk_candidates": [
+                        {"chunk_id": "chunk-1", "content": "context", "source": "graph"}
+                    ],
                 },
             },
             ensure_ascii=False,
@@ -429,6 +435,21 @@ def test_summarize_requests_defaults_unset_mode_to_retrieval_only(tmp_path: Path
                 "keyword_model_error": None,
             },
             "did not use GLiNER fallback",
+        ),
+        (
+            {
+                "final_context_text": "context",
+                "high_level_keywords": ["主题"],
+                "low_level_keywords": [],
+                "keyword_source": "gliner_fallback",
+                "keyword_strategy": "token_classification_fallback",
+                "keyword_model_error": None,
+                "final_context_chunks": [
+                    {"content": "context", "source": "vector"}
+                ],
+                "graph_chunk_candidates": [],
+            },
+            "no graph chunk candidates",
         ),
     ],
 )

@@ -508,7 +508,7 @@ def test_run_one_hop_no_longer_prefills_raw_query(monkeypatch):
         captured["allow_llm_keyword_extraction"] = (
             query_param.allow_llm_keyword_extraction
         )
-        return "", [], {
+        return "检索上下文", [], {
             "high_level_keywords": [],
             "low_level_keywords": [],
             "keyword_source": "gliner_fallback",
@@ -551,4 +551,5 @@ def test_run_one_hop_no_longer_prefills_raw_query(monkeypatch):
     assert captured["hl_keywords"] == []
     assert captured["ll_keywords"] == []
     assert captured["allow_llm_keyword_extraction"] is False
+    assert result["answer"] == "检索上下文"
     assert result["retrieval_result"]["keyword_source"] == "gliner_fallback"

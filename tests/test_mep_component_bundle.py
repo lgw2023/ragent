@@ -724,7 +724,7 @@ def test_customer_model_calc_retrieval_only_writes_retrieval_result(
             assert inference_request.only_need_context is True
             assert inference_request.include_trace is True
             return {
-                "answer": "",
+                "answer": "检索上下文",
                 "retrieval_only": True,
                 "only_need_context": True,
                 "referenced_file_paths": ["doc.md"],
@@ -769,7 +769,7 @@ def test_customer_model_calc_retrieval_only_writes_retrieval_result(
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["retrieval_only"] is True
-    assert payload["answer"] == ""
+    assert payload["answer"] == "检索上下文"
     assert payload["retrieval_result"]["final_context_text"] == "检索上下文"
     assert payload["referenced_file_paths"] == ["doc.md"]
 
