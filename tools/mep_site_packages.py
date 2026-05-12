@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
+import sys
 import zipfile
 from collections.abc import Iterable
 from pathlib import Path
@@ -10,10 +13,53 @@ from typing import Any
 _NATIVE_WHEEL_SUFFIXES = (".so", ".pyd", ".dll", ".dylib")
 DEFAULT_SITE_PACKAGE_DISTRIBUTIONS = ("litellm", "openai")
 MANIFEST_FILENAME = "ragent-mep-site-packages-manifest.json"
+ALL_PLATFORM_TAG_VALUES = {"all", "*"}
+CURRENT_PLATFORM_TAG_VALUES = {"", "auto", "current"}
 
 
 def normalize_distribution_name(value: str) -> str:
     return value.strip().replace("_", "-").lower()
+
+
+def _normalize_os_name(value: str | None = None) -> str:
+    normalized = (value or sys.platform).strip().lower()
+    if normalized.startswith("linux"):
+        return "linux"
+    if normalized == "darwin":
+        return "darwin"
+    return normalized or "unknown"
+
+
+def _normalize_arch_name(value: str | None = None) -> str:
+    normalized = (value or platform.machine()).strip().lower()
+    if normalized in {"x86_64", "amd64"}:
+        return "amd64"
+    if normalized in {"aarch64", "arm64"}:
+        return "arm64"
+    return normalized or "unknown"
+
+
+def current_platform_tag() -> str:
+    return (
+        f"{_normalize_os_name()}-{_normalize_arch_name()}-"
+        f"py{sys.version_info.major}.{sys.version_info.minor}"
+    )
+
+
+def resolve_site_packages_platform_tag(value: str | None = None) -> str | None:
+    raw_value = (
+        value
+        if value is not None
+        else os.getenv("RAGENT_MEP_MATERIALIZE_PLATFORM_TAG")
+        or os.getenv("RAGENT_MEP_PLATFORM_TAG")
+        or "current"
+    )
+    normalized = raw_value.strip().lower()
+    if normalized in ALL_PLATFORM_TAG_VALUES:
+        return None
+    if normalized in CURRENT_PLATFORM_TAG_VALUES:
+        return current_platform_tag()
+    return raw_value.strip()
 
 
 def distribution_name_from_wheel(wheel_path: Path) -> str | None:

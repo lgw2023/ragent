@@ -150,6 +150,48 @@ def test_build_mep_layout_materialize_dereferences_source_symlinks(tmp_path: Pat
     assert materialized_config.read_text(encoding="utf-8") == '{"source": "external"}\n'
 
 
+def test_build_mep_layout_materializes_only_current_site_packages_platform(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+    bad_old_wheel = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "demo"
+        / "modelDir"
+        / "data"
+        / "deps"
+        / "wheelhouse"
+        / "linux-arm64-py3.10"
+        / "litellm-1.80.10-py3-none-any.whl"
+    )
+    bad_old_wheel.write_bytes(b"not a valid wheel")
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "linux-arm64-py3.9")
+
+    build_mep_layout(
+        repo_root=repo_root,
+        model_package="demo",
+        output=tmp_path / "runtime",
+        materialize=True,
+    )
+
+    assert not (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "demo"
+        / "modelDir"
+        / "data"
+        / "deps"
+        / "site-packages"
+        / "linux-arm64-py3.10"
+    ).exists()
+
+
 @pytest.mark.parametrize(
     ("archive_format", "archive_name", "expected_result_format"),
     [
