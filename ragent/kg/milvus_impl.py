@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ast
+import importlib.util
 import json
 import os
 from typing import Any, final
@@ -10,10 +11,12 @@ import numpy as np
 from ragent.utils import logger, compute_mdhash_id
 from ..base import BaseVectorStorage
 from .backend_config import get_backend_config_value, load_backend_config
-import pipmaster as pm
 
-if not pm.is_installed("pymilvus"):
-    pm.install("pymilvus")
+if importlib.util.find_spec("pymilvus") is None:
+    raise RuntimeError(
+        "pymilvus is required for MilvusVectorDBStorage. Install it in the "
+        "offline runtime wheelhouse instead of using runtime pip installation."
+    )
 
 from pymilvus import MilvusClient, DataType, CollectionSchema, FieldSchema  # type: ignore
 

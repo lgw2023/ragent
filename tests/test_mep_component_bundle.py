@@ -539,6 +539,23 @@ def test_mep_runtime_sources_avoid_python310_only_dataclass_slots():
     assert "dataclass(slots=True)" not in inference_runtime.read_text(encoding="utf-8")
 
 
+def test_mep_runtime_sources_avoid_dynamic_pipmaster_imports():
+    repo_root = Path(__file__).resolve().parents[1]
+    runtime_sources = [
+        repo_root / "ragent" / "kg" / "networkx_impl.py",
+        repo_root / "ragent" / "kg" / "nano_vector_db_impl.py",
+        repo_root / "ragent" / "kg" / "neo4j_impl.py",
+        repo_root / "ragent" / "kg" / "milvus_impl.py",
+        repo_root / "ragent" / "llm" / "hf.py",
+        repo_root / "ragent" / "llm" / "ollama.py",
+    ]
+
+    for source_path in runtime_sources:
+        source = source_path.read_text(encoding="utf-8")
+        assert "pipmaster" not in source
+        assert "pm.install" not in source
+
+
 def test_offline_full_chain_validation_script_is_exported():
     repo_root = Path(__file__).resolve().parents[1]
     script_path = (

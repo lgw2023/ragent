@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 from dataclasses import dataclass
@@ -19,10 +20,12 @@ from ..base import BaseGraphStorage
 from ..types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
 from ..constants import GRAPH_FIELD_SEP
 from .backend_config import get_backend_config_value, load_backend_config
-import pipmaster as pm
 
-if not pm.is_installed("neo4j"):
-    pm.install("neo4j")
+if importlib.util.find_spec("neo4j") is None:
+    raise RuntimeError(
+        "neo4j is required for Neo4JStorage. Install it in the offline runtime "
+        "wheelhouse instead of using runtime pip installation."
+    )
 
 from neo4j import (  # type: ignore
     AsyncGraphDatabase,
