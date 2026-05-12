@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import argparse
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from tools import export_mep_keyword_fallback_assets as exporter
+from tools import validate_mep_wheelhouse as wheelhouse_validator
 from tools.validate_mep_full_chain_result import summarize_requests, validate_result
 
 
@@ -29,6 +32,13 @@ def _write_keyword_wheelhouse(model_dir_root: Path, platform_tag: str) -> Path:
     ):
         (wheelhouse_dir / name).write_bytes(b"fake")
     return wheelhouse_dir
+
+
+def _write_valid_wheel(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as wheel:
+        wheel.writestr("demo/__init__.py", "")
+        wheel.writestr("demo-1.0.0.dist-info/METADATA", "Name: demo\nVersion: 1.0.0\n")
 
 
 def test_validate_keyword_fallback_assets_uses_conventional_paths(tmp_path: Path):
@@ -93,7 +103,7 @@ def test_download_keyword_wheels_removes_stale_wheels(monkeypatch, tmp_path: Pat
 
     wheels = exporter.download_keyword_wheels(
         output_dir=output_dir,
-        platform_tag="linux-arm64-py3.10",
+        platform_tag="linux-arm64-py3.9",
         python_bin="python3",
         binary_requirements=("gliner==0.2.26",),
         pure_wheel_requirements=(),
@@ -102,6 +112,44 @@ def test_download_keyword_wheels_removes_stale_wheels(monkeypatch, tmp_path: Pat
     assert wheels == ["gliner-0.2.26-py3-none-any.whl"]
     assert not (output_dir / "gliner-0.1.0-py3-none-any.whl").exists()
     assert (output_dir / "gliner-0.2.26-py3-none-any.whl").is_file()
+
+
+def test_download_keyword_wheels_maps_platform_tag_to_pip_target_args(
+    monkeypatch,
+    tmp_path: Path,
+):
+    commands = []
+
+    def fake_run(command):
+        commands.append(command)
+        wheel_dir = Path(command[command.index("--dest") + 1])
+        _write_valid_wheel(wheel_dir / "onnxruntime-1.16.3-cp39-cp39.whl")
+
+    monkeypatch.setattr(exporter, "_run", fake_run)
+
+    exporter.download_keyword_wheels(
+        output_dir=tmp_path / "keyword_wheelhouse",
+        platform_tag="linux-arm64-py3.9",
+        python_bin="python3",
+        binary_requirements=("onnxruntime==1.16.3",),
+        pure_wheel_requirements=(),
+    )
+
+    command = commands[0]
+    assert command[command.index("--platform") + 1] == "manylinux2014_aarch64"
+    assert command[command.index("--python-version") + 1] == "3.9"
+    assert command[command.index("--abi") + 1] == "cp39"
+
+
+def test_download_keyword_wheels_rejects_unsupported_platform(tmp_path: Path):
+    with pytest.raises(ValueError, match="linux-arm64 CPython tags"):
+        exporter.download_keyword_wheels(
+            output_dir=tmp_path / "keyword_wheelhouse",
+            platform_tag="linux-amd64-py3.9",
+            python_bin="python3",
+            binary_requirements=(),
+            pure_wheel_requirements=(),
+        )
 
 
 def test_export_keyword_fallback_assets_populates_model_and_wheels(
@@ -127,13 +175,13 @@ def test_export_keyword_fallback_assets_populates_model_and_wheels(
         binary_requirements=(),
         pure_wheel_requirements=(),
     ):
-        assert platform_tag == "linux-arm64-py3.10"
+        assert platform_tag == "linux-arm64-py3.9"
         assert python_bin == "python3"
         output_dir.mkdir(parents=True)
         for name in (
             "gliner-0.2.26-py3-none-any.whl",
             "stanza-1.10.1-py3-none-any.whl",
-            "onnxruntime-1.16.3-cp310-cp310-manylinux2014_aarch64.whl",
+            "onnxruntime-1.16.3-cp39-cp39-manylinux2014_aarch64.whl",
             "langdetect-1.0.9-py3-none-any.whl",
         ):
             (output_dir / name).write_bytes(b"fake")
@@ -145,7 +193,7 @@ def test_export_keyword_fallback_assets_populates_model_and_wheels(
     result = exporter.export_keyword_fallback_assets(
         repo_root=repo_root,
         model_package="demo",
-        platform_tag="linux-arm64-py3.10",
+        platform_tag="linux-arm64-py3.9",
         python_bin="python3",
         model_id="knowledgator/gliner-x-small",
     )
@@ -153,6 +201,36 @@ def test_export_keyword_fallback_assets_populates_model_and_wheels(
     assert Path(result["model_dir"]).is_dir()
     assert Path(result["wheelhouse_dir"]).is_dir()
     assert result["wheel_count"] == 4
+
+
+def test_validate_mep_wheelhouse_reports_missing_requested_keyword_platform(
+    tmp_path: Path,
+):
+    model_dir_root = tmp_path / "modelDir"
+    _write_valid_wheel(
+        model_dir_root
+        / "data"
+        / "deps"
+        / "wheelhouse"
+        / "linux-arm64-py3.9"
+        / "demo-1.0.0-py3-none-any.whl"
+    )
+
+    args = argparse.Namespace(
+        wheelhouse_dir=[],
+        model_dir_root=model_dir_root,
+        platform_tag=("linux-arm64-py3.9",),
+        include_keyword=True,
+    )
+    checked, invalid = wheelhouse_validator.validate_wheelhouse_dirs(
+        wheelhouse_validator._iter_wheelhouse_dirs(args)
+    )
+
+    assert checked == 1
+    assert any(
+        "keyword_wheelhouse/linux-arm64-py3.9: directory does not exist" in detail
+        for detail in invalid
+    )
 
 
 def _write_validation_files(

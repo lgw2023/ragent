@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -11,7 +12,7 @@ from typing import Any
 
 
 DEFAULT_MODEL_PACKAGE = "bge-m3"
-DEFAULT_PLATFORM_TAG = "linux-arm64-py3.10"
+DEFAULT_PLATFORM_TAG = "linux-arm64-py3.9"
 DEFAULT_HF_MODEL_ID = "knowledgator/gliner-x-small"
 DEFAULT_HF_MODEL_DIR_NAME = "knowledgator-gliner-x-small"
 KEYWORD_MODEL_RELATIVE_DIR = (
@@ -93,6 +94,19 @@ def _distribution_name_from_wheel(wheel_name: str) -> str | None:
     return distribution or None
 
 
+def _pip_target_args_for_platform_tag(platform_tag: str) -> tuple[str, str, str]:
+    match = re.fullmatch(r"linux-arm64-py3\.(\d+)", platform_tag)
+    if match is None:
+        raise ValueError(
+            "keyword fallback wheel export supports linux-arm64 CPython tags "
+            f"such as linux-arm64-py3.9: {platform_tag}"
+        )
+    minor = match.group(1)
+    python_version = f"3.{minor}"
+    abi = f"cp3{minor}"
+    return "manylinux2014_aarch64", python_version, abi
+
+
 def download_keyword_wheels(
     *,
     output_dir: Path,
@@ -101,11 +115,7 @@ def download_keyword_wheels(
     binary_requirements: tuple[str, ...] = DEFAULT_BINARY_REQUIREMENTS,
     pure_wheel_requirements: tuple[str, ...] = DEFAULT_PURE_WHEEL_REQUIREMENTS,
 ) -> list[str]:
-    if platform_tag != DEFAULT_PLATFORM_TAG:
-        raise ValueError(
-            "keyword fallback wheel export currently supports only "
-            f"{DEFAULT_PLATFORM_TAG}: {platform_tag}"
-        )
+    pip_platform, python_version, abi = _pip_target_args_for_platform_tag(platform_tag)
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ragent_keyword_wheels_") as tmp:
         tmp_dir = Path(tmp)
@@ -120,13 +130,13 @@ def download_keyword_wheels(
                     str(tmp_dir),
                     "--only-binary=:all:",
                     "--platform",
-                    "manylinux2014_aarch64",
+                    pip_platform,
                     "--python-version",
-                    "310",
+                    python_version,
                     "--implementation",
                     "cp",
                     "--abi",
-                    "cp310",
+                    abi,
                     "--no-deps",
                     *binary_requirements,
                 ]
@@ -149,6 +159,9 @@ def download_keyword_wheels(
 
     manifest = {
         "platform_tag": platform_tag,
+        "pip_platform": pip_platform,
+        "python_version": python_version,
+        "abi": abi,
         "binary_requirements": list(binary_requirements),
         "pure_wheel_requirements": list(pure_wheel_requirements),
         "wheels": copied,

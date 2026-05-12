@@ -23,14 +23,20 @@ def _describe_non_zip_payload(path: Path) -> str:
     return "file is not a zip archive"
 
 
-def _iter_platform_dirs(root: Path, platform_tags: tuple[str, ...]) -> Iterable[Path]:
-    if not root.is_dir():
-        return
+def _iter_platform_dirs(
+    root: Path,
+    platform_tags: tuple[str, ...],
+    *,
+    require_requested_tags: bool = False,
+) -> Iterable[Path]:
     if platform_tags:
         for platform_tag in platform_tags:
             candidate = root / platform_tag
-            if candidate.is_dir():
+            if candidate.is_dir() or require_requested_tags:
                 yield candidate
+        return
+
+    if not root.is_dir():
         return
 
     for candidate in sorted(root.iterdir()):
@@ -48,9 +54,18 @@ def _iter_wheelhouse_dirs(args: argparse.Namespace) -> Iterable[Path]:
         return
 
     deps_dir = args.model_dir_root.expanduser().resolve() / "data" / "deps"
-    yield from _iter_platform_dirs(deps_dir / "wheelhouse", args.platform_tag)
+    require_requested_tags = bool(args.platform_tag)
+    yield from _iter_platform_dirs(
+        deps_dir / "wheelhouse",
+        args.platform_tag,
+        require_requested_tags=require_requested_tags,
+    )
     if args.include_keyword:
-        yield from _iter_platform_dirs(deps_dir / "keyword_wheelhouse", args.platform_tag)
+        yield from _iter_platform_dirs(
+            deps_dir / "keyword_wheelhouse",
+            args.platform_tag,
+            require_requested_tags=require_requested_tags,
+        )
 
 
 def validate_wheelhouse_dirs(wheelhouse_dirs: Iterable[Path]) -> tuple[int, list[str]]:
