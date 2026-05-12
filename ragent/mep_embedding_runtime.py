@@ -53,7 +53,9 @@ _DATA_CONFIG_FILENAMES = (
 )
 _DEFAULT_ASCEND_ENV_SCRIPTS = (
     "/usr/local/Ascend/ascend-toolkit/set_env.sh",
+    "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh",
     "/usr/local/Ascend/nnal/atb/set_env.sh",
+    "/usr/local/Ascend/nnal/atb/latest/atb/set_env.sh",
 )
 _VLLM_SUBPROCESS_DEFAULT_ENV = {
     "VLLM_WORKER_MULTIPROC_METHOD": "spawn",

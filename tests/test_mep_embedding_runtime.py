@@ -509,6 +509,15 @@ def test_build_vllm_subprocess_env_defaults_to_spawn(monkeypatch, tmp_path: Path
     assert env["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
 
 
+def test_default_ascend_env_scripts_include_latest_paths():
+    assert "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh" in (
+        mep_embedding_runtime._DEFAULT_ASCEND_ENV_SCRIPTS
+    )
+    assert "/usr/local/Ascend/nnal/atb/latest/atb/set_env.sh" in (
+        mep_embedding_runtime._DEFAULT_ASCEND_ENV_SCRIPTS
+    )
+
+
 def test_build_vllm_subprocess_env_passes_bootstrapped_pythonpath(
     monkeypatch,
     tmp_path: Path,
