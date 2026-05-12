@@ -231,6 +231,8 @@ def _run_offline_pip_install(
     constraints_file: Path | None,
     wheelhouse_dirs: tuple[Path, ...],
 ) -> None:
+    _validate_wheelhouse_wheels(wheelhouse_dirs)
+
     command = [
         sys.executable,
         "-m",
@@ -256,6 +258,28 @@ def _run_offline_pip_install(
         raise RuntimeError(
             "offline MEP dependency installation failed with exit_code="
             f"{completed.returncode}: {' '.join(command)}\n{completed.stdout}"
+        )
+
+
+def _validate_wheelhouse_wheels(wheelhouse_dirs: tuple[Path, ...]) -> None:
+    invalid_wheels: list[str] = []
+    for wheelhouse_dir in wheelhouse_dirs:
+        for wheel_path in sorted(wheelhouse_dir.glob("*.whl")):
+            try:
+                with zipfile.ZipFile(wheel_path) as wheel:
+                    corrupt_member = wheel.testzip()
+            except (OSError, zipfile.BadZipFile) as exc:
+                invalid_wheels.append(f"{wheel_path}: {exc}")
+                continue
+            if corrupt_member is not None:
+                invalid_wheels.append(
+                    f"{wheel_path}: corrupt archive member {corrupt_member}"
+                )
+
+    if invalid_wheels:
+        raise RuntimeError(
+            "offline MEP wheelhouse contains invalid wheel file(s):\n"
+            + "\n".join(f"- {detail}" for detail in invalid_wheels)
         )
 
 
