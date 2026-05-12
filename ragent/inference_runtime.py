@@ -762,7 +762,7 @@ async def _run_one_hop_with_rag(
                 debug_payload,
             )
             return {
-                "answer": "" if context_only else answer,
+                "answer": answer,
                 "referenced_file_paths": normalized_references,
                 "image_list": normalized_references,
                 "retrieval_result": (
@@ -816,7 +816,7 @@ async def _run_one_hop_with_rag(
                 debug_payload,
             )
             return {
-                "answer": "" if context_only else answer,
+                "answer": answer,
                 "referenced_file_paths": normalized_references,
                 "image_list": normalized_references,
                 "retrieval_result": (

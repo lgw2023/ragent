@@ -224,7 +224,7 @@ def test_execute_retrieval_only_skips_llm_check_and_returns_retrieval_payload(
         calls["only_need_context"] = kwargs["only_need_context"]
         calls["high_level_keywords"] = kwargs["high_level_keywords"]
         return {
-            "answer": "",
+            "answer": "上下文",
             "referenced_file_paths": ["doc.md"],
             "image_list": ["doc.md"],
             "retrieval_result": {"final_context_text": "上下文"},
@@ -259,7 +259,7 @@ def test_execute_retrieval_only_skips_llm_check_and_returns_retrieval_payload(
     assert calls["retrieval_only"] is True
     assert calls["only_need_context"] is True
     assert calls["high_level_keywords"] == ["指南"]
-    assert result["answer"] == ""
+    assert result["answer"] == "上下文"
     assert result["retrieval_only"] is True
     assert result["only_need_context"] is True
     assert result["retrieval_result"]["final_context_text"] == "上下文"

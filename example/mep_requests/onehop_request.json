@@ -8,6 +8,15 @@
     "query_type": "onehop",
     "query": "文档的主要主题是什么？",
     "mode": "hybrid",
+    "high_level_keywords": [
+      "平衡膳食",
+      "膳食指南"
+    ],
+    "low_level_keywords": [
+      "中国居民膳食指南",
+      "食物多样",
+      "合理搭配"
+    ],
     "enable_rerank": true,
     "response_type": "Multiple Paragraphs",
     "generatePath": "/tmp/ragent_mep_output"

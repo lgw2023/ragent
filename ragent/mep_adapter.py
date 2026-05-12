@@ -4,8 +4,10 @@ import asyncio
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -29,6 +31,7 @@ _RAGENT_SNAPSHOT_MARKERS = {
     "kv_store_text_chunks.json",
     "vdb_chunks.json",
 }
+_SQLITE_KV_NAMESPACES_FROM_JSON = ("full_docs", "text_chunks")
 
 
 @dataclass(frozen=True)
@@ -639,6 +642,101 @@ def _env_flag_enabled(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in _TRUE_VALUES
 
 
+def _normalize_legacy_kv_json_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("legacy KV JSON payload must be an object")
+    if isinstance(payload.get("data"), dict):
+        return dict(payload["data"])
+    return dict(payload)
+
+
+def _coerce_kv_timestamp(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _materialize_sqlite_kv_from_json(
+    project_dir: Path,
+    *,
+    namespace: str,
+) -> int:
+    json_path = project_dir / f"kv_store_{namespace}.json"
+    if not json_path.is_file():
+        return 0
+
+    sqlite_path = project_dir / f"kv_store_{namespace}.sqlite"
+    raw_payload = json.loads(json_path.read_text(encoding="utf-8"))
+    records = _normalize_legacy_kv_json_payload(raw_payload)
+    if not records:
+        return 0
+
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS kv_entries (
+                key TEXT PRIMARY KEY,
+                entry_json TEXT NOT NULL,
+                create_time INTEGER NOT NULL DEFAULT 0,
+                update_time INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kv_entries_update_time ON kv_entries(update_time)"
+        )
+        now = int(time.time())
+        rows = []
+        for key, value in records.items():
+            entry = dict(value) if isinstance(value, dict) else {"return": value}
+            entry.pop("_id", None)
+            if namespace == "text_chunks":
+                entry.setdefault("llm_cache_list", [])
+            create_time = _coerce_kv_timestamp(entry.get("create_time"), now)
+            update_time = _coerce_kv_timestamp(entry.get("update_time"), create_time)
+            entry["create_time"] = create_time
+            entry["update_time"] = update_time
+            rows.append(
+                (
+                    str(key),
+                    json.dumps(entry, ensure_ascii=False, default=str),
+                    create_time,
+                    update_time,
+                )
+            )
+
+        conn.executemany(
+            """
+            INSERT INTO kv_entries (
+                key,
+                entry_json,
+                create_time,
+                update_time
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                entry_json = excluded.entry_json,
+                create_time = excluded.create_time,
+                update_time = excluded.update_time
+            """,
+            rows,
+        )
+        conn.commit()
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def materialize_sqlite_kv_stores_from_snapshot(project_dir: Path) -> dict[str, int]:
+    return {
+        namespace: _materialize_sqlite_kv_from_json(project_dir, namespace=namespace)
+        for namespace in _SQLITE_KV_NAMESPACES_FROM_JSON
+    }
+
+
 def prepare_runtime_project_layout(
     *,
     data_dir: str | os.PathLike[str],
@@ -678,6 +776,7 @@ def prepare_runtime_project_layout(
         runtime_temp_root = Path(tempfile.mkdtemp(prefix="ragent_mep_runtime_")).resolve()
     target_project_dir = runtime_temp_root / source_project_dir.name
     shutil.copytree(source_project_dir, target_project_dir)
+    materialize_sqlite_kv_stores_from_snapshot(target_project_dir)
 
     return RuntimeProjectLayout(
         data_dir=resolved_data_dir,
