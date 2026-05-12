@@ -10,9 +10,9 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-DEST="${DEST:-/Volumes/Udisk2/ragent-mep-test}"
+DEST="${DEST:-/Volumes/Udisk2/ragent}"
 MODEL_PACKAGE="${MODEL_PACKAGE:-bge-m3}"
-PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.10}"
+PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.9}"
 
 RSYNC_EXCLUDES=(
   --exclude "__pycache__/"
@@ -153,6 +153,7 @@ for path in \
   export_mep_keyword_fallback_assets.py \
   export_mep_test_bundle_to_udisk.sh \
   export_mep_vllm_ascend_wheelhouse.py \
+  validate_mep_wheelhouse.py \
   validate_mep_full_chain_result.py
 do
   if [ -f "$PROJECT_ROOT/tools/$path" ]; then
@@ -185,7 +186,7 @@ python "$PROJECT_ROOT/tools/mep_site_packages.py" \
 # wheelhouse, source archives, and any pre-expanded site-packages.
 rsync_dir "$MODEL_PACKAGE_SRC" "$MODEL_PACKAGE_DEST"
 
-# The validation script installs these from /tmp/ragent-mep-test directly.
+# The validation script installs these from the mounted repository/test bundle.
 REPAIR_WHEEL_PATHS=()
 REPAIR_WHEEL_NAMES=()
 for pattern in "${REPAIR_WHEEL_PATTERNS[@]}"; do

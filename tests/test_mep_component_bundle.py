@@ -541,6 +541,7 @@ def test_offline_full_chain_validation_script_is_exported():
     )
     export_script = repo_root / "tools" / "export_mep_test_bundle_to_udisk.sh"
     validator_script = repo_root / "tools" / "validate_mep_full_chain_result.py"
+    wheelhouse_validator_script = repo_root / "tools" / "validate_mep_wheelhouse.py"
 
     assert script_path.exists()
     script_text = script_path.read_text(encoding="utf-8")
@@ -549,8 +550,14 @@ def test_offline_full_chain_validation_script_is_exported():
 
     assert "Validated_ragent-mep-test_docker_full_chain.sh" in export_text
     assert "validate_mep_full_chain_result.py" in export_text
+    assert "validate_mep_wheelhouse.py" in export_text
+    assert 'DEST="${DEST:-/Volumes/Udisk2/ragent}"' in export_text
+    assert 'PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.9}"' in export_text
     assert 'MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"' in script_text
     assert 'IMAGE="${IMAGE:-}"' in script_text
+    assert 'CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"' in script_text
+    assert 'MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"' in script_text
+    assert "validate_host_wheelhouse()" in script_text
     assert "AUTO_START_CONTAINER" in script_text
     assert "start_plain_container()" in script_text
     assert "docker run -d" in script_text
@@ -558,6 +565,9 @@ def test_offline_full_chain_validation_script_is_exported():
     assert "requests_require_llm()" in script_text
     assert "validate_mep_full_chain_result.py" in script_text
     assert "retrieval-only payload is missing retrieval_result" in validator_text
+    assert "Validate that MEP offline wheelhouse .whl files" in wheelhouse_validator_script.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(

@@ -24,6 +24,7 @@ set -euo pipefail
 #   MEP_REUSE_EXISTING_VLLM=0               use component-local transformers embedding
 #   AUTO_START_CONTAINER=1                  docker rm/run CONTAINER_NAME before validation
 #   MEP_REQUEST_NAME=sfs_create_request.json run a normal generation request sample
+#   MEP_WHEELHOUSE_PLATFORM_TAG=linux-arm64-py3.9 host-side wheelhouse preflight tag
 #   MEP_REQUIRE_RERANK=1                    fail if RERANK_* is incomplete
 #   MEP_ENABLE_RERANK=false                 force rerank off for this validation
 
@@ -35,7 +36,7 @@ else
 fi
 
 HOST_TEST_DIR="${HOST_TEST_DIR:-${HOST_REPO_DIR:-$DEFAULT_HOST_TEST_DIR}}"
-CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent-mep-test}"
+CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"
 RUNTIME_DIR="${RUNTIME_DIR:-/tmp/ragent-mep-runtime}"
 MODEL_PACKAGE="${MODEL_PACKAGE:-bge-m3}"
 CONTAINER_NAME="${CONTAINER_NAME:-vllm_ascend_910b_8cards}"
@@ -59,6 +60,8 @@ MEP_KEEP_REQUEST_RERANK="${MEP_KEEP_REQUEST_RERANK:-0}"
 MEP_REUSE_EXISTING_VLLM="${MEP_REUSE_EXISTING_VLLM:-1}"
 MEP_CLEAR_PATH_ENV="${MEP_CLEAR_PATH_ENV:-1}"
 MEP_ALLOW_TEST_EMBEDDING_TRUNCATION="${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-1}"
+MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-1}"
+MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"
 
 NO_PROXY_DEFAULT="localhost,127.0.0.1,::1,*.huawei.com,*.huaweicloud.com"
 http_proxy="${http_proxy:-}"
@@ -164,6 +167,23 @@ start_plain_container() {
     /bin/bash -lc "while true; do sleep 3600; done" >/dev/null
 }
 
+validate_host_wheelhouse() {
+  [ "$MEP_VALIDATE_HOST_WHEELHOUSE" = "1" ] || return 0
+  local validator="$HOST_TEST_DIR/tools/validate_mep_wheelhouse.py"
+  local model_dir_root="$HOST_TEST_DIR/mep/model_packages/$MODEL_PACKAGE/modelDir"
+  local wheelhouse_dir="$model_dir_root/data/deps/wheelhouse/$MEP_WHEELHOUSE_PLATFORM_TAG"
+
+  require_command python3
+  [ -f "$validator" ] || die "missing wheelhouse validator: $validator"
+  [ -d "$model_dir_root" ] || die "missing MEP modelDir root: $model_dir_root"
+  [ -d "$wheelhouse_dir" ] || die "missing MEP wheelhouse: $wheelhouse_dir"
+
+  step "Validate host MEP wheelhouse"
+  python3 "$validator" \
+    --model-dir-root "$model_dir_root" \
+    --platform-tag "$MEP_WHEELHOUSE_PLATFORM_TAG"
+}
+
 require_command docker
 [ -d "$HOST_TEST_DIR" ] || die "HOST_TEST_DIR does not exist: $HOST_TEST_DIR"
 [ -f "$HOST_TEST_DIR/MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh" ] || \
@@ -185,6 +205,8 @@ fi
 if [ "$MEP_REUSE_EXISTING_VLLM" != "1" ] && [ "$SKIP_VLLM_VALIDATION" != "1" ]; then
   die "MEP_REUSE_EXISTING_VLLM=0 requires SKIP_VLLM_VALIDATION=1 and a clean running container, otherwise the vLLM validation step will occupy the embedding port"
 fi
+
+validate_host_wheelhouse
 
 if [ "$SKIP_VLLM_VALIDATION" != "1" ]; then
   step "Run validated vLLM Ascend embedding check"

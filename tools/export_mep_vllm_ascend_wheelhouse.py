@@ -58,7 +58,7 @@ DEFAULT_EXTRA_REQUIREMENTS: tuple[str, ...] = (
     "tenacity==9.1.4",
     "wcwidth==0.6.0",
 )
-DEFAULT_RESOLVABLE_LOCAL_FILE_PREFIXES = ("/tmp/ragent-mep-test",)
+DEFAULT_RESOLVABLE_LOCAL_FILE_PREFIXES = ("/tmp/ragent", "/tmp/ragent-mep-test")
 PINNED_REQUIREMENT_RE = re.compile(r"^[A-Za-z0-9_.-]+(?:\[[^]]+\])?==[^#;\s]+$")
 
 
@@ -426,7 +426,8 @@ def parse_args() -> argparse.Namespace:
         default=list(DEFAULT_RESOLVABLE_LOCAL_FILE_PREFIXES),
         help=(
             "file:// wheel path prefix that should be resolved from package "
-            "indexes by default. Defaults to /tmp/ragent-mep-test."
+            "indexes by default. Defaults to /tmp/ragent and legacy "
+            "/tmp/ragent-mep-test."
         ),
     )
     parser.add_argument(

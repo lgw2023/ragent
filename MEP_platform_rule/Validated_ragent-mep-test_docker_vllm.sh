@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run this script on the Ascend host after copying the offline test bundle.
+# Run this script on the Ascend host from a full repository checkout.
 #
 # Typical usage:
-#   cd /data/disk1/ragent-mep-test
+#   cd /data/disk1/ragent
 #   bash MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh
 #
 # Optional overrides:
-#   HOST_TEST_DIR=/data/disk1/ragent-mep-test \
+#   HOST_TEST_DIR=/data/disk1/ragent \
 #   CONTAINER_NAME=vllm_ascend_910b_8cards \
 #   ASCEND_VISIBLE_DEVICES=0-7 \
 #   ASCEND_RT_VISIBLE_DEVICES=0 \
@@ -22,7 +22,7 @@ else
 fi
 
 HOST_TEST_DIR="${HOST_TEST_DIR:-$DEFAULT_HOST_TEST_DIR}"
-CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent-mep-test}"
+CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"
 RUNTIME_DIR="${RUNTIME_DIR:-/tmp/ragent-mep-runtime}"
 MODEL_PACKAGE="${MODEL_PACKAGE:-bge-m3}"
 MODEL_PATH="${MODEL_PATH:-}"
@@ -76,7 +76,7 @@ single_match_glob() {
 
 chmod_test_dir() {
   [ "$CHMOD_TEST_DIR" = "1" ] || return 0
-  step "Make offline test bundle readable/writable by the container"
+  step "Make repository/test bundle readable/writable by the container"
   if [ "$(id -u)" -eq 0 ]; then
     chmod -R a+rwX "$HOST_TEST_DIR"
   elif command -v sudo >/dev/null 2>&1; then
@@ -88,14 +88,14 @@ chmod_test_dir() {
 
 require_command docker
 [ -d "$HOST_TEST_DIR" ] || die "HOST_TEST_DIR does not exist: $HOST_TEST_DIR"
-[ -d "$HOST_TEST_DIR/ragent" ] || die "not a ragent offline test bundle: $HOST_TEST_DIR"
+[ -d "$HOST_TEST_DIR/ragent" ] || die "not a ragent repository/test bundle: $HOST_TEST_DIR"
 [ -f "$HOST_TEST_DIR/tools/build_mep_layout.py" ] || die "missing tools/build_mep_layout.py under $HOST_TEST_DIR"
 
 TRITON_WHEEL="$(single_match_glob "$HOST_TEST_DIR/triton_ascend-3.2.0*.whl" "triton-ascend repair wheel")"
 VLLM_WHEEL="$(single_match_glob "$HOST_TEST_DIR/vllm-0.13.0*.whl" "vllm repair wheel")"
 VLLM_ASCEND_WHEEL="$(single_match_glob "$HOST_TEST_DIR/vllm_ascend-0.13.0*.whl" "vllm-ascend repair wheel")"
 
-echo "offline test bundle: $HOST_TEST_DIR"
+echo "repository/test bundle: $HOST_TEST_DIR"
 echo "container mount:     $CONTAINER_TEST_DIR"
 echo "image:               $IMAGE"
 echo "container:           $CONTAINER_NAME"
