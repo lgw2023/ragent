@@ -532,6 +532,13 @@ def test_example_mep_requests_exist():
     assert (request_dir / "retrieval_only_request.json").exists()
 
 
+def test_mep_runtime_sources_avoid_python310_only_dataclass_slots():
+    repo_root = Path(__file__).resolve().parents[1]
+    inference_runtime = repo_root / "ragent" / "inference_runtime.py"
+
+    assert "dataclass(slots=True)" not in inference_runtime.read_text(encoding="utf-8")
+
+
 def test_offline_full_chain_validation_script_is_exported():
     repo_root = Path(__file__).resolve().parents[1]
     script_path = (
