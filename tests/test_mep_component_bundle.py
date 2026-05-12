@@ -505,6 +505,11 @@ def test_offline_full_chain_validation_script_is_exported():
     assert "Validated_ragent-mep-test_docker_full_chain.sh" in export_text
     assert "validate_mep_full_chain_result.py" in export_text
     assert 'MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"' in script_text
+    assert 'IMAGE="${IMAGE:-}"' in script_text
+    assert "AUTO_START_CONTAINER" in script_text
+    assert "start_plain_container()" in script_text
+    assert "docker run -d" in script_text
+    assert "MEP_REUSE_EXISTING_VLLM=0" in script_text
     assert "requests_require_llm()" in script_text
     assert "validate_mep_full_chain_result.py" in script_text
     assert "retrieval-only payload is missing retrieval_result" in validator_text
