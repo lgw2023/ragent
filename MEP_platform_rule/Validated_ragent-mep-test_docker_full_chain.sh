@@ -27,6 +27,7 @@ set -euo pipefail
 #   MEP_WHEELHOUSE_PLATFORM_TAG=linux-arm64-py3.9 host-side wheelhouse preflight tag
 #   MEP_REQUIRE_RERANK=1                    fail if RERANK_* is incomplete
 #   MEP_ENABLE_RERANK=false                 force rerank off for this validation
+#   MEP_STRICT_OFFLINE=1                    force HF/Transformers/pip offline behavior in the container
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$(basename "$SCRIPT_DIR")" = "MEP_platform_rule" ]; then
@@ -63,6 +64,7 @@ MEP_ALLOW_TEST_EMBEDDING_TRUNCATION="${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-1}"
 MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-1}"
 MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"
 MEP_REQUIRE_ASCEND_ENV="${MEP_REQUIRE_ASCEND_ENV:-}"
+MEP_STRICT_OFFLINE="${MEP_STRICT_OFFLINE:-1}"
 
 NO_PROXY_DEFAULT="localhost,127.0.0.1,::1,*.huawei.com,*.huaweicloud.com"
 http_proxy="${http_proxy:-}"
@@ -292,6 +294,7 @@ EXEC_ENV_ARGS=(
   "-e" "MEP_REUSE_EXISTING_VLLM=$MEP_REUSE_EXISTING_VLLM"
   "-e" "MEP_CLEAR_PATH_ENV=$MEP_CLEAR_PATH_ENV"
   "-e" "MEP_ALLOW_TEST_EMBEDDING_TRUNCATION=$MEP_ALLOW_TEST_EMBEDDING_TRUNCATION"
+  "-e" "MEP_STRICT_OFFLINE=$MEP_STRICT_OFFLINE"
   "-e" "MEP_EMBEDDING_MODEL=${MEP_EMBEDDING_MODEL:-}"
   "-e" "MEP_EMBEDDING_MODEL_KEY=${MEP_EMBEDDING_MODEL_KEY:-}"
   "-e" "MEP_EMBEDDING_MODEL_URL=${MEP_EMBEDDING_MODEL_URL:-}"
@@ -383,6 +386,22 @@ bool_from_string() {
     0|false|no|off) echo "false" ;;
     *) return 1 ;;
   esac
+}
+
+configure_strict_offline_if_enabled() {
+  local strict_offline
+  strict_offline="$(bool_from_string "${MEP_STRICT_OFFLINE:-1}")" || \
+    die "invalid MEP_STRICT_OFFLINE: ${MEP_STRICT_OFFLINE:-}"
+  if [ "$strict_offline" != "true" ]; then
+    echo "strict offline mode: disabled"
+    return 0
+  fi
+
+  export HF_HUB_OFFLINE=1
+  export TRANSFORMERS_OFFLINE=1
+  export HF_DATASETS_OFFLINE=1
+  export PIP_NO_INDEX=1
+  echo "strict offline mode: enabled"
 }
 
 require_env() {
@@ -726,6 +745,7 @@ run_component_request() {
 }
 
 cd "$CONTAINER_TEST_DIR"
+configure_strict_offline_if_enabled
 prepare_runtime_if_needed
 mkdir -p "$MEP_LOG_DIR" "$MEP_OUTPUT_DIR"
 export COSINE_THRESHOLD="${COSINE_THRESHOLD:--1}"

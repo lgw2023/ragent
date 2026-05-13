@@ -272,6 +272,8 @@ embedding.batch_size=8
 
 ### 5.6 `data/` 自定义依赖
 
+MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 是生产入口。入口文件最开始会默认启用 strict offline 环境，设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1`，然后再执行离线依赖安装、依赖路径注入和后续 `ragent` 导入。确需排查镜像基础环境时，可显式设置 `MEP_STRICT_OFFLINE=0` 或 `RAGENT_MEP_STRICT_OFFLINE=0`。
+
 `data/` 被视为模型包随附的只读自定义数据目录。当前组件在导入 ragent 之前会尝试把以下路径加入 Python import path：
 
 ```text
@@ -295,7 +297,7 @@ python tools/export_mep_transformers_embedding_wheelhouse.py --clean
 
 它会生成 `constraints-linux-arm64-py3.9.txt`、`manifest.json` 和 `downloaded-wheels.txt`。`image-baseline-constraints-linux-arm64-py3.9.txt` 固定镜像内已验证的 `torch`、`torch_npu`、`transformers`、`tokenizers`、`numpy` 等版本，防止离线解析替换 Ascend 栈。
 
-这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 只负责在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `data/deps` 中的依赖影响后续导入。
+这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `data/deps` 中的依赖影响后续导入。
 
 如果本轮没有找到任何可加入的依赖路径，bootstrap 会清理 `RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH`，避免平台诊断读到上一轮进程留下的过期路径。
 

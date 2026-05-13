@@ -6,6 +6,36 @@ import sys
 from pathlib import Path
 
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _strict_offline_enabled() -> bool:
+    raw_value = os.getenv("MEP_STRICT_OFFLINE")
+    if raw_value is None:
+        raw_value = os.getenv("RAGENT_MEP_STRICT_OFFLINE")
+    if raw_value is None:
+        return True
+    normalized = raw_value.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ValueError(f"Invalid MEP_STRICT_OFFLINE value: {raw_value!r}")
+
+
+def _configure_default_offline_environment() -> None:
+    if not _strict_offline_enabled():
+        return
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+    os.environ["PIP_NO_INDEX"] = "1"
+    os.environ["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+
+
+_configure_default_offline_environment()
+
 _CODE_ROOT = Path(__file__).resolve().parent
 if str(_CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(_CODE_ROOT))
