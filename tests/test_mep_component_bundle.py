@@ -34,6 +34,20 @@ def test_root_component_files_exist():
     config = json.loads((repo_root / "config.json").read_text(encoding="utf-8"))
     assert config == {"main_file": "process", "main_class": "CustomerModel"}
 
+    process_text = (repo_root / "process.py").read_text(encoding="utf-8")
+    offline_call = "\n_configure_default_offline_environment()\n"
+    assert offline_call in process_text
+    assert 'os.environ["HF_HUB_OFFLINE"] = "1"' in process_text
+    assert 'os.environ["TRANSFORMERS_OFFLINE"] = "1"' in process_text
+    assert 'os.environ["HF_DATASETS_OFFLINE"] = "1"' in process_text
+    assert 'os.environ["PIP_NO_INDEX"] = "1"' in process_text
+    assert (
+        process_text.index(offline_call)
+        < process_text.index("ensure_mep_offline_requirements(_CODE_ROOT)")
+        < process_text.index("bootstrap_mep_data_dependencies(_CODE_ROOT)")
+        < process_text.index("from ragent.runtime_env import")
+    )
+
 
 def test_mep_data_dependency_bootstrap_uses_runtime_sibling_data_dir(
     monkeypatch,
@@ -486,9 +500,20 @@ def test_bge_m3_embedding_properties_match_validated_transformers_runtime():
     assert properties["embedding.batch_size"] == "8"
 
 
-def test_root_process_exports_customer_model():
+def test_root_process_exports_customer_model(monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]
     process_path = repo_root / "process.py"
+
+    for name in (
+        "MEP_STRICT_OFFLINE",
+        "RAGENT_MEP_STRICT_OFFLINE",
+        "HF_HUB_OFFLINE",
+        "TRANSFORMERS_OFFLINE",
+        "HF_DATASETS_OFFLINE",
+        "PIP_NO_INDEX",
+        "PIP_DISABLE_PIP_VERSION_CHECK",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
     spec = importlib.util.spec_from_file_location("ragent_root_process_test", process_path)
     assert spec is not None and spec.loader is not None
@@ -496,6 +521,10 @@ def test_root_process_exports_customer_model():
     spec.loader.exec_module(module)
 
     assert module.CustomerModel.__name__ == "CustomerModel"
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
+    assert os.environ["HF_DATASETS_OFFLINE"] == "1"
+    assert os.environ["PIP_NO_INDEX"] == "1"
 
 
 def test_root_init_exports_platform_probe(monkeypatch):
@@ -581,6 +610,12 @@ def test_offline_full_chain_validation_script_is_exported():
     assert 'IMAGE="${IMAGE:-}"' in script_text
     assert 'CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"' in script_text
     assert 'MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"' in script_text
+    assert 'MEP_STRICT_OFFLINE="${MEP_STRICT_OFFLINE:-1}"' in script_text
+    assert "configure_strict_offline_if_enabled()" in script_text
+    assert "HF_HUB_OFFLINE=1" in script_text
+    assert "TRANSFORMERS_OFFLINE=1" in script_text
+    assert "HF_DATASETS_OFFLINE=1" in script_text
+    assert "PIP_NO_INDEX=1" in script_text
     assert "validate_host_wheelhouse()" in script_text
     assert "load_ascend_runtime_environment()" in script_text
     assert "sourced Ascend env:" in script_text
