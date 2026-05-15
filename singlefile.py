@@ -4,6 +4,7 @@ import os
 import logging
 import json
 import re
+from pathlib import Path
 from collections import Counter
 from contextlib import contextmanager
 from typing import Any
@@ -1303,7 +1304,7 @@ class RagentApp:
         if not mineru_output_dir:
             return []
 
-        pdf_name = os.path.basename(pdf_file_path).rsplit(".", 1)[0]
+        pdf_name = Path(pdf_file_path).stem
         candidate_paths = []
         output_subdirs = get_mineru_output_subdirs_for_lookup()
         if keep_pdf_subdir:
