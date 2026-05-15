@@ -145,6 +145,39 @@ _AIOFILES_MODULE = None
 _MINERU_RUNTIME: "MineruRuntime | None" = None
 
 
+def _pdf_output_stem(pdf_file_path: str | os.PathLike[str]) -> str:
+    return Path(pdf_file_path).stem
+
+
+def _resolve_generated_output_file(
+    output_dir: str,
+    expected_name: str,
+    *,
+    suffix: str,
+) -> str:
+    expected_path = os.path.join(output_dir, expected_name)
+    if os.path.exists(expected_path):
+        return expected_path
+
+    if not os.path.isdir(output_dir):
+        return expected_path
+
+    candidates = sorted(
+        os.path.join(output_dir, name)
+        for name in os.listdir(output_dir)
+        if name.endswith(suffix) and os.path.isfile(os.path.join(output_dir, name))
+    )
+    if len(candidates) == 1:
+        logger.warning(
+            "Expected MinerU output file not found at %s; using the only %s file found: %s",
+            expected_path,
+            suffix,
+            candidates[0],
+        )
+        return candidates[0]
+    return expected_path
+
+
 @dataclass(frozen=True)
 class MineruParseSettings:
     requested_mode: str
@@ -4020,7 +4053,7 @@ def mineru_process(pdf_file_path, output_dir, keep_pdf_subdir: bool = True):
     pdf_path_list = [pdf_file_path]
     settings = resolve_mineru_parse_settings_from_env()
     _prepare_mineru_runtime(settings)
-    pdf_name = pdf_file_path.split("/")[-1].split(".")[0]
+    pdf_name = _pdf_output_stem(pdf_file_path)
 
     if keep_pdf_subdir:
         parse_doc(
@@ -4073,10 +4106,19 @@ async def build_enhanced_md(pdf_file_path, mineru_output_dir, keep_pdf_subdir: b
                 os.makedirs(pdf_outdir, exist_ok=True)
                 image_dir = os.path.join(pdf_outdir, "images")
                 os.makedirs(image_dir, exist_ok=True)
-                md_name = pdf_file_path.split("/")[-1].split(".")[0] + ".md"
-                md_path = os.path.join(pdf_outdir, md_name)
-                content_list_name = pdf_file_path.split("/")[-1].split(".")[0] + "_content_list.json"
-                content_list_path = os.path.join(pdf_outdir, content_list_name)
+                pdf_name = _pdf_output_stem(pdf_file_path)
+                md_name = f"{pdf_name}.md"
+                md_path = _resolve_generated_output_file(
+                    pdf_outdir,
+                    md_name,
+                    suffix=".md",
+                )
+                content_list_name = f"{Path(md_path).stem}_content_list.json"
+                content_list_path = _resolve_generated_output_file(
+                    pdf_outdir,
+                    content_list_name,
+                    suffix="_content_list.json",
+                )
 
                 progress_tracker.update(0.55, "mineru_parse", "Markdown artifacts generated")
 
@@ -4430,8 +4472,8 @@ async def index_md_to_rag(
                     content_list, source_pdf_path
                 )
 
-                doc_name_with_ext = pdf_file_path.split("/")[-1]
-                doc_name_without_ext = pdf_file_path.split("/")[-1].split(".")[0]
+                doc_name_with_ext = os.path.basename(pdf_file_path)
+                doc_name_without_ext = _pdf_output_stem(pdf_file_path)
                 md_split_mode = (os.getenv("RAG_MD_SPLIT_MODE", "parser") or "parser").strip().lower()
                 insert_units: list[dict[str, Any]] = []
                 total_chunks = 0
