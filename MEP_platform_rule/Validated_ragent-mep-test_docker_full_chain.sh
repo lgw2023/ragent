@@ -401,7 +401,9 @@ configure_strict_offline_if_enabled() {
   export TRANSFORMERS_OFFLINE=1
   export HF_DATASETS_OFFLINE=1
   export PIP_NO_INDEX=1
-  echo "strict offline mode: enabled"
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+  export PIP_CONFIG_FILE="${PIP_CONFIG_FILE:-/dev/null}"
+  echo "strict offline mode: enabled (PIP_CONFIG_FILE=$PIP_CONFIG_FILE)"
 }
 
 require_env() {

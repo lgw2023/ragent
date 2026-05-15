@@ -15,8 +15,11 @@ try:
         reset_path,
         resolve_archive_output_path,
         safe_archive_stem,
+        validate_component_package_dir,
+        validate_model_data_dir,
         validate_output_path_does_not_overlap,
         validate_model_dir,
+        validate_model_package_dir,
         write_archive,
     )
     from tools.mep_site_packages import materialize_model_site_packages
@@ -30,8 +33,11 @@ except ModuleNotFoundError:
         reset_path,
         resolve_archive_output_path,
         safe_archive_stem,
+        validate_component_package_dir,
+        validate_model_data_dir,
         validate_output_path_does_not_overlap,
         validate_model_dir,
+        validate_model_package_dir,
         write_archive,
     )
     from mep_site_packages import materialize_model_site_packages
@@ -219,6 +225,7 @@ def build_mep_upload_packages(
         include_local_runner=include_local_runner,
     )
     validate_model_dir(source_model_dir_root)
+    validate_model_data_dir(source_model_dir_root / "data")
     _validate_safe_output(
         repo_root=repo_root,
         source_model_package_dir=source_model_package_dir,
@@ -268,8 +275,12 @@ def build_mep_upload_packages(
         component_dir,
         include_local_runner=include_local_runner,
     )
+    validate_component_package_dir(
+        component_dir,
+        allow_local_runner=include_local_runner,
+    )
     _copy_model_package(source_model_dir_root, model_upload_dir)
-    validate_model_dir(model_upload_dir / "modelDir")
+    validate_model_package_dir(model_upload_dir)
 
     result = {
         "output_root": str(output),

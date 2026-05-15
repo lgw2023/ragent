@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import importlib
 import os
+from pathlib import Path
 import re
 import string
 import threading
@@ -84,6 +85,38 @@ _CJK_QUERY_SPLIT_RE = re.compile(
     r"(?:是什么|有哪些|如何|怎么|怎样|为什么|多少|是否|请|帮我|一下|吗|呢|？|\?)"
 )
 _CJK_CONNECTOR_RE = re.compile(r"(?:以及|或者|的|和|与|及|或|在|中|为|是|对)")
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _strict_offline_runtime_enabled() -> bool:
+    return any(
+        _env_flag_enabled(name)
+        for name in (
+            "MEP_STRICT_OFFLINE",
+            "RAGENT_MEP_STRICT_OFFLINE",
+            "HF_HUB_OFFLINE",
+            "TRANSFORMERS_OFFLINE",
+        )
+    )
+
+
+def _local_model_path_exists(model_name: str) -> bool:
+    return Path(model_name).expanduser().exists()
+
+
+def _load_gliner_from_pretrained(gliner_class: Any, model_name: str) -> Any:
+    if not _strict_offline_runtime_enabled():
+        return gliner_class.from_pretrained(model_name)
+
+    if not _local_model_path_exists(model_name):
+        raise KeywordExtractorUnavailable(
+            "strict offline mode requires RAG_KEYWORD_FALLBACK_MODEL to point to "
+            f"a local GLiNER model directory, got {model_name!r}"
+        )
+    return gliner_class.from_pretrained(model_name)
 
 
 class _LocalRegexWordsSplitter:
@@ -362,7 +395,7 @@ def _load_gliner_model(model_name: str, device: str) -> Any:
 
         try:
             with _patched_gliner_words_splitter():
-                model = GLiNER.from_pretrained(model_name)
+                model = _load_gliner_from_pretrained(GLiNER, model_name)
             _install_local_words_splitter(model)
             to_device = getattr(model, "to", None)
             if callable(to_device):

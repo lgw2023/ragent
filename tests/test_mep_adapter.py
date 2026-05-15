@@ -460,6 +460,34 @@ def test_resolve_component_bundle_paths_supports_sfs_relative_layout(
     assert paths.meta_dir == (object_root / "meta").resolve()
 
 
+def test_resolve_component_bundle_paths_prefers_sfs_over_runtime_placeholder(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    process_file = _write_component_entry(runtime_root / "component")
+    _write_runtime_bundle_dirs(runtime_root)
+
+    sfs_base = tmp_path / "sfs"
+    object_root = sfs_base / "object-123"
+    (object_root / "model").mkdir(parents=True)
+    (object_root / "data").mkdir()
+    (object_root / "meta").mkdir()
+
+    monkeypatch.setenv("MODEL_SFS", json.dumps({"sfsBasePath": str(sfs_base)}))
+    monkeypatch.setenv("MODEL_OBJECT_ID", "object-123")
+    monkeypatch.setenv("MODEL_RELATIVE_DIR", "model")
+
+    paths = resolve_component_bundle_paths(process_file)
+
+    assert paths.model_dir == (object_root / "model").resolve()
+    assert paths.model_source == "sfs_model_relative_dir"
+    assert paths.data_dir == (object_root / "data").resolve()
+    assert paths.data_source == "sfs_object_data_dir"
+    assert paths.meta_dir == (object_root / "meta").resolve()
+    assert paths.meta_source == "sfs_object_meta_dir"
+
+
 def test_resolve_component_bundle_paths_supports_model_absolute_dir(
     monkeypatch,
     tmp_path: Path,

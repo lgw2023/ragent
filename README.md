@@ -100,6 +100,14 @@ elsewhere; the builder rejects archive paths inside `component_package/` or
 `model_package/` so the archives cannot include themselves. The same source
 path protections apply to a custom archive directory.
 
+Before upload, run the preflight checker for the target Ascend Python platform:
+
+```bash
+python tools/preflight_mep_upload_packages.py \
+  --upload-root .mep_upload/bge-m3 \
+  --platform-tag linux-arm64-py3.9
+```
+
 Both MEP builders reject output paths that would overwrite the repository root,
 component source files/directories, or the source model package. The model
 package must include a non-empty `modelDir/meta/type.mf`.

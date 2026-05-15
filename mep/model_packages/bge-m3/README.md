@@ -44,7 +44,7 @@ modelDir/data/deps/wheelhouse/linux-arm64-py3.9/*.whl
 
 组件启动时会优先用 `requirements/constraints/wheelhouse` 执行一次 `pip install --no-index`，已安装且版本一致的镜像包会被跳过，缺失的应用层依赖和 native wheel 会从本地 wheelhouse 安装。之后才加载匹配平台标签的 `site-packages`、`pythonpath` 和可 zipimport 的纯 Python wheel。
 
-组件入口 `process.py` 和 Ascend full-chain 验证脚本都默认启用 `MEP_STRICT_OFFLINE=1`，会设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1` 和 `PIP_NO_INDEX=1`。这会把运行约束在模型包自带模型文件、KG 快照和离线 wheelhouse 上，避免 Hugging Face、Transformers 或 pip 走外部网络兜底。只有在排查镜像基础环境时，才建议临时设置 `MEP_STRICT_OFFLINE=0`。
+组件入口 `process.py` 和 Ascend full-chain 验证脚本都默认启用 `MEP_STRICT_OFFLINE=1`，会设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1` 和 `PIP_CONFIG_FILE=/dev/null`。这会把运行约束在模型包自带模型文件、KG 快照和离线 wheelhouse 上，避免 Hugging Face、Transformers 或 pip 走外部网络兜底，并屏蔽镜像全局 pip 配置中的外部 index 提示。只有在排查镜像基础环境时，才建议临时设置 `MEP_STRICT_OFFLINE=0`。
 
 如需按 Python 3.9/aarch64 重新解析并导出 wheelhouse：
 
@@ -97,6 +97,14 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 上传归档默认写在 `.mep_upload/bge-m3/` 下；如需写到其他目录，可追加 `--archive-output-dir <dir>`，该参数必须和 `--archive-format` 一起使用，且不能指向正在打包的 `component_package/`、`model_package/`、组件源码或源模型包内部。
 
 模型包归档的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。`modelDir/meta/type.mf` 必须存在且非空。组件包默认不携带 `run_mep_local.py`；确需包含本地调试入口时使用 `--include-local-runner`。
+
+上传前可运行 preflight 校验组件包、模型包、KG/vdb 维度和目标平台 wheelhouse：
+
+```bash
+python /Volumes/SSD1/ragent/tools/preflight_mep_upload_packages.py \
+  --upload-root /Volumes/SSD1/ragent/.mep_upload/bge-m3 \
+  --platform-tag linux-arm64-py3.9
+```
 
 也可以继续使用显式环境变量做局部调试：
 

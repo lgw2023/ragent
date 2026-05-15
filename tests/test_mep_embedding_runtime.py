@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -16,6 +17,17 @@ from ragent.mep_embedding_runtime import (
     build_vllm_subprocess_env,
     resolve_embedding_launch_config,
 )
+
+
+def _clear_external_embedding_env(monkeypatch) -> None:
+    for key in (
+        "EMBEDDING_MODEL",
+        "EMBEDDING_MODEL_KEY",
+        "EMBEDDING_MODEL_URL",
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_DIMENSIONS",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 def _write_embedding_bundle(model_dir: Path) -> Path:
@@ -85,6 +97,7 @@ def test_bootstrap_local_embedding_runtime_uses_transformers_runtime(
     monkeypatch,
     tmp_path: Path,
 ):
+    _clear_external_embedding_env(monkeypatch)
     model_dir = tmp_path / "model"
     model_dir.mkdir(parents=True)
     (model_dir / "config.json").write_text("{}", encoding="utf-8")
@@ -361,6 +374,54 @@ def test_resolve_embedding_launch_config_finds_nested_model_dir_like_bge_m3_pack
 
     assert config.model_dir == model_dir.resolve()
     assert config.model_path == nested.resolve()
+
+
+def test_resolve_embedding_launch_config_uses_sfs_model_when_runtime_model_is_placeholder(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_model_dir = tmp_path / "runtime" / "model"
+    runtime_model_dir.mkdir(parents=True)
+    runtime_data_dir = tmp_path / "runtime" / "data"
+    runtime_data_dir.mkdir(parents=True)
+
+    sfs_base = tmp_path / "sfs"
+    object_root = sfs_base / "object-123"
+    sfs_model_dir = object_root / "model"
+    sfs_model_dir.mkdir(parents=True)
+    (sfs_model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (sfs_model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+    sfs_data_config = object_root / "data" / "config"
+    sfs_data_config.mkdir(parents=True)
+    embedding_config = sfs_data_config / "embedding.properties"
+    embedding_config.write_text(
+        "\n".join(
+            [
+                "model.name=BAAI/bge-m3",
+                "model.relative_path=.",
+                "embedding.runtime=transformers",
+                "embedding.dimensions=256",
+                "vllm.port=0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MODEL_SFS", json.dumps({"sfsBasePath": str(sfs_base)}))
+    monkeypatch.setenv("MODEL_OBJECT_ID", "object-123")
+    monkeypatch.setenv("MODEL_RELATIVE_DIR", "model")
+
+    config = resolve_embedding_launch_config(
+        runtime_model_dir,
+        data_dir=runtime_data_dir,
+    )
+
+    assert config.model_dir == runtime_model_dir.resolve()
+    assert config.model_path == sfs_model_dir.resolve()
+    assert config.config_path == embedding_config.resolve()
+    assert config.runtime == "transformers"
+    assert config.dimensions == 256
 
 
 def test_resolve_embedding_launch_config_nested_ambiguous_raises(tmp_path: Path):

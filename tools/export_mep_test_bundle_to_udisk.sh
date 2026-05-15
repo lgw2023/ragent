@@ -150,6 +150,7 @@ for path in \
   build_mep_upload_packages.py \
   mep_site_packages.py \
   mep_package_utils.py \
+  preflight_mep_upload_packages.py \
   export_mep_keyword_fallback_assets.py \
   export_mep_test_bundle_to_udisk.sh \
   export_mep_vllm_ascend_wheelhouse.py \

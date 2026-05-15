@@ -168,14 +168,15 @@ class CustomerModel:
 
 当前代码通过 `resolve_component_bundle_paths()` 解析 `model` 和 `data`，优先级如下：
 
-1. `process.py` 位于 `<runtime_root>/component` 时，优先使用父目录同级 `model/`、`data/`、`meta/`
-   只有匹配到包含 `config.json` 的 `component/` 组件包目录祖先时才使用这条规则；源码仓库根目录本地运行不会把仓库父目录当成 runtime root
+1. 显式 `model_dir_override` / `data_dir_override`
 2. 平台注入的 SFS env：`MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_RELATIVE_DIR`、`MODEL_ABSOLUTE_DIR`
-3. 兼容 `CustomerModel(model_root=...)`，同时接受 `model_root=<runtime_root>` 和 `model_root=<model_dir>`
-4. 本地调试 env fallback：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
-5. 源码目录同级 `model/`、`data/` 作为最后兜底
+3. `process.py` 位于 `<runtime_root>/component` 时，使用父目录同级 `model/`、`data/`、`meta/`
+   只有匹配到包含 `config.json` 的 `component/` 组件包目录祖先时才使用这条规则；源码仓库根目录本地运行不会把仓库父目录当成 runtime root
+4. 兼容 `CustomerModel(model_root=...)`，同时接受 `model_root=<runtime_root>` 和 `model_root=<model_dir>`
+5. 本地调试 env fallback：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
+6. 源码目录同级 `model/`、`data/` 作为最后兜底
 
-其中 `path_appendix` 不改变 bundle 级 `model_dir` 解析，只作为旧式平台路径的兼容输入；当前 bge-m3 包默认把 `model/` 本身作为 embedding 权重目录。当前仓库推荐通过 `tools/build_mep_layout.py` 生成 `.mep_build/<model-package>/runtime`，用平台形态验证这条路径解析，而不是把模型包直接当成组件源码的一部分。
+其中 `path_appendix` 同时作为 SFS/env 模型候选路径的兼容后缀，以及 embedding 层旧式平台路径的兼容输入；当前 bge-m3 包默认把 `model/` 本身作为 embedding 权重目录。当前仓库推荐通过 `tools/build_mep_layout.py` 生成 `.mep_build/<model-package>/runtime`，用平台形态验证这条路径解析，而不是把模型包直接当成组件源码的一部分。
 
 ### 3.4 参照样例后修正的目标理解
 
@@ -846,15 +847,16 @@ find /data -maxdepth 3 -type f | head -50
 
 当前 `resolve_component_bundle_paths()` / `CustomerModel._load_async()` 已按以下顺序解析：
 
-1. 原生运行时平级目录：`component` 父目录下的 `model/`、`data/`、`meta/`
-2. SFS 环境变量 fallback：`MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_RELATIVE_DIR`、`MODEL_ABSOLUTE_DIR`、`path_appendix`
-3. `model_root` 兼容模式：
+1. 显式 `model_dir_override` / `data_dir_override`
+2. SFS 环境变量：`MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_RELATIVE_DIR`、`MODEL_ABSOLUTE_DIR`、`path_appendix`
+3. 原生运行时平级目录：`component` 父目录下的 `model/`、`data/`、`meta/`
+4. `model_root` 兼容模式：
    - `model_root=model_root_of_runtime`
    - `model_root=model_dir`
-4. 本地显式 env fallback：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
-5. 源码目录同级 `model/`、`data/` 作为最后兜底
+5. 本地显式 env fallback：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
+6. 源码目录同级 `model/`、`data/` 作为最后兜底
 
-重点不是继续强化 `model_root/model` 这一条，而是先对齐样例暴露出的原生平台路径契约。当前推荐用 `.mep_build/<model-package>/runtime` 做本地仿真，避免把仓库里的模型包源码位置误认为平台运行时位置。
+重点不是继续强化 `model_root/model` 这一条，而是优先尊重平台注入的 SFS/绝对路径，再兼容原生平级目录。当前推荐用 `.mep_build/<model-package>/runtime` 做本地仿真，避免把仓库里的模型包源码位置误认为平台运行时位置。
 
 ### 7.2 已补充 `MODEL_SFS` 系列 fallback
 
@@ -866,7 +868,7 @@ MODEL_SFS + MODEL_OBJECT_ID + MODEL_RELATIVE_DIR
 MODEL_SFS + MODEL_OBJECT_ID + "/model"
 ```
 
-但要注意：ragent 需要同时定位 `data/`，不能只定位 embedding 模型目录；`path_appendix` 现在只作为旧式平台兼容输入，当前 bge-m3 包默认直接使用 `model/`。
+但要注意：ragent 需要同时定位 `data/`，不能只定位 embedding 模型目录；`path_appendix` 会追加到 SFS/env 模型候选路径，当前 bge-m3 包默认直接使用 `model/`。
 
 ### 7.3 已增加启动诊断日志
 

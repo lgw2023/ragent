@@ -198,6 +198,12 @@ def _iter_embedding_config_candidates(
         for filename in _DATA_CONFIG_FILENAMES:
             candidates.append((data_dir / filename).resolve())
 
+    for env_data_dir in _iter_mep_env_data_dir_candidates():
+        for filename in _DATA_CONFIG_FILENAMES:
+            candidates.append((env_data_dir / "config" / filename).resolve())
+        for filename in _DATA_CONFIG_FILENAMES:
+            candidates.append((env_data_dir / filename).resolve())
+
     # Legacy compatibility: older local model packages stored component-readable
     # bootstrap config beside the HF model directory under model/.
     candidates.append((model_dir / "sysconfig.properties").resolve())
@@ -306,6 +312,168 @@ def _resolve_property(
     return None
 
 
+def _resolve_env_path(value: Any) -> Path | None:
+    normalized = _normalize_optional_str(value)
+    if normalized is None:
+        return None
+    return Path(normalized).expanduser().resolve()
+
+
+def _parse_model_sfs_object_root() -> Path | None:
+    raw_model_sfs = _normalize_optional_str(os.getenv("MODEL_SFS"))
+    model_object_id = _normalize_optional_str(os.getenv("MODEL_OBJECT_ID"))
+    if raw_model_sfs is None or model_object_id is None:
+        return None
+
+    try:
+        payload = json.loads(raw_model_sfs)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    sfs_base_path = _normalize_optional_str(payload.get("sfsBasePath"))
+    if sfs_base_path is None:
+        return None
+    return (Path(sfs_base_path).expanduser() / model_object_id).resolve()
+
+
+def _append_relative_path(base: Path, relative_path: str | None) -> Path | None:
+    normalized = _normalize_optional_str(relative_path)
+    if normalized is None:
+        return None
+    path = Path(normalized).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (base / path).resolve()
+
+
+def _iter_mep_env_data_dir_candidates() -> tuple[Path, ...]:
+    candidates: list[Path] = []
+
+    model_absolute_dir = _resolve_env_path(os.getenv("MODEL_ABSOLUTE_DIR"))
+    if model_absolute_dir is not None:
+        if model_absolute_dir.name == "model":
+            candidates.append((model_absolute_dir.parent / "data").resolve())
+        elif model_absolute_dir.parent.name == "model":
+            candidates.append((model_absolute_dir.parent.parent / "data").resolve())
+
+    sfs_object_root = _parse_model_sfs_object_root()
+    if sfs_object_root is not None:
+        candidates.append((sfs_object_root / "data").resolve())
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        deduped.append(candidate)
+        seen.add(candidate)
+    return tuple(deduped)
+
+
+def _iter_mep_env_model_path_candidates(model_dir: Path) -> tuple[Path, ...]:
+    candidates: list[Path] = []
+    path_appendix = _normalize_optional_str(os.getenv("path_appendix"))
+
+    model_absolute_dir = _resolve_env_path(os.getenv("MODEL_ABSOLUTE_DIR"))
+    if model_absolute_dir is not None:
+        candidates.append(model_absolute_dir)
+        appended = _append_relative_path(model_absolute_dir, path_appendix)
+        if appended is not None:
+            candidates.append(appended)
+
+    sfs_object_root = _parse_model_sfs_object_root()
+    if sfs_object_root is not None:
+        model_relative_dir = _normalize_optional_str(
+            os.getenv("MODEL_RELATIVE_DIR")
+        ) or "model"
+        relative_candidate = _append_relative_path(
+            sfs_object_root,
+            model_relative_dir,
+        )
+        if relative_candidate is not None:
+            candidates.append(relative_candidate)
+            appended = _append_relative_path(relative_candidate, path_appendix)
+            if appended is not None:
+                candidates.append(appended)
+        default_candidate = (sfs_object_root / "model").resolve()
+        candidates.append(default_candidate)
+        appended = _append_relative_path(default_candidate, path_appendix)
+        if appended is not None:
+            candidates.append(appended)
+
+    appended = _append_relative_path(model_dir, path_appendix)
+    if appended is not None:
+        candidates.append(appended)
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        deduped.append(candidate)
+        seen.add(candidate)
+    return tuple(deduped)
+
+
+def _describe_model_path_candidate(path: Path) -> str:
+    if not path.exists():
+        return f"{path} (missing)"
+    if not path.is_dir():
+        return f"{path} (not a directory)"
+
+    marker_status = ", ".join(
+        f"{marker}={'yes' if (path / marker).exists() else 'no'}"
+        for marker in _MODEL_DIR_MARKERS
+    )
+    try:
+        entries = sorted(
+            child.name + ("/" if child.is_dir() else "")
+            for child in path.iterdir()
+        )
+    except OSError as exc:
+        return f"{path} ({marker_status}; unable to list entries: {exc})"
+
+    visible_entries = entries[:20]
+    entries_text = ", ".join(visible_entries) if visible_entries else "<empty>"
+    if len(entries) > len(visible_entries):
+        entries_text += f", ... +{len(entries) - len(visible_entries)} more"
+    archive_entries = [
+        entry
+        for entry in entries
+        if entry.endswith((".zip", ".tar", ".tar.gz", ".tgz"))
+    ]
+    archive_text = ""
+    if archive_entries:
+        archive_text = f"; archives={', '.join(archive_entries[:10])}"
+    return f"{path} ({marker_status}; entries={entries_text}{archive_text})"
+
+
+def _format_model_path_search_failure(
+    *,
+    model_dir: Path,
+    checked: tuple[Path, ...],
+) -> str:
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in (model_dir, *checked):
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        deduped.append(resolved)
+        seen.add(resolved)
+
+    details = "; ".join(_describe_model_path_candidate(path) for path in deduped[:8])
+    if len(deduped) > 8:
+        details += f"; ... +{len(deduped) - 8} more candidate(s)"
+    return (
+        "No embedding model directory found under model/. "
+        f"Checked: {', '.join(str(path) for path in deduped)}. "
+        f"Directory summaries: {details}"
+    )
+
+
 def _should_pass_vllm_api_key(api_key: str) -> bool:
     normalized = api_key.strip()
     return bool(normalized) and normalized.lower() not in {"empty", "none", "null"}
@@ -391,6 +559,7 @@ def _resolve_model_path(
     *,
     preferred_model_path: Path | None = None,
 ) -> Path:
+    env_model_candidates = _iter_mep_env_model_path_candidates(model_dir)
     configured_path = _resolve_property(
         properties,
         "RAGENT_MEP_EMBEDDING_MODEL_PATH",
@@ -417,15 +586,25 @@ def _resolve_model_path(
                 )
             ):
                 return preferred_model_path.resolve()
-            raise FileNotFoundError(
-                f"Configured embedding model path is invalid: {candidate}"
-            )
-        return candidate
+            if str(configured_path_obj) == ".":
+                for env_candidate in env_model_candidates:
+                    if _looks_like_embedding_model_dir(env_candidate):
+                        return env_candidate.resolve()
+            if str(configured_path_obj) != ".":
+                raise FileNotFoundError(
+                    f"Configured embedding model path is invalid: {candidate}"
+                )
+        else:
+            return candidate
 
     if preferred_model_path is not None and _looks_like_embedding_model_dir(
         preferred_model_path
     ):
         return preferred_model_path.resolve()
+
+    for env_candidate in env_model_candidates:
+        if _looks_like_embedding_model_dir(env_candidate):
+            return env_candidate.resolve()
 
     path_appendix = _normalize_optional_str(os.getenv("path_appendix"))
     if path_appendix is not None:
@@ -458,8 +637,10 @@ def _resolve_model_path(
                 f"Candidates: {', '.join(str(item) for item in nested)}"
             )
         raise FileNotFoundError(
-            "No embedding model directory found under model/. "
-            f"Checked: {model_dir}"
+            _format_model_path_search_failure(
+                model_dir=model_dir,
+                checked=env_model_candidates,
+            )
         )
     raise RuntimeError(
         "Multiple embedding model directories found under model/. "

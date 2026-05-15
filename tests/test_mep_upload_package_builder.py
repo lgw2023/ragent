@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import shutil
+import subprocess
+import sys
 import tarfile
 import zipfile
 from collections.abc import Callable
@@ -18,7 +21,28 @@ def _write_fake_repo(repo_root: Path) -> None:
             '{"scope": "demo", "version": "1", "type": "aiexplore", '
             '"name": "ragent_inference_mep"}\n'
         ),
-        "process.py": "class CustomerModel:\n    pass\n",
+        "process.py": (
+            "import os\n"
+            "from pathlib import Path\n"
+            "\n"
+            "_CODE_ROOT = Path(__file__).resolve().parent\n"
+            "\n"
+            "def _configure_default_offline_environment():\n"
+            "    os.environ[\"HF_HUB_OFFLINE\"] = \"1\"\n"
+            "    os.environ[\"TRANSFORMERS_OFFLINE\"] = \"1\"\n"
+            "    os.environ[\"HF_DATASETS_OFFLINE\"] = \"1\"\n"
+            "    os.environ[\"PIP_NO_INDEX\"] = \"1\"\n"
+            "    os.environ.setdefault(\"PIP_CONFIG_FILE\", os.devnull)\n"
+            "\n"
+            "_configure_default_offline_environment()\n"
+            "from mep_dependency_bootstrap import bootstrap_mep_data_dependencies, ensure_mep_offline_requirements\n"
+            "ensure_mep_offline_requirements(_CODE_ROOT)\n"
+            "bootstrap_mep_data_dependencies(_CODE_ROOT)\n"
+            "from ragent.runtime_env import bootstrap_runtime_environment\n"
+            "\n"
+            "class CustomerModel:\n"
+            "    pass\n"
+        ),
         "init.py": "# init\n",
         "mep_dependency_bootstrap.py": "# bootstrap\n",
         "pyproject.toml": "[project]\nname = \"ragent\"\n",
@@ -63,12 +87,25 @@ def _write_fake_repo(repo_root: Path) -> None:
     )
     (model_dir / "data" / "config").mkdir(parents=True)
     (model_dir / "data" / "config" / "embedding.properties").write_text(
-        "model.relative_path=.\n",
+        "model.relative_path=.\nembedding.dimensions=256\n",
         encoding="utf-8",
     )
+    kg_dir = model_dir / "data" / "kg" / "sample_kg"
+    kg_dir.mkdir(parents=True)
+    (kg_dir / "graph_chunk_entity_relation.graphml").write_text(
+        "<graphml />\n",
+        encoding="utf-8",
+    )
+    (kg_dir / "kv_store_text_chunks.json").write_text("{}\n", encoding="utf-8")
+    for filename in ("vdb_chunks.json", "vdb_entities.json", "vdb_relationships.json"):
+        (kg_dir / filename).write_text(
+            '{"embedding_dim": 256, "data": []}\n',
+            encoding="utf-8",
+        )
     wheelhouse = model_dir / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
     wheelhouse.mkdir(parents=True)
-    (wheelhouse / "demo_dep-1.0.0-py3-none-any.whl").write_bytes(b"fake wheel")
+    with zipfile.ZipFile(wheelhouse / "demo_dep-1.0.0-py3-none-any.whl", "w") as wheel:
+        wheel.writestr("demo_dep/__init__.py", "")
     (wheelhouse / "demo_sdist-1.0.0.tar.gz").write_bytes(b"fake sdist")
     with zipfile.ZipFile(wheelhouse / "litellm-1.80.10-py3-none-any.whl", "w") as wheel:
         wheel.writestr("litellm/__init__.py", "")
@@ -77,6 +114,14 @@ def _write_fake_repo(repo_root: Path) -> None:
             "litellm-1.80.10.dist-info/METADATA",
             "Name: litellm\nVersion: 1.80.10\n",
         )
+    keyword_wheelhouse = (
+        model_dir / "data" / "deps" / "keyword_wheelhouse" / "linux-arm64-py3.10"
+    )
+    keyword_wheelhouse.mkdir(parents=True)
+    with zipfile.ZipFile(
+        keyword_wheelhouse / "gliner-0.2.26-py3-none-any.whl", "w"
+    ) as wheel:
+        wheel.writestr("gliner/__init__.py", "")
     (model_dir / "meta").mkdir()
     (model_dir / "meta" / "type.mf").write_text("model\n", encoding="utf-8")
 
@@ -411,6 +456,44 @@ def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Pat
     ) in model_names
     assert "modelDir/meta/type.mf" in model_names
     assert not any(name.startswith("model_package/") for name in model_names)
+
+
+def test_preflight_mep_upload_packages_accepts_built_upload_shape(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_repo(repo_root)
+
+    result = build_mep_upload_packages(
+        repo_root=repo_root,
+        model_package="demo",
+        output=tmp_path / "upload",
+        archive_format="zip",
+    )
+
+    project_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(project_root / "tools" / "preflight_mep_upload_packages.py"),
+            "--upload-root",
+            str(tmp_path / "upload"),
+            "--platform-tag",
+            "linux-arm64-py3.10",
+            "--component-archive",
+            result["component_archive_path"],
+            "--model-archive",
+            result["model_archive_path"],
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "ok"
+    assert payload["wheel_payloads_checked"] >= 2
 
 
 def test_build_mep_upload_packages_archives_to_custom_output_dir(tmp_path: Path):

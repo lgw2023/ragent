@@ -144,12 +144,13 @@ mep/model_packages/bge-m3/modelDir/
 
 ## 3. 目录映射约定
 
-参照样例后，本文采用以下优先级理解 MEP 平台目录约定：
+参照样例和 2026-05-14 平台实测日志后，本文采用以下优先级理解 MEP 平台目录约定：
 
-1. 原生运行时平级目录：`<runtime_root>/component`、`<runtime_root>/model`、`<runtime_root>/data`、`<runtime_root>/meta`
+1. 显式覆盖：代码调用方直接传入的 `model_dir_override` / `data_dir_override`
 2. 平台注入的 SFS 相关环境变量：`MODEL_SFS`、`MODEL_OBJECT_ID`、`MODEL_RELATIVE_DIR`、`MODEL_ABSOLUTE_DIR`、`path_appendix`
-3. 兼容性输入 `model_root`
-4. 本地调试兜底输入：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
+3. 原生运行时平级目录：`<runtime_root>/component`、`<runtime_root>/model`、`<runtime_root>/data`、`<runtime_root>/meta`
+4. 兼容性输入 `model_root`
+5. 本地调试兜底输入：`RAGENT_MEP_MODEL_DIR`、`RAGENT_MEP_DATA_DIR`
 
 样例 `process.py` / `process_sync.py` 虽然保留了 `__init__(gpu_id=None, model_root=None)` 这个签名，但实际模型路径主要由环境变量拼出：
 
@@ -165,7 +166,7 @@ model_path = process_model_base + "/" + os.environ.get("path_appendix", "")
 - 平台更可能通过运行时目录和平级目录，或通过 SFS 环境变量告诉组件模型位置
 - 后续 ragent 代码不应再把 `model_root=<modelDir>` 视为唯一或首要假设
 
-当前仓库代码现已按上述优先级实现路径解析，并保留旧的“源码目录同级 `model/`、`data/`”作为最后一层本地 fallback。
+当前仓库代码现已按上述优先级实现路径解析，并保留旧的“源码目录同级 `model/`、`data/`”作为最后一层本地 fallback。这样可以避免平台同时创建 `/model-data/model` 占位目录和 SFS 对象目录时，组件过早选择占位目录。
 
 ## 4. 当前组件职责
 
@@ -212,9 +213,9 @@ model_path = process_model_base + "/" + os.environ.get("path_appendix", "")
 
 参照样例后，ragent 的目标目录解析约定应为：
 
-1. 优先按 `<runtime_root>/component` 的父目录查找同级 `model/` 和 `data/`
+1. 如果平台注入 `MODEL_ABSOLUTE_DIR`，或注入 `MODEL_SFS` / `MODEL_OBJECT_ID` / `MODEL_RELATIVE_DIR`，优先从这些值推导模型路径，并补齐 `data` / `meta` 定位
+2. 再按 `<runtime_root>/component` 的父目录查找同级 `model/` 和 `data/`
    仅当入口模块实际位于包含 `config.json` 的 `component/` 组件包目录内时，才启用这条规则；源码仓库根目录本地运行时，不会把仓库父目录误判为 `<runtime_root>`
-2. 如平台只暴露 SFS 信息，则从 `MODEL_SFS` / `MODEL_OBJECT_ID` / `MODEL_RELATIVE_DIR` / `MODEL_ABSOLUTE_DIR` / `path_appendix` 推导模型路径，并补齐 `data` 定位
 3. `model_root` 仅作为兼容输入，允许兼容 `runtime_root` 或 `model/` 两种含义
 4. 本地调试再使用 `RAGENT_MEP_MODEL_DIR` / `RAGENT_MEP_DATA_DIR`
 5. 若以上均未命中，则回退到源码目录同级 `model/` / `data/`
@@ -272,7 +273,7 @@ embedding.batch_size=8
 
 ### 5.6 `data/` 自定义依赖
 
-MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 是生产入口。入口文件最开始会默认启用 strict offline 环境，设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1`，然后再执行离线依赖安装、依赖路径注入和后续 `ragent` 导入。确需排查镜像基础环境时，可显式设置 `MEP_STRICT_OFFLINE=0` 或 `RAGENT_MEP_STRICT_OFFLINE=0`。
+MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 是生产入口。入口文件最开始会默认启用 strict offline 环境，设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1`、`PIP_CONFIG_FILE=/dev/null`，然后再执行离线依赖安装、依赖路径注入和后续 `ragent` 导入。确需排查镜像基础环境时，可显式设置 `MEP_STRICT_OFFLINE=0` 或 `RAGENT_MEP_STRICT_OFFLINE=0`。
 
 `data/` 被视为模型包随附的只读自定义数据目录。当前组件在导入 ragent 之前会尝试把以下路径加入 Python import path：
 
@@ -518,6 +519,16 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 如需把两个上传归档写到其他目录，可在 `--archive-format` 基础上追加 `--archive-output-dir <dir>`。脚本会拒绝把归档写进正在打包的 `component_package/` 或 `model_package/` 内部，避免归档过程把自身也打入包中；自定义归档目录同样不能覆盖仓库根、组件源码或源模型包。
 
 上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝会覆盖仓库根、组件源码或源模型包的危险输出目录，并强校验 `modelDir/meta/type.mf` 非空以及 `modelDir/model` 本身直接包含 Hugging Face 模型文件。
+
+上传前可运行统一 preflight，检查组件包入口、模型包第一层、KG/vdb 维度和离线 wheelhouse payload：
+
+```bash
+python /Volumes/SSD1/ragent/tools/preflight_mep_upload_packages.py \
+  --upload-root /Volumes/SSD1/ragent/.mep_upload/bge-m3 \
+  --platform-tag linux-arm64-py3.9 \
+  --component-archive /Volumes/SSD1/ragent/.mep_upload/bge-m3/ragent_inference_mep-component.zip \
+  --model-archive /Volumes/SSD1/ragent/.mep_upload/bge-m3/bge-m3-model.zip
+```
 
 ### 10.3 参照样例的目标容器布局
 
