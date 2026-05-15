@@ -247,9 +247,15 @@ def _run_offline_pip_install(
         command.extend(["-c", str(constraints_file)])
     command.extend(["-r", str(requirements_file)])
 
+    pip_env = os.environ.copy()
+    pip_env.setdefault("PIP_NO_INDEX", "1")
+    pip_env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    pip_env.setdefault("PIP_CONFIG_FILE", os.devnull)
+
     completed = subprocess.run(
         command,
         check=False,
+        env=pip_env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

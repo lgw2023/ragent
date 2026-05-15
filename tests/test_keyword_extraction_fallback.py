@@ -225,6 +225,27 @@ def test_gliner_loader_uses_local_words_splitter_without_model_kwargs(
     keyword_extraction._MODEL_CACHE.clear()
 
 
+def test_gliner_loader_rejects_remote_model_in_strict_offline(monkeypatch):
+    class FakeGLiNER:
+        @classmethod
+        def from_pretrained(cls, model_name, **kwargs):
+            raise AssertionError("strict offline should reject remote model before load")
+
+    monkeypatch.setitem(sys.modules, "gliner", SimpleNamespace(GLiNER=FakeGLiNER))
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    keyword_extraction._MODEL_CACHE.clear()
+
+    try:
+        keyword_extraction._load_gliner_model("knowledgator/gliner-x-small", "cpu")
+    except keyword_extraction.KeywordExtractorUnavailable as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected remote GLiNER model to fail in strict offline")
+
+    assert "strict offline mode requires" in message
+    keyword_extraction._MODEL_CACHE.clear()
+
+
 def test_ensure_gliner_keyword_model_ready_warms_cached_model(
     monkeypatch,
     tmp_path: Path,

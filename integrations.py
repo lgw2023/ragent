@@ -18,16 +18,17 @@ def _resolve_project_relative_mineru_config() -> None:
 
     MinerU reads MINERU_TOOLS_CONFIG_JSON during import and resolves relative
     paths under the user's home directory. For offline bundles we keep the
-    config in this project, so convert an existing relative path to absolute
-    before importing MinerU modules.
+    config in this project, so convert project-relative paths to absolute
+    before importing MinerU modules. Do this even when the file does not exist
+    yet, so MinerU error messages and bootstrap flows point at the project path
+    instead of resolving the relative path under the user's home directory.
     """
     raw_config_path = (os.getenv("MINERU_TOOLS_CONFIG_JSON") or "").strip()
     if not raw_config_path or os.path.isabs(raw_config_path):
         return
 
     project_config_path = (Path(__file__).resolve().parent / raw_config_path).resolve()
-    if project_config_path.exists():
-        os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(project_config_path)
+    os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(project_config_path)
 
 
 _resolve_project_relative_mineru_config()
@@ -4891,10 +4892,14 @@ async def pdf_insert(pdf_file_path, mineru_output_dir, project_dir, keep_pdf_sub
                 last_progress=progress_snapshot,
             )
             err_msg = str(e) if str(e) else f"{type(e).__name__}({repr(e)})"
-            logger.warning(
-                "RAG indexing timeout, skip remainder. "
+            logger.error(
+                "RAG indexing timeout; aborting because KG index is incomplete. "
                 f"timeout={rag_timeout}s, elapsed={total_elapsed}s, err={err_msg}, last_progress: {progress_snapshot}"
             )
+            raise RuntimeError(
+                "RAG indexing timeout; KG index is incomplete. "
+                f"timeout={rag_timeout}s, elapsed={total_elapsed}s, last_progress={progress_snapshot}"
+            ) from e
         except Exception as e:
             total_elapsed = round(time.monotonic() - rag_start, 3)
             progress_snapshot = _progress_snapshot()
@@ -4906,10 +4911,14 @@ async def pdf_insert(pdf_file_path, mineru_output_dir, project_dir, keep_pdf_sub
                 err=err_msg,
                 last_progress=progress_snapshot,
             )
-            logger.warning(
-                "RAG indexing failure, skip remainder. "
+            logger.error(
+                "RAG indexing failure; aborting because KG index is incomplete. "
                 f"timeout={rag_timeout}s, elapsed={total_elapsed}s, err={err_msg}, last_progress: {progress_snapshot}"
             )
+            raise RuntimeError(
+                "RAG indexing failed; KG index is incomplete. "
+                f"elapsed={total_elapsed}s, err={err_msg}, last_progress={progress_snapshot}"
+            ) from e
 
     _write_usage_report_if_needed(
         collector,

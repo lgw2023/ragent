@@ -41,6 +41,7 @@ def test_root_component_files_exist():
     assert 'os.environ["TRANSFORMERS_OFFLINE"] = "1"' in process_text
     assert 'os.environ["HF_DATASETS_OFFLINE"] = "1"' in process_text
     assert 'os.environ["PIP_NO_INDEX"] = "1"' in process_text
+    assert "PIP_CONFIG_FILE" in process_text
     assert (
         process_text.index(offline_call)
         < process_text.index("ensure_mep_offline_requirements(_CODE_ROOT)")
@@ -354,6 +355,7 @@ def test_mep_offline_requirements_install_uses_platform_wheelhouse(
     constraints.write_text("demo-dep==1.0.0\n", encoding="utf-8")
 
     commands: list[list[str]] = []
+    command_envs: list[dict[str, str]] = []
 
     class FakeCompleted:
         returncode = 0
@@ -361,6 +363,7 @@ def test_mep_offline_requirements_install_uses_platform_wheelhouse(
 
     def fake_run(command, **kwargs):
         commands.append(command)
+        command_envs.append(kwargs["env"])
         return FakeCompleted()
 
     monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
@@ -386,6 +389,8 @@ def test_mep_offline_requirements_install_uses_platform_wheelhouse(
     assert command[command.index("--find-links") + 1] == str(wheelhouse.resolve())
     assert command[command.index("-c") + 1] == str(constraints.resolve())
     assert command[command.index("-r") + 1] == str(requirements.resolve())
+    assert command_envs[0]["PIP_NO_INDEX"] == "1"
+    assert command_envs[0]["PIP_CONFIG_FILE"] == os.devnull
 
 
 def test_mep_offline_requirements_install_rejects_corrupt_wheel(
@@ -512,6 +517,7 @@ def test_root_process_exports_customer_model(monkeypatch):
         "HF_DATASETS_OFFLINE",
         "PIP_NO_INDEX",
         "PIP_DISABLE_PIP_VERSION_CHECK",
+        "PIP_CONFIG_FILE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -525,6 +531,7 @@ def test_root_process_exports_customer_model(monkeypatch):
     assert os.environ["TRANSFORMERS_OFFLINE"] == "1"
     assert os.environ["HF_DATASETS_OFFLINE"] == "1"
     assert os.environ["PIP_NO_INDEX"] == "1"
+    assert os.environ["PIP_CONFIG_FILE"] == os.devnull
 
 
 def test_root_init_exports_platform_probe(monkeypatch):
@@ -604,6 +611,7 @@ def test_offline_full_chain_validation_script_is_exported():
     assert "Validated_ragent-mep-test_docker_full_chain.sh" in export_text
     assert "validate_mep_full_chain_result.py" in export_text
     assert "validate_mep_wheelhouse.py" in export_text
+    assert "preflight_mep_upload_packages.py" in export_text
     assert 'DEST="${DEST:-/Volumes/Udisk2/ragent}"' in export_text
     assert 'PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.9}"' in export_text
     assert 'MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"' in script_text
@@ -616,6 +624,7 @@ def test_offline_full_chain_validation_script_is_exported():
     assert "TRANSFORMERS_OFFLINE=1" in script_text
     assert "HF_DATASETS_OFFLINE=1" in script_text
     assert "PIP_NO_INDEX=1" in script_text
+    assert "PIP_CONFIG_FILE" in script_text
     assert "validate_host_wheelhouse()" in script_text
     assert "load_ascend_runtime_environment()" in script_text
     assert "sourced Ascend env:" in script_text

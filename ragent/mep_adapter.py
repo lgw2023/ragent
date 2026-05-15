@@ -462,12 +462,6 @@ def resolve_component_bundle_paths(
         [
             ("explicit_data_dir_override", data_dir_override),
             (
-                "runtime_sibling_data_dir",
-                None
-                if component_runtime_candidates is None
-                else component_runtime_candidates["data"],
-            ),
-            (
                 "sfs_object_data_dir",
                 None if sfs_object_root is None else sfs_object_root / "data",
             ),
@@ -476,6 +470,12 @@ def resolve_component_bundle_paths(
                 None
                 if model_absolute_sibling_candidates is None
                 else model_absolute_sibling_candidates["data"],
+            ),
+            (
+                "runtime_sibling_data_dir",
+                None
+                if component_runtime_candidates is None
+                else component_runtime_candidates["data"],
             ),
             (
                 "model_root_data_dir",
@@ -489,12 +489,6 @@ def resolve_component_bundle_paths(
         "model",
         [
             ("explicit_model_dir_override", model_dir_override),
-            (
-                "runtime_sibling_model_dir",
-                None
-                if component_runtime_candidates is None
-                else component_runtime_candidates["model"],
-            ),
             ("sfs_model_absolute_dir", model_absolute_dir),
             (
                 "sfs_model_relative_dir",
@@ -505,6 +499,12 @@ def resolve_component_bundle_paths(
             (
                 "sfs_default_model_dir",
                 None if sfs_object_root is None else sfs_object_root / "model",
+            ),
+            (
+                "runtime_sibling_model_dir",
+                None
+                if component_runtime_candidates is None
+                else component_runtime_candidates["model"],
             ),
             (
                 "model_root_model_dir",
@@ -520,12 +520,6 @@ def resolve_component_bundle_paths(
         "meta",
         [
             (
-                "runtime_sibling_meta_dir",
-                None
-                if component_runtime_candidates is None
-                else component_runtime_candidates["meta"],
-            ),
-            (
                 "sfs_object_meta_dir",
                 None if sfs_object_root is None else sfs_object_root / "meta",
             ),
@@ -534,6 +528,12 @@ def resolve_component_bundle_paths(
                 None
                 if model_absolute_sibling_candidates is None
                 else model_absolute_sibling_candidates["meta"],
+            ),
+            (
+                "runtime_sibling_meta_dir",
+                None
+                if component_runtime_candidates is None
+                else component_runtime_candidates["meta"],
             ),
             (
                 "model_root_meta_dir",

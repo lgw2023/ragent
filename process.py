@@ -26,12 +26,26 @@ def _strict_offline_enabled() -> bool:
 
 def _configure_default_offline_environment() -> None:
     if not _strict_offline_enabled():
+        _log_bootstrap("strict offline mode: disabled")
         return
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ["HF_DATASETS_OFFLINE"] = "1"
     os.environ["PIP_NO_INDEX"] = "1"
     os.environ["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    os.environ.setdefault("PIP_CONFIG_FILE", os.devnull)
+    _log_bootstrap(
+        "strict offline mode: enabled; "
+        "HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 "
+        "PIP_NO_INDEX=1 PIP_CONFIG_FILE=%s" % os.environ.get("PIP_CONFIG_FILE")
+    )
+
+
+def _log_bootstrap(message: str) -> None:
+    raw_value = os.getenv("RAGENT_MEP_BOOTSTRAP_LOG", "1").strip().lower()
+    if raw_value in {"0", "false", "no", "off"}:
+        return
+    print(f"[ragent.mep_process.bootstrap] {message}", file=sys.stderr, flush=True)
 
 
 _configure_default_offline_environment()
@@ -46,8 +60,18 @@ from mep_dependency_bootstrap import (  # noqa: E402
 )
 
 
-ensure_mep_offline_requirements(_CODE_ROOT)
-bootstrap_mep_data_dependencies(_CODE_ROOT)
+_installed_requirements = ensure_mep_offline_requirements(_CODE_ROOT)
+_bootstrapped_paths = bootstrap_mep_data_dependencies(_CODE_ROOT)
+if _installed_requirements:
+    _log_bootstrap(
+        "installed offline requirements from: "
+        + ", ".join(_installed_requirements)
+    )
+if _bootstrapped_paths:
+    _log_bootstrap(
+        "bootstrapped MEP data dependency paths: "
+        + os.pathsep.join(_bootstrapped_paths)
+    )
 if str(_CODE_ROOT) in sys.path:
     sys.path.remove(str(_CODE_ROOT))
 sys.path.insert(0, str(_CODE_ROOT))
@@ -56,6 +80,7 @@ from ragent.runtime_env import bootstrap_runtime_environment  # noqa: E402
 
 
 bootstrap_runtime_environment(explicit_runtime_env="mep", repo_root=_CODE_ROOT)
+_configure_default_offline_environment()
 
 from ragent.mep_adapter import (  # noqa: E402
     AsyncLoopThread,
@@ -112,7 +137,7 @@ class CustomerModel:
         return value[:max_length] + "...(truncated)"
 
     def _log_bundle_path_resolution(self, bundle_paths: ComponentBundlePaths) -> None:
-        logger.debug(
+        logger.info(
             "Resolving MEP bundle paths. process_file=%s cwd=%s gpu_id=%s model_root=%s "
             "MODEL_SFS=%s MODEL_OBJECT_ID=%s MODEL_RELATIVE_DIR=%s MODEL_ABSOLUTE_DIR=%s "
             "path_appendix=%s RAGENT_MEP_MODEL_DIR=%s RAGENT_MEP_DATA_DIR=%s",
@@ -142,7 +167,7 @@ class CustomerModel:
             bundle_paths.meta_dir.exists(),
         )
         for note in bundle_paths.diagnostics:
-            logger.debug("MEP path diagnostic: %s", note)
+            logger.info("MEP path diagnostic: %s", note)
 
     def _release_runtime_resources(self) -> None:
         runtime_session = self._runtime_session
