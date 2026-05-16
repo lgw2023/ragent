@@ -328,6 +328,37 @@ def _normalize_env_choice(
     )
 
 
+def _resolve_rag_insert_batch_size(
+    *,
+    total_units: int,
+    llm_model_max_async: int,
+    hard_timeout_enabled: bool,
+) -> int:
+    normalized_total = max(1, int(total_units))
+    raw_value = os.getenv("RAG_INSERT_BATCH_SIZE")
+
+    if raw_value is None or not raw_value.strip():
+        if hard_timeout_enabled:
+            return max(1, min(normalized_total, int(llm_model_max_async or 1)))
+        return normalized_total
+
+    normalized_value = raw_value.strip().lower()
+    if normalized_value in {"0", "all", "full", "none"}:
+        return normalized_total
+
+    try:
+        configured_size = int(normalized_value)
+    except ValueError as exc:
+        raise ValueError(
+            "Invalid RAG_INSERT_BATCH_SIZE="
+            f"{raw_value!r}. Use a positive integer, 0, or all."
+        ) from exc
+
+    if configured_size <= 0:
+        return normalized_total
+    return max(1, min(normalized_total, configured_size))
+
+
 def _mineru_sglang_engine_available() -> bool:
     try:
         from sglang.srt.server_args import ServerArgs  # noqa: F401
@@ -4593,14 +4624,10 @@ async def index_md_to_rag(
                 )
                 total_units = max(total_units, 1)
                 progress_tracker.update(0.10, "rag_plan", f"0/{total_units} insert units completed")
-                insert_batch_size = max(
-                    1,
-                    int(
-                        os.getenv(
-                            "RAG_INSERT_BATCH_SIZE",
-                            str(max(1, getattr(rag, "llm_model_max_async", 4))),
-                        )
-                    ),
+                insert_batch_size = _resolve_rag_insert_batch_size(
+                    total_units=total_units,
+                    llm_model_max_async=max(1, getattr(rag, "llm_model_max_async", 4)),
+                    hard_timeout_enabled=hard_timeout_enabled,
                 )
 
                 def _clean_text_for_xml(text: str) -> str:
