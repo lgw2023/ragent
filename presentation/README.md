@@ -196,7 +196,7 @@ RAG_ANSWER_PROMPT_MODE="single_prompt"
 - `build` 环境里的 `MINERU_PARSE_MODE` 支持 `pipeline | vlm-engine | hybrid-engine`。
 - `MINERU_VLM_BACKEND=sglang-client` 时，还需要设置 `MINERU_VLM_SERVER_URL`。
 - 宽表建图仍然属于 `build` 环境，因此 `pandas/openpyxl/xlsxwriter` 也只在 `build` 环境安装。
-- `num_chars_of_front`、`num_chars_of_behind`、`chunk_size`、`overlap_size`、`ENTITY_EXTRACT_GLEANING_LEVEL`、`MAX_GLEANING`、`RAG_INSERT_TIMEOUT_SECONDS`、`RAG_INDEX_TIMEOUT_SECONDS` 这类切块和建图调优项，也只在 `build` 环境有意义。
+- `num_chars_of_front`、`num_chars_of_behind`、`chunk_size`、`overlap_size`、`ENTITY_EXTRACT_GLEANING_LEVEL`、`MAX_GLEANING`、`RAG_INSERT_BATCH_SIZE`、`RAG_INSERT_TIMEOUT_SECONDS`、`RAG_INDEX_TIMEOUT_SECONDS` 这类切块和建图调优项，也只在 `build` 环境有意义。
 
 如果你暂时不打算接 rerank 服务，至少同时设置：
 
@@ -349,6 +349,7 @@ if __name__ == "__main__":
 ```
 
 第二阶段默认使用基于 Markdown 结构解析的切分（`parser` 模式）。
+默认情况下，所有 insert units 会一次性进入 RAG/KG pipeline；如需隔离超时或失败，可设置 `RAG_INSERT_BATCH_SIZE=8` 这类正整数恢复小批量处理。
 
 如果希望切回旧的 `legacy` 逻辑，可在运行前设置：
 
