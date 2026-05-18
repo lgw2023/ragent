@@ -8,7 +8,9 @@ import os
 from pathlib import Path
 import re
 import string
+import sys
 import threading
+import types
 from typing import Any
 
 from .utils import logger
@@ -380,12 +382,46 @@ def _install_local_words_splitter(model: Any) -> None:
             logger.debug("Unable to install local GLiNER words splitter", exc_info=True)
 
 
+def _ensure_langdetect_importable() -> None:
+    if "langdetect" in sys.modules:
+        return
+
+    try:
+        import langdetect  # noqa: F401
+        return
+    except Exception:
+        logger.debug("Using langdetect import stub for GLiNER", exc_info=True)
+
+    class LangDetectException(Exception):
+        pass
+
+    class DetectorFactory:
+        seed = 0
+
+    def _detect_unavailable(*_args: Any, **_kwargs: Any) -> Any:
+        raise LangDetectException("langdetect is unavailable")
+
+    langdetect_stub = types.ModuleType("langdetect")
+    langdetect_stub.__path__ = []  # type: ignore[attr-defined]
+    langdetect_stub.DetectorFactory = DetectorFactory  # type: ignore[attr-defined]
+    langdetect_stub.LangDetectException = LangDetectException  # type: ignore[attr-defined]
+    langdetect_stub.detect = _detect_unavailable  # type: ignore[attr-defined]
+    langdetect_stub.detect_langs = _detect_unavailable  # type: ignore[attr-defined]
+
+    exception_stub = types.ModuleType("langdetect.lang_detect_exception")
+    exception_stub.LangDetectException = LangDetectException  # type: ignore[attr-defined]
+
+    sys.modules["langdetect"] = langdetect_stub
+    sys.modules["langdetect.lang_detect_exception"] = exception_stub
+
+
 def _load_gliner_model(model_name: str, device: str) -> Any:
     cache_key = (model_name, device)
     with _MODEL_CACHE_LOCK:
         cached_model = _MODEL_CACHE.get(cache_key)
         if cached_model is not None:
             return cached_model
+        _ensure_langdetect_importable()
         try:
             from gliner import GLiNER  # type: ignore
         except Exception as exc:  # pragma: no cover - exercised via fallback tests

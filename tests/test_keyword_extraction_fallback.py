@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -121,6 +122,35 @@ def test_gliner_unavailable_does_not_fall_back_to_llm(monkeypatch):
     assert param.keyword_source == "gliner_fallback"
     assert "GLiNER fallback unavailable" in param.keyword_fallback_reason
     assert param.keyword_model_error == "missing package"
+
+
+def test_langdetect_zipimport_failure_installs_gliner_compatible_stub(monkeypatch):
+    for module_name in ("langdetect.lang_detect_exception", "langdetect"):
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    original_import = builtins.__import__
+
+    def fail_langdetect_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "langdetect":
+            raise NotADirectoryError("not a directory")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_langdetect_import)
+
+    keyword_extraction._ensure_langdetect_importable()
+
+    monkeypatch.setattr(builtins, "__import__", original_import)
+
+    import langdetect
+    from langdetect.lang_detect_exception import LangDetectException
+
+    assert langdetect.DetectorFactory.seed == 0
+    try:
+        langdetect.detect("hello")
+    except LangDetectException as exc:
+        assert "unavailable" in str(exc)
+    else:
+        raise AssertionError("stubbed langdetect should raise LangDetectException")
 
 
 def test_retrieval_only_uses_real_gliner_loader_without_llm(monkeypatch, tmp_path: Path):

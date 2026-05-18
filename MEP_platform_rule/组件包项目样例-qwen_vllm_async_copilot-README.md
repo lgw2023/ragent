@@ -426,12 +426,12 @@ MEP 异步场景下，业务与模型服务通过 **SFS 共享存储** 交互：
     "data": {
         "taskId": "100002455",
         "action": "create",
-        "basePath": "/opt/business/businessId/100002455",
+        "basePath": "/opt/huawei/hivoice/businessId/100002455",
         "fileInfo": [
             {
                 "sourceImage": "image1.png",
-                "sourcePath": "/opt/business/businessId/100002455/sourcepath",
-                "generatePath": "/opt/business/businessId/100002455/generatePath",
+                "sourcePath": "/opt/huawei/hivoice/businessId/100002455/sourcepath",
+                "generatePath": "/opt/huawei/hivoice/businessId/100002455/generatePath",
                 "processSpec": []
             }
         ]

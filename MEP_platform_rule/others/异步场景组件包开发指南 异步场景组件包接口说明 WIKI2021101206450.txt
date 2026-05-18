@@ -248,12 +248,12 @@ application/json;charset=UTF-8
     "data": {
         "taskId": "100002455",
         "action": "create",
-        "basePath": "/opt/business/businessId /100002455",
+        "basePath": "/opt/huawei/hivoice/businessId /100002455",
         "fileInfo": [
             {
                 "sourceImage": "image1.png",
-                "sourcePath": "/opt/business/businessId/100002455/sourcepath",
-                "generatePath": "/opt/business/businessId/100002455/generatePath",
+                "sourcePath": "/opt/huawei/hivoice/businessId/100002455/sourcepath",
+                "generatePath": "/opt/huawei/hivoice/businessId/100002455/generatePath",
                 "processSpec": []
             }
         ]
@@ -272,7 +272,7 @@ application/json;charset=UTF-8
     "data": {
         "taskId": "100002455",
         "action": "query",
-        "basePath": "/opt/business/businessId /100002455"
+        "basePath": "/opt/huawei/hivoice/businessId /100002455"
     }
 }
  

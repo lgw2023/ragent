@@ -396,7 +396,7 @@ KG 查询参数按三层兜底解析，前层优先：
     "snapshot_source_dir": "...",
     "copied_to_runtime_dir": false
   },
-  "result_file_path": "/opt/business/100002455/generatePath/gen.json"
+  "result_file_path": "/opt/huawei/hivoice/100002455/generatePath/gen.json"
 }
 ```
 
@@ -413,13 +413,13 @@ SFS 异步 create：
   "data": {
     "taskId": "100002455",
     "action": "create",
-    "basePath": "/opt/business/100002455",
+    "basePath": "/opt/huawei/hivoice/100002455",
     "query_type": "onehop",
     "query": "我已经是个成年男人了，但是下午多喝了一听含糖饮料(330ml)，我先 中速步行30 分钟，再爬楼多久能补回来？",
     "mode": "hybrid",
     "fileInfo": [
       {
-        "generatePath": "/opt/business/100002455/generatePath",
+        "generatePath": "/opt/huawei/hivoice/100002455/generatePath",
         "processSpec": []
       }
     ]
