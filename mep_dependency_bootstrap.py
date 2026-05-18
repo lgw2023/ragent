@@ -192,6 +192,17 @@ def _iter_wheelhouse_dirs(
         yield legacy_flat_dir
 
 
+def _iter_offline_install_wheelhouse_dirs(deps_dir: Path) -> Iterator[Path]:
+    seen: set[Path] = set()
+    for root_name in ("wheelhouse", "keyword_wheelhouse"):
+        for wheelhouse_dir in _iter_wheelhouse_dirs(deps_dir, root_name):
+            resolved = wheelhouse_dir.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            yield wheelhouse_dir
+
+
 def _iter_platform_named_files(
     deps_dir: Path,
     *,
@@ -222,6 +233,10 @@ def _iter_offline_requirements_files(deps_dir: Path) -> Iterator[Path]:
     yield from _iter_platform_named_files(
         deps_dir,
         prefix="requirements",
+    )
+    yield from _iter_platform_named_files(
+        deps_dir,
+        prefix="keyword-requirements",
     )
 
 
@@ -320,7 +335,7 @@ def ensure_mep_offline_requirements(
 
         wheelhouse_dirs = tuple(
             wheelhouse_dir
-            for wheelhouse_dir in _iter_wheelhouse_dirs(deps_dir)
+            for wheelhouse_dir in _iter_offline_install_wheelhouse_dirs(deps_dir)
             if wheelhouse_dir.is_dir() and any(wheelhouse_dir.glob("*.whl"))
         )
         if not wheelhouse_dirs:

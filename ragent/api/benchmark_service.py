@@ -249,7 +249,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Ragent Benchmark Service", version="1.0.0", lifespan=lifespan)
 
-    @app.get("/health")
+    @app.api_route("/health", methods=["GET", "HEAD", "POST"])
     async def health() -> dict[str, Any]:
         return {
             "status": "ok",

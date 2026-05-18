@@ -393,6 +393,61 @@ def test_mep_offline_requirements_install_uses_platform_wheelhouse(
     assert command_envs[0]["PIP_CONFIG_FILE"] == os.devnull
 
 
+def test_mep_offline_requirements_install_includes_keyword_wheelhouse(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    deps_dir = runtime_root / "data" / "deps"
+    wheelhouse = deps_dir / "wheelhouse" / "test-platform"
+    keyword_wheelhouse = deps_dir / "keyword_wheelhouse" / "test-platform"
+    wheelhouse.mkdir(parents=True)
+    keyword_wheelhouse.mkdir(parents=True)
+    _write_minimal_wheel(wheelhouse / "demo_dep-1.0.0-py3-none-any.whl")
+    _write_minimal_wheel(
+        keyword_wheelhouse / "onnxruntime-1.16.3-cp39-cp39-linux_aarch64.whl"
+    )
+    requirements = deps_dir / "keyword-requirements-test-platform.txt"
+    requirements.write_text("onnxruntime\n", encoding="utf-8")
+
+    commands: list[list[str]] = []
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "ok"
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        return FakeCompleted()
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_OFFLINE_PIP_INSTALL", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setattr(mep_dependency_bootstrap, "_OFFLINE_REQUIREMENTS_DONE", set())
+    monkeypatch.setattr(mep_dependency_bootstrap.subprocess, "run", fake_run)
+    monkeypatch.setattr(mep_dependency_bootstrap.site, "addsitedir", lambda _: None)
+
+    installed = ensure_mep_offline_requirements(component_dir)
+
+    assert installed == (str(requirements.resolve()),)
+    command = commands[0]
+    find_links = [
+        command[index + 1]
+        for index, value in enumerate(command)
+        if value == "--find-links"
+    ]
+    assert find_links == [
+        str(wheelhouse.resolve()),
+        str(keyword_wheelhouse.resolve()),
+    ]
+
+
 def test_mep_offline_requirements_install_rejects_corrupt_wheel(
     monkeypatch,
     tmp_path: Path,
@@ -503,6 +558,36 @@ def test_bge_m3_embedding_properties_match_validated_transformers_runtime():
     assert properties["embedding.pooling"] == "cls"
     assert properties["embedding.normalize"] == "true"
     assert properties["embedding.batch_size"] == "8"
+
+
+def test_bge_m3_keyword_requirements_install_native_onnxruntime():
+    repo_root = Path(__file__).resolve().parents[1]
+    deps_dir = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "bge-m3"
+        / "modelDir"
+        / "data"
+        / "deps"
+    )
+    requirements = [
+        line.strip()
+        for line in (
+            deps_dir / "keyword-requirements-linux-arm64-py3.9.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    constraints = {
+        line.strip()
+        for line in (
+            deps_dir / "constraints-linux-arm64-py3.9.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+    assert "onnxruntime" in requirements
+    assert "onnxruntime==1.16.3" in constraints
 
 
 def test_root_process_exports_customer_model(monkeypatch):

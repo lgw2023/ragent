@@ -29,18 +29,25 @@ Supported local bootstrap paths:
 At startup, `process.py` first calls `mep_dependency_bootstrap.py` before
 importing `ragent`. The bootstrap does two things:
 
-1. It runs an offline pip install when a matching
-   `requirements-<platform-tag>.txt` file exists:
+1. It runs an offline pip install when matching
+   `requirements-<platform-tag>.txt` or
+   `keyword-requirements-<platform-tag>.txt` files exist:
 
    ```bash
    python3 -m pip install --no-index \
      --find-links data/deps/wheelhouse/linux-arm64-py3.9 \
+     --find-links data/deps/keyword_wheelhouse/linux-arm64-py3.9 \
      -c data/deps/constraints-linux-arm64-py3.9.txt \
      -r data/deps/requirements-linux-arm64-py3.9.txt
    ```
 
+   The same command shape is used for
+   `keyword-requirements-linux-arm64-py3.9.txt`.
+
    Already installed packages with matching versions are skipped by pip. This
    path handles native wheels such as `tiktoken`, `jiter`, and `fastuuid`.
+   The keyword requirements file uses the same install path for the GLiNER
+   fallback's `onnxruntime`.
 
 2. It adds pure-Python dependency paths to `sys.path` as a fallback. Native
    wheels with `.so`, `.pyd`, `.dll`, or `.dylib` payloads are not zipimported.
@@ -67,4 +74,6 @@ PyPI mirror.
 `keyword_wheelhouse/<platform-tag>/` remains reserved for no-LLM keyword
 fallback dependencies such as GLiNER, Stanza, and ONNX Runtime. Keep it separate
 from the embedding/application wheelhouse so keyword extraction packages do not
-change the validated BGE-M3 embedding runtime.
+change the validated BGE-M3 embedding runtime. The bootstrap still passes this
+directory to offline pip because native wheels such as ONNX Runtime cannot be
+imported directly from a `.whl` file.
