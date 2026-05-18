@@ -39,6 +39,7 @@ MinerU-master.zip
 .pytest_cache/
 .coverage
 htmlcov/
+.tmp_offline_e2e*/
 
 # IDE
 .idea/

@@ -20,6 +20,14 @@ def test_resolve_generated_output_file_can_use_single_actual_markdown(tmp_path: 
     assert resolved == str(actual_md)
 
 
+def test_resolve_raw_export_usage_report_dir_follows_output_jsonl(tmp_path: Path):
+    output_path = tmp_path / "raw" / "doc.raw-units.jsonl"
+
+    assert integrations._resolve_raw_export_usage_report_dir(str(output_path)) == str(
+        tmp_path / "raw"
+    )
+
+
 class _DummyProgressTracker:
     enabled = False
 

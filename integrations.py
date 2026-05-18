@@ -36,9 +36,15 @@ import subprocess
 from ragent import QueryParam, Ragent
 import ragent.inference_runtime as _inference_runtime
 from ragent.llm.openai import env_openai_complete, openai_embed
+from ragent.offline_replay import (
+    build_raw_merge_unit_from_text,
+    raw_merge_unit_to_json_obj,
+)
 from ragent.rerank import rerank_from_env
 from ragent.kg.shared_storage import initialize_pipeline_status, finalize_share_data
 from ragent.utils import (
+    clean_text,
+    compute_mdhash_id,
     log_model_call,
     logger,
     ModelUsageCollector,
@@ -64,6 +70,7 @@ import time
 import shutil
 import sys
 import threading
+import tempfile
 from collections import Counter
 from typing import Any, TYPE_CHECKING
 
@@ -840,6 +847,10 @@ def _resolve_md_usage_report_dir(pdf_outdir: str) -> str:
 
 def _resolve_kg_usage_report_dir(project_dir: str) -> str:
     return os.path.abspath(project_dir)
+
+
+def _resolve_raw_export_usage_report_dir(output_jsonl_path: str) -> str:
+    return os.path.abspath(os.path.dirname(output_jsonl_path) or ".")
 
 
 def _maybe_create_usage_collector(label: str):
@@ -2349,6 +2360,155 @@ def _resolve_content_list_path_from_md(md_path: str) -> str | None:
     if os.path.exists(candidate_path):
         return candidate_path
     return None
+
+
+def _source_group_key_from_doc_name(doc_name: str | None) -> str:
+    if not doc_name:
+        return "unknown_source"
+    basename = os.path.basename(str(doc_name))
+    stem, ext = os.path.splitext(basename)
+    if ext:
+        return stem
+    return stem or basename or "unknown_source"
+
+
+def _clean_text_for_xml(text: str) -> str:
+    return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
+
+
+async def _build_md_rag_insert_plan(
+    rag: Ragent,
+    pdf_file_path: str,
+    md_path: str,
+    content_list_path: str | None = None,
+) -> dict[str, Any]:
+    aiofiles_module = _require_aiofiles()
+    image_dir = os.path.join(os.path.dirname(md_path), "images")
+    source_pdf_path = os.path.abspath(pdf_file_path)
+
+    async with aiofiles_module.open(md_path, "r", encoding="utf-8") as f:
+        md_text = await f.read()
+    if not md_text:
+        raise ValueError("md_text is empty")
+
+    resolved_content_list_path = content_list_path or _resolve_content_list_path_from_md(
+        md_path
+    )
+    content_list: list[dict[str, Any]] = []
+    if resolved_content_list_path and os.path.exists(resolved_content_list_path):
+        try:
+            async with aiofiles_module.open(
+                resolved_content_list_path, "r", encoding="utf-8"
+            ) as f:
+                content_list = json.loads(await f.read())
+        except Exception as e:
+            logger.warning(
+                f"Failed to load content_list metadata from {resolved_content_list_path}: {e}"
+            )
+
+    text_blocks, image_metadata_map = _build_content_list_index(
+        content_list, source_pdf_path
+    )
+
+    doc_name_with_ext = os.path.basename(pdf_file_path)
+    doc_name_without_ext = _pdf_output_stem(pdf_file_path)
+    md_split_mode = (os.getenv("RAG_MD_SPLIT_MODE", "parser") or "parser").strip().lower()
+    insert_units: list[dict[str, Any]] = []
+    total_chunks = 0
+    total_image_chunks = 0
+
+    if md_split_mode == "parser":
+        parser_text_units = _build_md_parser_text_insert_units(
+            md_text,
+            source_pdf_path,
+            text_blocks,
+            rag.tokenizer,
+            max_token_size=rag.chunk_token_size,
+            overlap_token_size=rag.chunk_overlap_token_size,
+        )
+        parser_image_units = _build_md_parser_image_insert_units(
+            md_text,
+            image_dir,
+            image_metadata_map,
+            doc_name_without_ext,
+        )
+        if parser_text_units or parser_image_units:
+            parser_units: list[dict[str, Any]] = []
+            for unit in parser_text_units:
+                parser_units.append(
+                    {
+                        **unit,
+                        "doc_name": doc_name_with_ext,
+                        "file_paths": source_pdf_path,
+                    }
+                )
+            parser_units.extend(parser_image_units)
+            parser_units.sort(
+                key=lambda item: (
+                    item.get("line_start")
+                    if isinstance(item.get("line_start"), int)
+                    else 10**9,
+                    0 if item.get("chunk_type") == "image_desc" else 1,
+                    item.get("chunk_index", 0),
+                )
+            )
+            for index, unit in enumerate(parser_units):
+                insert_units.append(
+                    {
+                        **unit,
+                        "sort_order": index,
+                    }
+                )
+            total_chunks = sum(
+                1
+                for unit in parser_units
+                if unit.get("chunk_type") == "text_md_parser"
+            )
+            total_image_chunks = sum(
+                1 for unit in parser_units if unit.get("chunk_type") == "image_desc"
+            )
+        else:
+            logger.warning(
+                "RAG_MD_SPLIT_MODE=parser produced no insert units for %s, falling back to legacy split.",
+                md_path,
+            )
+            md_split_mode = "legacy"
+
+    if md_split_mode != "parser":
+        insert_units.extend(
+            _build_legacy_md_insert_units(
+                md_text,
+                source_pdf_path,
+                text_blocks,
+                image_dir,
+                image_metadata_map,
+                doc_name_with_ext,
+                doc_name_without_ext,
+            )
+        )
+
+        total_chunks = sum(
+            1
+            for unit in insert_units
+            if unit.get("chunk_type") in {"text_first", "text"}
+        )
+        total_image_chunks = sum(
+            1 for unit in insert_units if unit.get("chunk_type") == "image_desc"
+        )
+
+    insert_units.sort(key=lambda item: item.get("sort_order", 0))
+    return {
+        "insert_units": insert_units,
+        "total_chunks": total_chunks,
+        "total_image_chunks": total_image_chunks,
+        "md_split_mode": md_split_mode,
+        "image_dir": image_dir,
+        "source_pdf_path": source_pdf_path,
+        "doc_name_with_ext": doc_name_with_ext,
+        "doc_name_without_ext": doc_name_without_ext,
+        "md_text": md_text,
+        "content_list_path": resolved_content_list_path,
+    }
 
 
 def _collect_ranked_chunks(
@@ -4455,7 +4615,6 @@ async def index_md_to_rag(
     progress: dict[str, Any] | None = None,
 ):
     """第二阶段：基于最终 md 和图片描述文件，构建 RAG/KG 索引。"""
-    aiofiles_module = _require_aiofiles()
     progress_tracker = _TerminalProgressTracker("KG")
     rag: Ragent | None = None
     with _maybe_create_usage_collector("index_md_to_rag") as collector:
@@ -4471,125 +4630,24 @@ async def index_md_to_rag(
                 rag = await initialize_rag(project_dir)
                 progress_tracker.update(0.10, "rag_init", "RAG stores initialized")
 
-                image_dir = os.path.join(os.path.dirname(md_path), "images")
-                source_pdf_path = os.path.abspath(pdf_file_path)
+                insert_plan = await _build_md_rag_insert_plan(
+                    rag,
+                    pdf_file_path,
+                    md_path,
+                    content_list_path=content_list_path,
+                )
+                image_dir = insert_plan["image_dir"]
+                source_pdf_path = insert_plan["source_pdf_path"]
+                doc_name_with_ext = insert_plan["doc_name_with_ext"]
+                md_split_mode = insert_plan["md_split_mode"]
+                insert_units = insert_plan["insert_units"]
+                total_chunks = insert_plan["total_chunks"]
+                total_image_chunks = insert_plan["total_image_chunks"]
                 hard_timeout_enabled = os.getenv("RAG_INSERT_HARD_TIMEOUT", "0") == "1"
                 insert_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_SECONDS", "0")) if hard_timeout_enabled else 0
                 max_retries = int(os.getenv("RAG_INSERT_RETRIES", "2"))
                 timeout_backoff = float(os.getenv("RAG_INSERT_TIMEOUT_BACKOFF", "1.8"))
                 max_timeout = int(os.getenv("RAG_INSERT_TIMEOUT_MAX_SECONDS", "600"))
-
-                async with aiofiles_module.open(md_path, "r", encoding="utf-8") as f:
-                    md_text = await f.read()
-                if not md_text:
-                    raise ValueError("md_text is empty")
-
-                resolved_content_list_path = content_list_path or _resolve_content_list_path_from_md(
-                    md_path
-                )
-                content_list: list[dict[str, Any]] = []
-                if resolved_content_list_path and os.path.exists(resolved_content_list_path):
-                    try:
-                        async with aiofiles_module.open(
-                            resolved_content_list_path, "r", encoding="utf-8"
-                        ) as f:
-                            content_list = json.loads(await f.read())
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to load content_list metadata from {resolved_content_list_path}: {e}"
-                        )
-
-                text_blocks, image_metadata_map = _build_content_list_index(
-                    content_list, source_pdf_path
-                )
-
-                doc_name_with_ext = os.path.basename(pdf_file_path)
-                doc_name_without_ext = _pdf_output_stem(pdf_file_path)
-                md_split_mode = (os.getenv("RAG_MD_SPLIT_MODE", "parser") or "parser").strip().lower()
-                insert_units: list[dict[str, Any]] = []
-                total_chunks = 0
-                total_image_chunks = 0
-
-                if md_split_mode == "parser":
-                    parser_text_units = _build_md_parser_text_insert_units(
-                        md_text,
-                        source_pdf_path,
-                        text_blocks,
-                        rag.tokenizer,
-                        max_token_size=rag.chunk_token_size,
-                        overlap_token_size=rag.chunk_overlap_token_size,
-                    )
-                    parser_image_units = _build_md_parser_image_insert_units(
-                        md_text,
-                        image_dir,
-                        image_metadata_map,
-                        doc_name_without_ext,
-                    )
-                    if parser_text_units or parser_image_units:
-                        parser_units: list[dict[str, Any]] = []
-                        for unit in parser_text_units:
-                            parser_units.append(
-                                {
-                                    **unit,
-                                    "doc_name": doc_name_with_ext,
-                                    "file_paths": source_pdf_path,
-                                }
-                            )
-                        parser_units.extend(parser_image_units)
-                        parser_units.sort(
-                            key=lambda item: (
-                                item.get("line_start")
-                                if isinstance(item.get("line_start"), int)
-                                else 10**9,
-                                0 if item.get("chunk_type") == "image_desc" else 1,
-                                item.get("chunk_index", 0),
-                            )
-                        )
-                        for index, unit in enumerate(parser_units):
-                            insert_units.append(
-                                {
-                                    **unit,
-                                    "sort_order": index,
-                                }
-                            )
-                        total_chunks = sum(
-                            1
-                            for unit in parser_units
-                            if unit.get("chunk_type") == "text_md_parser"
-                        )
-                        total_image_chunks = sum(
-                            1 for unit in parser_units if unit.get("chunk_type") == "image_desc"
-                        )
-                    else:
-                        logger.warning(
-                            "RAG_MD_SPLIT_MODE=parser produced no insert units for %s, falling back to legacy split.",
-                            md_path,
-                        )
-                        md_split_mode = "legacy"
-
-                if md_split_mode != "parser":
-                    insert_units.extend(
-                        _build_legacy_md_insert_units(
-                            md_text,
-                            source_pdf_path,
-                            text_blocks,
-                            image_dir,
-                            image_metadata_map,
-                            doc_name_with_ext,
-                            doc_name_without_ext,
-                        )
-                    )
-
-                    total_chunks = sum(
-                        1
-                        for unit in insert_units
-                        if unit.get("chunk_type") in {"text_first", "text"}
-                    )
-                    total_image_chunks = sum(
-                        1 for unit in insert_units if unit.get("chunk_type") == "image_desc"
-                    )
-
-                insert_units.sort(key=lambda item: item.get("sort_order", 0))
                 _print_pipeline_progress(
                     "rag_index_start",
                     source_pdf=os.path.abspath(pdf_file_path),
@@ -4629,9 +4687,6 @@ async def index_md_to_rag(
                     llm_model_max_async=max(1, getattr(rag, "llm_model_max_async", 4)),
                     hard_timeout_enabled=hard_timeout_enabled,
                 )
-
-                def _clean_text_for_xml(text: str) -> str:
-                    return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
 
                 async def safe_rag_insert_batch(
                     batch_units: list[dict[str, Any]],
@@ -4882,6 +4937,224 @@ async def index_md_to_rag(
             "stage": "rag",
         },
     )
+
+
+async def export_md_to_raw_merge_units(
+    pdf_file_path: str,
+    output_jsonl_path: str,
+    md_path: str,
+    content_list_path: str | None = None,
+    *,
+    working_dir: str | None = None,
+    append: bool = False,
+    continue_on_error: bool = False,
+    failures_jsonl_path: str | None = None,
+    progress: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Export raw extraction units using the same md insert plan as index_md_to_rag."""
+
+    async def _run_with_working_dir(resolved_working_dir: str) -> dict[str, Any]:
+        progress_tracker = _TerminalProgressTracker("RAW")
+        rag: Ragent | None = None
+        with _maybe_create_usage_collector("export_md_to_raw_merge_units") as collector:
+            with _activate_terminal_progress(progress_tracker):
+                try:
+                    progress_tracker.start_estimated_phase(
+                        "rag_init",
+                        "Initializing raw extraction stores",
+                        start_progress=0.02,
+                        end_progress=0.10,
+                        estimate_seconds=float(
+                            os.getenv("KG_PROGRESS_INIT_ESTIMATE_SECONDS", "8")
+                        ),
+                    )
+                    rag = await initialize_rag(resolved_working_dir)
+                    progress_tracker.update(
+                        0.10, "rag_init", "Raw extraction stores initialized"
+                    )
+
+                    insert_plan = await _build_md_rag_insert_plan(
+                        rag,
+                        pdf_file_path,
+                        md_path,
+                        content_list_path=content_list_path,
+                    )
+                    insert_units = insert_plan["insert_units"]
+                    source_pdf_path = insert_plan["source_pdf_path"]
+                    doc_name_with_ext = insert_plan["doc_name_with_ext"]
+                    md_split_mode = insert_plan["md_split_mode"]
+
+                    output_path = os.path.abspath(output_jsonl_path)
+                    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+                    failure_path = (
+                        os.path.abspath(failures_jsonl_path)
+                        if failures_jsonl_path
+                        else output_path + ".failures.jsonl"
+                    )
+
+                    total_units = sum(
+                        1 for unit in insert_units if (unit.get("text") or "").strip()
+                    )
+                    total_units = max(total_units, 1)
+                    progress_state = progress if progress is not None else {}
+                    progress_state["started_monotonic"] = time.monotonic()
+                    progress_state["last_update_monotonic"] = progress_state[
+                        "started_monotonic"
+                    ]
+                    progress_tracker.update(
+                        0.10,
+                        "raw_plan",
+                        f"0/{total_units} raw insert units exported",
+                    )
+
+                    def _update_progress(**kwargs):
+                        now = time.monotonic()
+                        progress_state.update(kwargs)
+                        progress_state["last_update_monotonic"] = now
+                        progress_state["elapsed_sec"] = round(
+                            now - progress_state.get("started_monotonic", now), 3
+                        )
+
+                    exported = 0
+                    skipped_duplicates = 0
+                    failed_units = 0
+                    seen_doc_ids: set[str] = set()
+                    mode = "a" if append else "w"
+
+                    with open(output_path, mode, encoding="utf-8") as output_file:
+                        for display_index, unit in enumerate(insert_units, start=1):
+                            text = unit.get("text", "")
+                            if not text or not text.strip():
+                                continue
+
+                            unit_doc_name = unit.get("doc_name", doc_name_with_ext)
+                            file_path = (
+                                os.path.abspath(unit.get("file_paths", source_pdf_path))
+                                if unit.get("file_paths")
+                                else source_pdf_path
+                            )
+                            content = clean_text(_clean_text_for_xml(text))
+                            doc_id = compute_mdhash_id(content, prefix="doc-")
+                            if doc_id in seen_doc_ids:
+                                skipped_duplicates += 1
+                                continue
+
+                            _update_progress(
+                                phase="raw_extract",
+                                doc=unit_doc_name,
+                                chunk_index=unit.get("chunk_index", display_index - 1),
+                                chunk_type=unit.get("chunk_type", "text"),
+                                file_paths=file_path,
+                                text_len=len(content),
+                                md_path=md_path,
+                                split_mode=md_split_mode,
+                            )
+
+                            try:
+                                raw_unit = await build_raw_merge_unit_from_text(
+                                    rag,
+                                    text=content,
+                                    doc_name=unit_doc_name,
+                                    file_path=file_path,
+                                    doc_id=doc_id,
+                                    metadata=unit.get("metadata") or {},
+                                    source_group_key=_source_group_key_from_doc_name(
+                                        unit_doc_name
+                                    ),
+                                    pipeline_status={
+                                        "latest_message": "",
+                                        "history_messages": [],
+                                    },
+                                    pipeline_status_lock=asyncio.Lock(),
+                                    clean_input=False,
+                                )
+                                output_file.write(
+                                    json.dumps(
+                                        raw_merge_unit_to_json_obj(raw_unit),
+                                        ensure_ascii=False,
+                                    )
+                                    + "\n"
+                                )
+                                seen_doc_ids.add(doc_id)
+                                exported += 1
+                            except Exception as e:
+                                failed_units += 1
+                                if not continue_on_error:
+                                    raise
+                                os.makedirs(
+                                    os.path.dirname(failure_path) or ".",
+                                    exist_ok=True,
+                                )
+                                with open(
+                                    failure_path, "a", encoding="utf-8"
+                                ) as failure_file:
+                                    failure_file.write(
+                                        json.dumps(
+                                            {
+                                                "pdf_file_path": os.path.abspath(
+                                                    pdf_file_path
+                                                ),
+                                                "md_path": os.path.abspath(md_path),
+                                                "doc_name": unit_doc_name,
+                                                "file_path": file_path,
+                                                "chunk_index": unit.get(
+                                                    "chunk_index", display_index - 1
+                                                ),
+                                                "chunk_type": unit.get(
+                                                    "chunk_type", "text"
+                                                ),
+                                                "error": str(e),
+                                            },
+                                            ensure_ascii=False,
+                                        )
+                                        + "\n"
+                                    )
+
+                            progress_tracker.update(
+                                _weighted_ratio(
+                                    0.10,
+                                    1.0,
+                                    exported + skipped_duplicates + failed_units,
+                                    total_units,
+                                ),
+                                "raw_extract",
+                                f"{exported}/{total_units} raw units exported",
+                            )
+
+                    progress_tracker.finish("raw_ready", os.path.basename(output_path))
+                    stats = {
+                        "input_units": total_units,
+                        "exported_units": exported,
+                        "skipped_duplicates": skipped_duplicates,
+                        "failed_units": failed_units,
+                        "output": output_path,
+                        "md_path": os.path.abspath(md_path),
+                    }
+                    if failed_units:
+                        stats["failures"] = failure_path
+                    _write_usage_report_if_needed(
+                        collector,
+                        _resolve_raw_export_usage_report_dir(output_path),
+                        task_name="raw_export",
+                        metadata={
+                            "pdf_file_path": os.path.abspath(pdf_file_path),
+                            "md_path": os.path.abspath(md_path),
+                            "output": output_path,
+                        },
+                    )
+                    return stats
+                except Exception:
+                    progress_tracker.fail("raw_failed", os.path.basename(pdf_file_path))
+                    raise
+                finally:
+                    await _close_rag(rag)
+
+    if working_dir:
+        os.makedirs(working_dir, exist_ok=True)
+        return await _run_with_working_dir(os.path.abspath(working_dir))
+
+    with tempfile.TemporaryDirectory(prefix="ragent_raw_export_") as temp_dir:
+        return await _run_with_working_dir(temp_dir)
 
 
 async def pdf_insert(pdf_file_path, mineru_output_dir, project_dir, keep_pdf_subdir: bool = True):

@@ -714,7 +714,10 @@ def merge_projects(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Merge multiple independently built Ragent KG project dirs."
+        description=(
+            "Fast/fallback merge of finished Ragent KG project dirs. "
+            "For online-equivalent offline builds, export raw merge units and replay them."
+        )
     )
     parser.add_argument(
         "sources",

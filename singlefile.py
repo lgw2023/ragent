@@ -14,6 +14,7 @@ if __package__:
         wide_table_insert,
         pdf_insert,
         build_enhanced_md,
+        export_md_to_raw_merge_units,
         index_md_to_rag,
         get_mineru_output_subdirs_for_lookup,
     )
@@ -33,6 +34,7 @@ else:
         wide_table_insert,
         pdf_insert,
         build_enhanced_md,
+        export_md_to_raw_merge_units,
         index_md_to_rag,
         get_mineru_output_subdirs_for_lookup,
     )
@@ -1190,9 +1192,9 @@ class RagentApp:
     ):
         target_output_dir = mineru_output_dir or self.mineru_output_dir
         target_project_dir = project_dir or self.project_dir
-        valid_stages = {"auto", "all", "md", "rag"}
+        valid_stages = {"auto", "all", "md", "rag", "raw"}
         if stage not in valid_stages:
-            raise ValueError("Invalid stage. Use one of: auto | all | md | rag")
+            raise ValueError("Invalid stage. Use one of: auto | all | md | rag | raw")
 
         if not pdf_file_path:
             raise ValueError("Missing required argument: pdf_file_path")
@@ -1200,8 +1202,8 @@ class RagentApp:
         resolved_input_path = os.path.abspath(pdf_file_path)
         if _is_wide_table_path(pdf_file_path):
             table_project_dir = target_project_dir or target_output_dir
-            if stage == "md":
-                raise ValueError("宽表输入不支持 md 阶段，请使用 auto | all | rag")
+            if stage in {"md", "raw"}:
+                raise ValueError("宽表输入不支持 md/raw 阶段，请使用 auto | all | rag")
             if not table_project_dir:
                 raise ValueError("宽表输入需要 project_dir")
             if target_project_dir is None and target_output_dir is not None:
@@ -1222,11 +1224,11 @@ class RagentApp:
             logger.info("宽表知识库构建完成。")
             return
 
-        if stage in {"auto", "all", "md"} and not target_output_dir:
-            raise ValueError("Missing required argument for md stage: mineru_output_dir")
+        if stage in {"auto", "all", "md", "raw"} and not target_output_dir:
+            raise ValueError("Missing required argument for md/raw stage: mineru_output_dir")
 
-        if stage in {"all", "rag"} and not target_project_dir:
-            raise ValueError("Missing required argument for rag stage: project_dir")
+        if stage in {"all", "rag", "raw"} and not target_project_dir:
+            raise ValueError("Missing required argument for rag/raw stage: project_dir")
 
         resolved_stage = stage
         if stage == "auto":
@@ -1274,23 +1276,48 @@ class RagentApp:
             logger.info(f"增强 md 生成完成: {artifacts['md_path']}")
             return
 
-        # resolved_stage == "rag"
-        # 仅构建 RAG/KG：依赖已经存在的最终 md 文件
+        # resolved_stage == "rag" or "raw"
+        # rag 依赖已经存在的最终 md；raw 若不存在 md 则先生成增强 md。
         md_path = self._resolve_existing_md_path(
             pdf_file_path,
             target_output_dir,
             keep_pdf_subdir=keep_pdf_subdir,
         )
+        raw_content_list_path = None
         if not md_path:
-            candidate_paths = self._build_md_candidate_paths(
+            if resolved_stage == "raw":
+                logger.info("未找到最终 md，先生成增强 md 后导出 raw merge units...")
+                artifacts = await build_enhanced_md(
+                    pdf_file_path,
+                    target_output_dir,
+                    keep_pdf_subdir=keep_pdf_subdir,
+                )
+                md_path = artifacts["md_path"]
+                raw_content_list_path = artifacts.get("content_list_path")
+            else:
+                candidate_paths = self._build_md_candidate_paths(
+                    pdf_file_path,
+                    target_output_dir,
+                    keep_pdf_subdir=keep_pdf_subdir,
+                )
+                raise FileNotFoundError(
+                    "未找到最终 md 文件，请先执行 md 阶段。已检查路径: "
+                    + " | ".join(candidate_paths)
+                )
+        if resolved_stage == "raw":
+            raw_units_path = self._resolve_raw_units_output_path(
+                pdf_file_path, target_project_dir
+            )
+            logger.info(f"开始基于最终 md 导出 raw merge units: {md_path}")
+            stats = await export_md_to_raw_merge_units(
                 pdf_file_path,
-                target_output_dir,
-                keep_pdf_subdir=keep_pdf_subdir,
+                raw_units_path,
+                md_path,
+                content_list_path=raw_content_list_path,
             )
-            raise FileNotFoundError(
-                "未找到最终 md 文件，请先执行 md 阶段。已检查路径: "
-                + " | ".join(candidate_paths)
-            )
+            logger.info(f"raw merge units 导出完成: {stats['output']}")
+            return stats
+
         logger.info(f"开始基于最终 md 构建知识库: {md_path}")
         await index_md_to_rag(pdf_file_path, target_project_dir, md_path)
         logger.info("知识库构建完成。")
@@ -1346,6 +1373,21 @@ class RagentApp:
             if os.path.exists(md_path):
                 return md_path
         return None
+
+    @staticmethod
+    def _resolve_raw_units_output_path(
+        source_file_path: str,
+        raw_units_target: str,
+    ) -> str:
+        target = Path(raw_units_target).expanduser()
+        if target.exists() and target.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            return str(target / f"{Path(source_file_path).stem}.raw-units.jsonl")
+        if target.suffix.lower() != ".jsonl":
+            target.mkdir(parents=True, exist_ok=True)
+            return str(target / f"{Path(source_file_path).stem}.raw-units.jsonl")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return str(target)
 
     async def onehop(
         self,
@@ -1517,7 +1559,7 @@ if __name__ == "__main__":
         # 2) parse <pdf_or_dir> <mineru_output_dir> <project_dir>
         #    - PDF 自动推断 stage=all/rag（有 md 即 rag，否则 all）
         # 3) parse <pdf_or_dir> <mineru_output_dir> [project_dir] [stage]
-        #    - PDF 可选手动覆盖 stage（auto/all/md/rag）
+        #    - PDF 可选手动覆盖 stage（auto/all/md/rag/raw）
         # 4) parse <wide_table_or_dir> <project_dir> [stage]
         #    - 宽表文件直接建图，stage 仅接受 auto/all/rag
         # 5) parse <wide_table_or_dir> <unused_output_dir> <project_dir> [stage]
@@ -1529,7 +1571,7 @@ if __name__ == "__main__":
             )
 
         PDF_FILE_PATH = sys.argv[2] # "path/to/your/document.pdf"
-        valid_stages = {"auto", "all", "md", "rag"}
+        valid_stages = {"auto", "all", "md", "rag", "raw"}
         input_is_wide_table = os.path.isfile(PDF_FILE_PATH) and _is_wide_table_path(PDF_FILE_PATH)
 
         if os.path.isdir(PDF_FILE_PATH):
@@ -1595,11 +1637,16 @@ if __name__ == "__main__":
                 stage = arg5 if arg5 else "auto"
 
         if stage not in valid_stages:
-            raise ValueError(f"Invalid stage: {stage}. Use one of: auto | all | md | rag")
+            raise ValueError(f"Invalid stage: {stage}. Use one of: auto | all | md | rag | raw")
         # 如果传入的是目录，则批量遍历解析其中的 PDF 文档
         if os.path.isdir(PDF_FILE_PATH):
             BATCH_PARSE = True
             KEEP_PDF_SUBDIR = True
+            if stage == "raw" and PROJECT_DIR and Path(PROJECT_DIR).suffix.lower() == ".jsonl":
+                raise ValueError(
+                    "目录 raw 阶段请把第三个参数设为 raw JSONL 输出目录，"
+                    "不要传单个 .jsonl 文件。"
+                )
             valid_exts = {".pdf", *_WIDE_TABLE_EXTENSIONS}
             file_list = []
             for root, dirs, files in os.walk(PDF_FILE_PATH):
@@ -1615,8 +1662,8 @@ if __name__ == "__main__":
                 logger.info(f"[{idx + 1}/{len(file_list)}] 开始解析: {fp}")
                 try:
                     if _is_wide_table_path(fp):
-                        if stage == "md":
-                            logger.info(f"跳过宽表文件（md 阶段不适用）: {fp}")
+                        if stage in {"md", "raw"}:
+                            logger.info(f"跳过宽表文件（md/raw 阶段不适用）: {fp}")
                             continue
                         per_file_stage = "rag" if stage in {"auto", "all", "rag"} else stage
                     else:
