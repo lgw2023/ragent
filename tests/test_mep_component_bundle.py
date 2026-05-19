@@ -792,17 +792,13 @@ def test_customer_model_calc_create_writes_gen_json_and_returns_async_success(
         }
     )
 
-    assert response == {
-        "recommendResult": {
-            "code": "0",
-            "des": "success",
-            "length": 0,
-            "content": [],
-        }
-    }
+    assert response["recommendResult"]["code"] == "0"
+    assert response["recommendResult"]["des"] == "success"
+    assert response["recommendResult"]["length"] == 1
     output_path = generate_path / "gen.json"
     assert output_path.exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert response["recommendResult"]["content"] == [payload]
     assert payload["code"] == "0"
     assert payload["des"] == "success"
     assert payload["taskId"] == "100002455"
@@ -940,7 +936,8 @@ def test_customer_model_calc_query_checks_existing_gen_json_without_loaded_runti
     )
 
     assert response["recommendResult"]["code"] == "0"
-    assert response["recommendResult"]["length"] == 0
+    assert response["recommendResult"]["length"] == 1
+    assert response["recommendResult"]["content"] == [{"code": "0"}]
 
 
 def test_customer_model_load_passes_model_root_without_legacy_suffixing(

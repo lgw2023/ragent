@@ -280,8 +280,8 @@ python -m vllm.entrypoints.openai.api_server --model <model_path> ...
 
 `calc(req_Data)` 的行为：
 
-- 如果 `action=query`，当前代码有防御性兼容，会尝试返回查询状态
-- 如果 `action=create`，会执行 KG 查询，写 `{generatePath}/gen.json`，再返回 `recommendResult`
+- 如果 `action=query`，当前代码有防御性兼容，会尝试读取 `gen.json` 并返回 `content=[payload]`
+- 如果 `action=create`，会执行 KG 查询，写 `{generatePath}/gen.json`，再返回携带 payload 的 `recommendResult`
 - 如果没有 `action`，视为直接调试请求，返回内容会放进 `recommendResult.content`
 
 `action=create` 成功返回：
@@ -291,8 +291,10 @@ python -m vllm.entrypoints.openai.api_server --model <model_path> ...
   "recommendResult": {
     "code": "0",
     "des": "success",
-    "length": 0,
-    "content": []
+    "length": 1,
+    "content": [
+      {"code": "0", "des": "success", "answer": "..."}
+    ]
   }
 }
 ```
@@ -396,9 +398,11 @@ MEP 组件包需要包含：
 MEP 平台入队并调用组件 calc()
 组件执行推理
 组件写 generatePath/gen.json
-组件返回 recommendResult 状态
+组件返回 recommendResult，content 中携带 KG QA payload
+MEP 异步框架保存该返回为任务 response_content
 业务方 POST /service action=query 轮询状态
-query 返回完成后，业务方读取 SFS 上的 gen.json
+query 返回完成后，业务方从 respData/recommendResult.content 获取结果
+SFS 上的 generatePath/gen.json 保留为兼容和排障结果文件
 ```
 
 ### 4.5 `action=create` / `action=query`
@@ -409,26 +413,27 @@ query 返回完成后，业务方读取 SFS 上的 gen.json
 - 携带 `taskId`、`basePath`、`fileInfo`、`generatePath` 等
 - 会触发组件推理
 - 组件需要写 `{generatePath}/gen.json`
+- 组件返回的 `recommendResult.content` 会被最新 MSG 异步框架保存为 `response_content`
 
 `action=query`：
 
 - 用于查询异步任务状态
-- 大概率由 MEP 异步框架或 MSG 网关处理，不一定进入组件 `calc()`
-- 当前 ragent 仍保留 `action=query` 的防御性兼容
+- 由 MEP 异步框架或 MSG 网关处理时，完成后返回任务 `response_content`
+- 当前 ragent 仍保留 `action=query` 的防御性兼容；如果 query 进入组件，会读取 `gen.json` 并返回 `content=[payload]`
 
 ### 4.6 `calc()` 返回值和 `gen.json` 的消费者不同
 
 `calc()` 返回值：
 
 - 消费者是 MEP 框架
-- 用于判断任务执行状态
+- 用于判断任务执行状态，并在最新 MSG 异步框架中作为任务 `response_content`
 - 结构必须符合 `recommendResult` 约定
-- 异步 create 成功时，`content` 通常为空
+- 异步 create 在组件执行完成后应返回 `content=[payload]`，这样业务侧 query 才能拿到结果
 
 `generatePath/gen.json`：
 
-- 消费者是业务方
-- 承载实际推理结果
+- 消费者可以是业务方或排障人员
+- 承载同一份推理结果，作为 SFS 兼容输出
 - 平台主要强制文件名和位置，不强制 JSON 内部 schema
 - schema 需要组件方和业务方对齐
 
@@ -549,7 +554,7 @@ generate_path.mkdir(parents=True, exist_ok=True)
 
 - `{generatePath}` 是否一定在组件容器内可写
 - 如果目录不存在，组件自行创建是否被允许
-- 写出的 `gen.json` 是否业务方可见
+- 写出的 `gen.json` 是否业务方可见；即使不可见，MSG query 也应通过 `response_content` 返回 payload
 
 ### 5.7 `gen.json` schema 需要业务方确认
 
@@ -584,7 +589,7 @@ MEP 不强制 `gen.json` 内部 schema。
 
 待业务方确认：
 
-- 是否读取 `answer` 字段
+- 是否从 MSG query 的 `respData[0].recommendResult.content[0].answer` 读取结果
 - 是否希望字段名是 `response`、`result`、`content` 或其他
 - 是否需要保留引用文件路径
 - 是否需要错误时也写 `gen.json`
@@ -688,6 +693,7 @@ python tools/build_mep_upload_packages.py --model-package bge-m3
 - embedding 服务可用
 - 外部 LLM 可用
 - `calc()` 返回 `recommendResult.code="0"`
+- `calc()` 返回 `recommendResult.content[0].answer`
 - `{generatePath}/gen.json` 被写出
 - `gen.json.answer` 有合理回答
 
@@ -837,7 +843,8 @@ find /data -maxdepth 3 -type f | head -50
 - MEP 平台日志中看到组件 `load()` 和 `calc()`
 - 组件写出 `generatePath/gen.json`
 - `action=query` 返回完成
-- 业务方能读取并解析 `gen.json.answer`
+- 业务方能从 `respData[0].recommendResult.content[0].answer` 解析结果
+- 如有 SFS 访问权限，也能读取并解析 `gen.json.answer`
 
 ## 7. 建议的代码增强
 

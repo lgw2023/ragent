@@ -304,15 +304,17 @@ python tools/export_mep_transformers_embedding_wheelhouse.py --clean
 
 ## 6. 接口契约
 
-当前 ragent 顶层返回约定仍保持：
+当前 ragent 顶层返回仍使用 `recommendResult` 契约：
 
 ```json
 {
   "recommendResult": {
     "code": "0",
     "des": "success",
-    "length": 0,
-    "content": []
+    "length": 1,
+    "content": [
+      {"code": "0", "des": "success", "answer": "..."}
+    ]
   }
 }
 ```
@@ -323,7 +325,7 @@ python tools/export_mep_transformers_embedding_wheelhouse.py --clean
 
 组件同步执行 KG 问答，将结果写入 `{generatePath}/gen.json`，然后返回 `recommendResult.code="0"`。
 
-异步 create 成功时，`content` 默认保持空数组，避免和平台异步查询语义冲突。
+按最新 MSG 异步框架文档，业务侧 `action=create` 的即时响应由框架返回，通常仍是空 `content` 的任务创建成功回执；组件 `calc()` 的实际返回会作为任务 `response_content` 保存，并在业务侧 `action=query` 完成时返回。因此 ragent 在 `action=create` 执行完成后会把 KG QA payload 放入 `recommendResult.content=[payload]`，同时保留 SFS 文件输出。
 
 `generatePath` 优先级：
 
@@ -336,9 +338,9 @@ python tools/export_mep_transformers_embedding_wheelhouse.py --clean
 
 理论上由 MEP 框架处理；当前 ragent 仍保留防御性兼容：
 
-- 找到 `gen.json`：返回 `code="0"`
+- 找到 `gen.json`：读取文件并返回 `code="0"`、`content=[payload]`
 - 目录存在但结果文件还不存在：返回 `code="2"`
-- 缺少路径或任务路径不存在：返回 `code="4"`
+- 缺少路径或任务路径不存在：返回 `code="6"`
 
 ### 6.3 直接调试请求
 

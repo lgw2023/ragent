@@ -1112,7 +1112,7 @@ def build_recommend_result(
 
 
 def build_recommend_success(
-    payload: dict[str, Any] | None = None,
+    payload: Any | None = None,
     *,
     include_content: bool = False,
 ) -> dict[str, Any]:
@@ -1122,6 +1122,11 @@ def build_recommend_success(
 
 def build_recommend_error(message: str, *, code: str = "3") -> dict[str, Any]:
     return build_recommend_result(code=code, des=str(message), content=[])
+
+
+def _read_result_payload(result_path: Path) -> Any:
+    with result_path.open(encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _candidate_result_paths_from_data(data: dict[str, Any]) -> list[Path]:
@@ -1167,11 +1172,18 @@ def build_action_query_response(req_data: Any) -> dict[str, Any]:
 
     for candidate in candidates:
         if candidate.is_file():
-            return build_recommend_success()
+            try:
+                payload = _read_result_payload(candidate)
+            except Exception as exc:
+                return build_recommend_error(
+                    f"failed to read task result file: {exc}",
+                    code="3",
+                )
+            return build_recommend_success(payload, include_content=True)
 
     if any(candidate.parent.exists() for candidate in candidates):
         return build_recommend_result(code="2", des="processing", content=[])
-    return build_recommend_error("task result path does not exist", code="4")
+    return build_recommend_error("task result path does not exist", code="6")
 
 
 __all__ = [

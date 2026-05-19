@@ -268,9 +268,11 @@ class CustomerModel:
             generate_path=normalized_request.generate_path,
             result_filename=normalized_request.result_filename,
         )
+        # The MSG async framework stores calc()'s return as response_content and
+        # exposes it on action=query after the task finishes.
         return build_recommend_success(
             payload,
-            include_content=normalized_request.action is None,
+            include_content=normalized_request.action in {None, "create"},
         )
 
     def calc(self, req_Data):

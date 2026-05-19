@@ -940,8 +940,8 @@ def test_build_action_query_response_checks_generate_path(tmp_path: Path):
     completed = build_action_query_response(req_data)
 
     assert completed["recommendResult"]["code"] == "0"
-    assert completed["recommendResult"]["length"] == 0
-    assert completed["recommendResult"]["content"] == []
+    assert completed["recommendResult"]["length"] == 1
+    assert completed["recommendResult"]["content"] == [{"code": "0"}]
 
 
 def test_build_action_query_response_checks_base_path_generate_subdir(tmp_path: Path):
@@ -955,13 +955,15 @@ def test_build_action_query_response_checks_base_path_generate_subdir(tmp_path: 
     )
 
     assert response["recommendResult"]["code"] == "0"
+    assert response["recommendResult"]["length"] == 1
+    assert response["recommendResult"]["content"] == [{"code": "0"}]
 
 
-def test_build_action_query_response_returns_missing_path_code_4(tmp_path: Path):
+def test_build_action_query_response_returns_missing_path_code_6(tmp_path: Path):
     response = build_action_query_response(
         {"data": {"action": "query", "basePath": str(tmp_path / "missing")}}
     )
 
-    assert response["recommendResult"]["code"] == "4"
+    assert response["recommendResult"]["code"] == "6"
     assert response["recommendResult"]["length"] == 0
     assert response["recommendResult"]["content"] == []
