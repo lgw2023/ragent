@@ -502,8 +502,12 @@ def validate_component_package_dir(
 
     process_path = component_dir / "process.py"
     process_text = process_path.read_text(encoding="utf-8")
+    ascend_call = "\n_bootstrap_ascend_toolkit_environment()\n"
+    offline_call = "\n_configure_default_offline_environment()\n"
     required_snippets = (
-        "_configure_default_offline_environment()",
+        ascend_call,
+        "/usr/local/Ascend/ascend-toolkit/set_env.sh",
+        offline_call,
         'os.environ["HF_HUB_OFFLINE"] = "1"',
         'os.environ["TRANSFORMERS_OFFLINE"] = "1"',
         'os.environ["HF_DATASETS_OFFLINE"] = "1"',
@@ -520,12 +524,14 @@ def validate_component_package_dir(
             f"snippet(s): {', '.join(missing)}"
         )
     if not (
-        process_text.index("_configure_default_offline_environment()")
+        process_text.index(ascend_call)
+        < process_text.index(offline_call)
         < process_text.index("ensure_mep_offline_requirements(_CODE_ROOT)")
         < process_text.index("bootstrap_mep_data_dependencies(_CODE_ROOT)")
         < process_text.index("from ragent.runtime_env import")
     ):
         raise ValueError(
-            "MEP component process.py must configure offline mode, install offline "
-            "requirements, and bootstrap data dependencies before importing ragent"
+            "MEP component process.py must source Ascend environment, configure "
+            "offline mode, install offline requirements, and bootstrap data "
+            "dependencies before importing ragent"
         )

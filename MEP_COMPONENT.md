@@ -273,7 +273,7 @@ embedding.batch_size=8
 
 ### 5.6 `data/` 自定义依赖
 
-MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 是生产入口。入口文件最开始会默认启用 strict offline 环境，设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1`、`PIP_CONFIG_FILE=/dev/null`，然后再执行离线依赖安装、依赖路径注入和后续 `ragent` 导入。确需排查镜像基础环境时，可显式设置 `MEP_STRICT_OFFLINE=0` 或 `RAGENT_MEP_STRICT_OFFLINE=0`。
+MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 是生产入口。入口文件会先尽早 source Ascend 环境脚本，默认优先使用 `/usr/local/Ascend/ascend-toolkit/set_env.sh`，并兼容 `latest` 和 ATB 路径；如需覆盖可设置 `RAGENT_ASCEND_SET_ENV_SH` 或 `RAGENT_ASCEND_ENV_SHS`，如需跳过可设置 `RAGENT_ASCEND_ENV_BOOTSTRAP=0`。随后入口文件会默认启用 strict offline 环境，设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1`、`PIP_CONFIG_FILE=/dev/null`，然后再执行离线依赖安装、依赖路径注入和后续 `ragent` 导入。确需排查镜像基础环境时，可显式设置 `MEP_STRICT_OFFLINE=0` 或 `RAGENT_MEP_STRICT_OFFLINE=0`。
 
 `data/` 被视为模型包随附的只读自定义数据目录。当前组件在导入 ragent 之前会尝试把以下路径加入 Python import path：
 

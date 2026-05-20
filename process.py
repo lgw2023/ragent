@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
+_DEFAULT_ASCEND_ENV_SCRIPTS = (
+    "/usr/local/Ascend/ascend-toolkit/set_env.sh",
+    "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh",
+    "/usr/local/Ascend/nnal/atb/set_env.sh",
+    "/usr/local/Ascend/nnal/atb/latest/atb/set_env.sh",
+)
+_SOURCED_ENV_IGNORED_KEYS = {"_", "SHLVL", "PWD", "OLDPWD"}
 
 
 def _strict_offline_enabled() -> bool:
@@ -22,6 +31,145 @@ def _strict_offline_enabled() -> bool:
     if normalized in _FALSE_VALUES:
         return False
     raise ValueError(f"Invalid MEP_STRICT_OFFLINE value: {raw_value!r}")
+
+
+def _normalize_optional_str(value: object | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _split_env_script_list(value: str) -> tuple[str, ...]:
+    raw_parts: list[str] = []
+    for chunk in value.replace(",", os.pathsep).split(os.pathsep):
+        normalized = chunk.strip()
+        if normalized:
+            raw_parts.append(normalized)
+    return tuple(raw_parts)
+
+
+def _ascend_environment_bootstrap_enabled() -> bool:
+    raw_value = os.getenv("RAGENT_ASCEND_ENV_BOOTSTRAP")
+    if raw_value is None:
+        return True
+    return raw_value.strip().lower() not in _FALSE_VALUES
+
+
+def _resolve_ascend_env_scripts() -> tuple[Path, ...]:
+    configured_single = _normalize_optional_str(os.getenv("RAGENT_ASCEND_SET_ENV_SH"))
+    configured_multi = _normalize_optional_str(os.getenv("RAGENT_ASCEND_ENV_SHS"))
+    if configured_single is not None:
+        raw_scripts = (configured_single,)
+    elif configured_multi is not None:
+        raw_scripts = _split_env_script_list(configured_multi)
+    else:
+        raw_scripts = _DEFAULT_ASCEND_ENV_SCRIPTS
+
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for raw_script in raw_scripts:
+        candidate = Path(raw_script).expanduser()
+        if not candidate.is_file():
+            continue
+        resolved_candidate = candidate.resolve()
+        if resolved_candidate in seen:
+            continue
+        resolved.append(resolved_candidate)
+        seen.add(resolved_candidate)
+    return tuple(resolved)
+
+
+def _load_env_after_sourcing_scripts(
+    script_paths: tuple[Path, ...],
+    base_env: dict[str, str],
+) -> dict[str, str]:
+    source_commands = "; ".join(
+        f"source {shlex.quote(str(script_path))} >/dev/null 2>&1 || true"
+        for script_path in script_paths
+    )
+    completed = subprocess.run(
+        ["bash", "-lc", f"{source_commands}; env -0"],
+        check=False,
+        env=base_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if completed.returncode != 0:
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        script_list = ", ".join(str(path) for path in script_paths)
+        raise RuntimeError(
+            f"failed to source Ascend environment scripts: {script_list}; {stderr}"
+        )
+
+    sourced_env: dict[str, str] = {}
+    for raw_item in completed.stdout.split(b"\0"):
+        if not raw_item or b"=" not in raw_item:
+            continue
+        key, value = raw_item.split(b"=", 1)
+        sourced_env[key.decode("utf-8", errors="surrogateescape")] = value.decode(
+            "utf-8",
+            errors="surrogateescape",
+        )
+    return sourced_env
+
+
+def _apply_sourced_environment(
+    sourced_env: dict[str, str],
+    base_env: dict[str, str],
+) -> tuple[str, ...]:
+    changed_keys: list[str] = []
+    for key, value in sourced_env.items():
+        if key in _SOURCED_ENV_IGNORED_KEYS or base_env.get(key) == value:
+            continue
+        os.environ[key] = value
+        changed_keys.append(key)
+    if sourced_env.get("PYTHONPATH") != base_env.get("PYTHONPATH"):
+        _prepend_sys_path_from_pythonpath(sourced_env.get("PYTHONPATH"))
+    return tuple(sorted(changed_keys))
+
+
+def _prepend_sys_path_from_pythonpath(raw_pythonpath: str | None) -> None:
+    if not raw_pythonpath:
+        return
+    entries = [entry for entry in raw_pythonpath.split(os.pathsep) if entry]
+    for entry in reversed(entries):
+        normalized = str(Path(entry).expanduser())
+        if normalized in sys.path:
+            sys.path.remove(normalized)
+        sys.path.insert(0, normalized)
+
+
+def _bootstrap_ascend_toolkit_environment() -> None:
+    if not _ascend_environment_bootstrap_enabled():
+        _log_bootstrap("Ascend environment bootstrap: disabled")
+        return
+
+    script_paths = _resolve_ascend_env_scripts()
+    if not script_paths:
+        _log_bootstrap("Ascend environment bootstrap: no set_env.sh found")
+        return
+
+    base_env = os.environ.copy()
+    try:
+        sourced_env = _load_env_after_sourcing_scripts(script_paths, base_env)
+    except Exception as exc:
+        _log_bootstrap(f"Ascend environment bootstrap failed: {exc}")
+        return
+
+    changed_keys = _apply_sourced_environment(sourced_env, base_env)
+    os.environ["RAGENT_ASCEND_ENV_BOOTSTRAPPED"] = "1"
+    os.environ["RAGENT_ASCEND_ENV_BOOTSTRAPPED_SCRIPTS"] = os.pathsep.join(
+        str(path) for path in script_paths
+    )
+    changed_preview = ", ".join(changed_keys[:12])
+    if len(changed_keys) > 12:
+        changed_preview += ", ..."
+    _log_bootstrap(
+        "sourced Ascend environment from: "
+        + ", ".join(str(path) for path in script_paths)
+        + (f"; updated env keys: {changed_preview}" if changed_preview else "")
+    )
 
 
 def _configure_default_offline_environment() -> None:
@@ -48,6 +196,7 @@ def _log_bootstrap(message: str) -> None:
     print(f"[ragent.mep_process.bootstrap] {message}", file=sys.stderr, flush=True)
 
 
+_bootstrap_ascend_toolkit_environment()
 _configure_default_offline_environment()
 
 _CODE_ROOT = Path(__file__).resolve().parent

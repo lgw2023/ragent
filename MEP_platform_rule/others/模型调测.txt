@@ -1,0 +1,127 @@
+
+模型调测
+
+ 2
+ 0
+ 0
+ 2800
+模型调测
+文档责任人已转移给 刘嘉诚 WX971608 。 2022-02-24 08:58 由 --  创建，于 2025-11-07 15:52 由 顾晓威  最后修改。 内容存疑 点我
+前提条件
+服务已经发布
+路由已经配置，参考：路由配置
+配置秘钥，参考：凭证管理
+ 
+
+步骤说明
+确认访问方式，MEP提供了从管理台调测模型，postman，单元测试用例（代码）等方式调测服务。
+根据需要选择请求入口，为了满足业务不同的调测需求，MEP提供了功能调测和性能调测入口。
+请求mep代码demo
+java https://wiki.huawei.com/domains/1465/wiki/6348/WIKI2022031100138
+python 
+ MepRequest-master.rar (6KB)
+
+javascript 
+(function () {
+    console.log(request);
+    var data = request.data;
+    console.log(data);
+    var queryParam = pm.request.url.query.members;
+    var path = pm.request.url.path;
+    var method = request.method;
+    var signKey = pm.environment.get('signkey');
+    var appid = pm.environment.get('appid');
+    var sign = calcSign(data, signKey, queryParam, path, method, appid);
+    pm.environment.set('Authorization', sign);
+})();
+
+function calcSign(data, signKey, queryParam, path, method, appid) {
+    var playload = '';
+    if (data !== null && data !== '' && data.length > 0) {
+        playload = playload + data;
+    }
+    console.log(playload);
+    var keys = [];
+    var values = new Map();
+    for (var k in queryParam) {
+        keys.push(queryParam[k].key);
+        values.set(queryParam[k].key, queryParam[k].value);
+    }
+    keys.sort();
+
+    var kv = [];
+    for (var v of keys) {
+        kv.push(v + '=' + values.get(v));
+    }
+
+    var paths = [];
+    var pathStr = '';
+    for (var kk in path) {
+        pathStr = pathStr + '/' + path[kk];
+    }
+    var queryStr = kv.join('&');
+    var timestamp = (new Date()).getTime().toString();
+    var signStr = method + '&' + pathStr + '&' + queryStr + '&' + playload.toString() + '&appid=' + appid + '&timestamp=' + timestamp;
+    console.log(signStr);
+    var sign = 'CLOUDSOA-HMAC-SHA256 appid=' + appid + ', timestamp=' + timestamp + ', signature=' + '"' + CryptoJS.enc.Base64.stringify(CryptoJS.HmacSHA256(signStr, signKey)).toString() + '"';
+    console.log(sign);
+    return sign;
+}
+性能测试，如果业务需要进行性能测试，可以先阅读：压测指导，同时MEP建议使用CloudTest方式压测（参考：Cloud Test），如果通过jMeter请不要直接在本地使用（本地使用会通过VPN，压测数据会有很大误差）
+常见错误码说明（具体参考：常见错误码）
+错误码	说明
+31	鉴权失败，一般是发送请求的时间和服务器时间存在很大间隔
+102	服务内部错误或者服务请求超时，排查方法参考：102问题排查
+105	
+请求鉴权不正确，确定appid和signkey是否正确
+
+202	模型路由失败，1、路由没有生效，路由配置生效时间不大于5分钟；2、路由不存在，请参照前提条件中的路由配置
+ 
+
+FAQ：
+ 
+
+1、appid和signkey怎么确定？
+当前业务使用的秘钥可以通过管理台新增，详情请参考：凭证管理
+
+ 
+
+2、调测结果一会成功，一会失败，是什么原因？
+如果是默认路由，确定是否存在重复路由，一定要保证默认路由唯一（调测环境建议bid使用自己的业务编码或者模型名称加以区分）。
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+分享
+添加收藏
+点赞 0
+
+内容存疑 点我
+
+评论
+大纲
+前提条件
+
+步骤说明
+
+FAQ：
+
+1、appid和signkey怎么确定？
+
+2、调测结果一会成功，一会失败，是什么原因？
+

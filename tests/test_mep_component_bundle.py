@@ -35,7 +35,10 @@ def test_root_component_files_exist():
     assert config == {"main_file": "process", "main_class": "CustomerModel"}
 
     process_text = (repo_root / "process.py").read_text(encoding="utf-8")
+    ascend_call = "\n_bootstrap_ascend_toolkit_environment()\n"
     offline_call = "\n_configure_default_offline_environment()\n"
+    assert ascend_call in process_text
+    assert "/usr/local/Ascend/ascend-toolkit/set_env.sh" in process_text
     assert offline_call in process_text
     assert 'os.environ["HF_HUB_OFFLINE"] = "1"' in process_text
     assert 'os.environ["TRANSFORMERS_OFFLINE"] = "1"' in process_text
@@ -43,11 +46,56 @@ def test_root_component_files_exist():
     assert 'os.environ["PIP_NO_INDEX"] = "1"' in process_text
     assert "PIP_CONFIG_FILE" in process_text
     assert (
-        process_text.index(offline_call)
+        process_text.index(ascend_call)
+        < process_text.index(offline_call)
         < process_text.index("ensure_mep_offline_requirements(_CODE_ROOT)")
         < process_text.index("bootstrap_mep_data_dependencies(_CODE_ROOT)")
         < process_text.index("from ragent.runtime_env import")
     )
+
+
+def test_root_process_ascend_bootstrap_sources_configured_script(
+    monkeypatch,
+    tmp_path: Path,
+):
+    repo_root = Path(__file__).resolve().parents[1]
+    process_path = repo_root / "process.py"
+
+    spec = importlib.util.spec_from_file_location(
+        "ragent_root_process_ascend_bootstrap_test",
+        process_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    set_env_script = tmp_path / "set_env.sh"
+    set_env_script.write_text(
+        "\n".join(
+            [
+                "export RAGENT_TEST_ASCEND_ENV=loaded",
+                'export PYTHONPATH="/fake/ascend/python:${PYTHONPATH:-}"',
+                'export LD_LIBRARY_PATH="/fake/ascend/lib:${LD_LIBRARY_PATH:-}"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RAGENT_ASCEND_SET_ENV_SH", str(set_env_script))
+    monkeypatch.setenv("PYTHONPATH", "/existing/python")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/existing/lib")
+    monkeypatch.delenv("RAGENT_TEST_ASCEND_ENV", raising=False)
+    monkeypatch.delenv("RAGENT_ASCEND_ENV_BOOTSTRAPPED", raising=False)
+    monkeypatch.delenv("RAGENT_ASCEND_ENV_BOOTSTRAPPED_SCRIPTS", raising=False)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    module._bootstrap_ascend_toolkit_environment()
+
+    assert os.environ["RAGENT_TEST_ASCEND_ENV"] == "loaded"
+    assert os.environ["PYTHONPATH"].split(os.pathsep)[0] == "/fake/ascend/python"
+    assert sys.path[0] == "/fake/ascend/python"
+    assert os.environ["LD_LIBRARY_PATH"].split(os.pathsep)[0] == "/fake/ascend/lib"
+    assert os.environ["RAGENT_ASCEND_ENV_BOOTSTRAPPED"] == "1"
 
 
 def test_mep_data_dependency_bootstrap_uses_runtime_sibling_data_dir(
