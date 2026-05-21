@@ -106,7 +106,6 @@ modelDir/
     pytorch_model.bin
     1_Pooling/
   data/
-    config/
     kg/
     deps/
     samples/
@@ -118,7 +117,7 @@ modelDir/
 - `<runtime_root>/data`
 - `<runtime_root>/meta`
 
-`model/` 本身就是 Hugging Face 模型目录；组件可读取的只读自定义数据放在 `data/`，例如配置、KG 快照、依赖包、样例请求等。因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念。
+`model/` 本身就是 Hugging Face 模型目录，应尽量保持标准 Hugging Face 权重目录形态。组件可读取的只读自定义数据放在 `data/`，例如 KG 快照、依赖包、样例请求等。因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念；也不要把镜像适配、vLLM 启动参数等运行时策略放进模型权重目录。
 
 当前仓库内的模型包源码放在：
 
@@ -132,8 +131,6 @@ mep/model_packages/bge-m3/modelDir/
     pytorch_model.bin
     1_Pooling/
   data/
-    config/
-      embedding.properties
     kg/
       sample_kg/
     deps/
@@ -224,7 +221,7 @@ model_path = process_model_base + "/" + os.environ.get("path_appendix", "")
 
 ### 5.4 embedding 运行方式
 
-当前 ragent 保留两种 embedding 模式。
+当前 ragent 保留三种 embedding 模式，并明确区分“集成覆盖”和“MEP 默认运行方式”。
 
 第一种：外部 embedding API。
 
@@ -236,32 +233,37 @@ EMBEDDING_MODEL_URL
 EMBEDDING_MODEL_KEY
 ```
 
-则组件直接调用外部 embedding API。
+则组件直接调用外部 embedding API。这是显式集成覆盖，不是当前 MEP 交付默认方式。
 
-第二种：本地 transformers embedding 推理。
+第二种：组件同容器 vLLM embedding 服务。
 
-如果没有完整外部 embedding 配置，`CustomerModel.load()` 会优先读取 `data/config/embedding.properties`，再通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 注入本地 embedding 函数。旧的 `model/sysconfig.properties` 仍作为兼容兜底，但新模型包不再把组件配置文件放入 `model/`。
+如果没有完整外部 embedding 配置，`CustomerModel.load()` 会通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 在同一个 MEP 容器内启动本地 vLLM OpenAI-compatible embedding 服务，并把组件内部 embedding 调用指向该本地端点。vLLM 启动参数、Ascend/ATB 运行库适配、默认端口和服务名等属于组件包职责；模型包里的 `model/` 只提供标准 Hugging Face 模型文件。
 
-权威测试结果显示，新目标镜像没有可用的 vLLM OpenAI embedding server 入口，但 `transformers + torch_npu` 能在 `npu:0` 上跑通本地 Hugging Face embedding。当前默认模型包为 **Qwen3-Embedding-4B**（`mep/model_packages/qwen3-embedding-4b/`），放弃 vLLM，直接在组件进程内加载模型。
+这是当前 **Qwen3-Embedding-4B**（`mep/model_packages/qwen3-embedding-4b/`）在 MEP 上的主路径。新的允许镜像已验证可通过 vLLM 运行 Qwen3-Embedding-4B embedding 服务；相比进程内 transformers 推理，vLLM 是性能和稳定性优先的默认选择。
 
-对应配置位于 `mep/model_packages/qwen3-embedding-4b/modelDir/data/config/embedding.properties`：
+第三种：本地 transformers embedding 推理。
+
+`transformers + torch_npu` 仍保留为降级路径，仅在 vLLM 不可用、被显式禁用，或需要排查镜像基础环境时使用。
+
+组件包默认按以下语义启动 Qwen3-Embedding-4B：
 
 ```text
 model.name=Qwen/Qwen3-Embedding-4B
-embedding.runtime=transformers
+embedding.runtime=vllm
 embedding.dimensions=2560
 embedding.max_token_size=8192
-embedding.device=npu:0
-embedding.pooling=lasttoken
-embedding.normalize=true
-embedding.batch_size=4
+embedding.trust_remote_code=true
+vllm.served_model_name=qwen3-embedding-4b-local
+vllm.runner=pooling
+vllm.bind_host=127.0.0.1
+vllm.host=127.0.0.1
 ```
 
-Qwen3 使用 **last-token pooling** 与 **left padding**（与官方 README 一致）。`embedding.dimensions` 支持 MRL 截断（32–2560）。从旧版 bge-m3（256 维）切换后，需按新维度重建 KG 向量库。
+这些默认值应来自组件包代码或组件包随附的 runtime profile，而不是写入标准 Hugging Face 模型目录。Qwen3 使用 embedding/pooling 任务。`embedding.dimensions` 支持 MRL 截断（32–2560）。从旧版 bge-m3（256 维）切换后，需按新维度重建 KG 向量库。
 
 历史包 `bge-m3` 仍保留在 `mep/model_packages/bge-m3/`，使用 CLS pooling、`embedding.dimensions=256`。
 
-`ragent.mep_embedding_runtime` 仍保留 vLLM 启动逻辑用于兼容旧包，但模型包默认走 transformers。加载模型前会自动尝试加载：
+`ragent.mep_embedding_runtime` 会按组件包内置 runtime profile 和环境变量覆盖启动 vLLM 或 transformers fallback。旧的 `data/config/embedding.properties` / `model/sysconfig.properties` 只作为历史包兼容输入；Qwen3-Embedding-4B 新路径不再依赖模型包内的 embedding runtime 配置。加载本地 Ascend runtime 前会自动尝试加载：
 
 ```text
 /usr/local/Ascend/ascend-toolkit/set_env.sh
@@ -272,7 +274,7 @@ Qwen3 使用 **last-token pooling** 与 **left padding**（与官方 README 一�
 
 ### 5.5 本地推理能力
 
-当前方向不再依赖组件内 vLLM 子进程。本地 Qwen3-Embedding-4B（或兼容的旧 bge-m3 包）在组件进程内完成 embedding，减少端口占用、子进程清理和 OpenAI-compatible server 兼容性风险。
+当前方向依赖组件内 vLLM 子进程作为主运行方式。本地 Qwen3-Embedding-4B 在同一个 MEP 容器内通过 vLLM OpenAI-compatible embedding 服务完成 embedding；transformers 只作为 fallback，用于镜像或 vLLM 栈不可用时保底。
 
 ### 5.6 `data/` 自定义依赖
 
@@ -293,7 +295,7 @@ data/deps/wheelhouse/*.whl
 
 这用于承载目标镜像中没有的轻量 Python 依赖。`<platform-tag>` 形如 `linux-arm64-py3.9`；目标 Ascend 910B MEP 镜像当前是 `linux-arm64-py3.9`。运行时会先查找 `requirements-<platform-tag>.txt` 和 `constraints-<platform-tag>.txt`，并用匹配的 `wheelhouse/<platform-tag>/` 执行一次 `pip install --no-index`。已安装且版本一致的镜像包会被跳过；缺失的应用依赖和 native wheel 会从本地 wheelhouse 安装。
 
-当前 transformers embedding wheelhouse 由以下脚本解析生成：
+transformers fallback 的离线 wheelhouse 由以下脚本解析生成：
 
 ```bash
 python tools/export_mep_transformers_embedding_wheelhouse.py --clean
@@ -558,8 +560,6 @@ python /Volumes/SSD1/ragent/tools/preflight_mep_upload_packages.py \
     pytorch_model.bin
     1_Pooling/
   data/
-    config/
-      embedding.properties
     kg/
       <kg snapshot>/
     deps/

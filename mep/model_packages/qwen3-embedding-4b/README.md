@@ -5,8 +5,8 @@ MEP 独立模型包，压缩包第一层必须是 `modelDir/`。
 ## 结构
 
 - `modelDir/meta/type.mf`：MEP 元信息
-- `modelDir/model/`：`Qwen/Qwen3-Embedding-4B` Hugging Face 权重（`config.json`、`tokenizer.json`、`model*.safetensors` 等）
-- `modelDir/data/config/embedding.properties`：本地 `transformers + torch_npu` embedding 配置
+- `modelDir/model/`：`Qwen/Qwen3-Embedding-4B` 标准 Hugging Face 权重目录（`config.json`、`tokenizer.json`、`model*.safetensors` 等）
+- `modelDir/data/`：组件可读取的只读 KG、依赖和样例数据；vLLM 启动和镜像 runtime 适配由组件包负责
 - `modelDir/data/kg/`、`data/deps/`、`data/samples/`：与 bge-m3 包共用（软链），离线 wheelhouse 与示例 KG 快照
 
 ## 本地权重
@@ -19,17 +19,9 @@ MEP 独立模型包，压缩包第一层必须是 `modelDir/`。
 
 交付 MEP 前请用物化拷贝或 `rsync -aL` 把权重放进 `modelDir/model/`，避免上传包仍依赖开发者机器路径。
 
-## embedding.properties
+## embedding runtime
 
-```text
-model.name=Qwen/Qwen3-Embedding-4B
-embedding.runtime=transformers
-embedding.dimensions=2560
-embedding.pooling=lasttoken
-embedding.device=npu:0
-```
-
-Qwen3 使用 **last-token pooling** 与 **left padding**（见官方 README）。支持 MRL：可在 `embedding.dimensions` 中配置更小的输出维度（32–2560）。
+Qwen3 在 MEP 上默认由组件同容器启动 vLLM OpenAI-compatible embedding 服务。镜像 runtime 适配、vLLM 命令参数、Ascend/ATB 环境处理和 transformers fallback 都属于组件包职责；模型包中的 `model/` 保持标准 Hugging Face 目录。支持 MRL：组件可配置更小的输出维度（32–2560）。
 
 **注意**：从 bge-m3（256 维）切换后，既有 KG 向量库需按新维度重新建索引。
 
