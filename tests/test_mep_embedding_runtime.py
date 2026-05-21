@@ -210,6 +210,19 @@ def test_resolve_embedding_launch_config_prefers_data_config(tmp_path: Path):
     assert config.config_path == config_path.resolve()
 
 
+def test_resolve_sentence_transformers_pooling_detects_lasttoken(tmp_path: Path):
+    pooling_dir = tmp_path / "1_Pooling"
+    pooling_dir.mkdir(parents=True)
+    (pooling_dir / "config.json").write_text(
+        json.dumps({"pooling_mode_lasttoken": True}),
+        encoding="utf-8",
+    )
+
+    resolved = mep_embedding_runtime._resolve_sentence_transformers_pooling(tmp_path)
+
+    assert resolved == "lasttoken"
+
+
 def test_resolve_embedding_launch_config_reads_transformers_runtime(tmp_path: Path):
     model_dir = tmp_path / "model"
     model_dir.mkdir(parents=True)

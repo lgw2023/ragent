@@ -242,21 +242,24 @@ EMBEDDING_MODEL_KEY
 
 如果没有完整外部 embedding 配置，`CustomerModel.load()` 会优先读取 `data/config/embedding.properties`，再通过 `ragent.mep_embedding_runtime.bootstrap_local_embedding_runtime()` 注入本地 embedding 函数。旧的 `model/sysconfig.properties` 仍作为兼容兜底，但新模型包不再把组件配置文件放入 `model/`。
 
-权威测试结果显示，新目标镜像没有可用的 vLLM OpenAI embedding server 入口，但 `transformers + torch_npu` 能在 `npu:0` 上跑通 BGE-M3。因此 bge-m3 模型包默认放弃 vLLM，直接加载本地 Hugging Face 模型目录：
+权威测试结果显示，新目标镜像没有可用的 vLLM OpenAI embedding server 入口，但 `transformers + torch_npu` 能在 `npu:0` 上跑通本地 Hugging Face embedding。当前默认模型包为 **Qwen3-Embedding-4B**（`mep/model_packages/qwen3-embedding-4b/`），放弃 vLLM，直接在组件进程内加载模型。
 
-对应配置位于 `mep/model_packages/bge-m3/modelDir/data/config/embedding.properties`：
+对应配置位于 `mep/model_packages/qwen3-embedding-4b/modelDir/data/config/embedding.properties`：
 
 ```text
+model.name=Qwen/Qwen3-Embedding-4B
 embedding.runtime=transformers
-embedding.dimensions=256
+embedding.dimensions=2560
 embedding.max_token_size=8192
 embedding.device=npu:0
-embedding.pooling=cls
+embedding.pooling=lasttoken
 embedding.normalize=true
-embedding.batch_size=8
+embedding.batch_size=4
 ```
 
-本地 embedding 实现按模型包中的 `1_Pooling/config.json` 使用 CLS pooling，并在截断到 `embedding.dimensions=256` 后做 normalize，保持现有 KG 向量维度一致。
+Qwen3 使用 **last-token pooling** 与 **left padding**（与官方 README 一致）。`embedding.dimensions` 支持 MRL 截断（32–2560）。从旧版 bge-m3（256 维）切换后，需按新维度重建 KG 向量库。
+
+历史包 `bge-m3` 仍保留在 `mep/model_packages/bge-m3/`，使用 CLS pooling、`embedding.dimensions=256`。
 
 `ragent.mep_embedding_runtime` 仍保留 vLLM 启动逻辑用于兼容旧包，但模型包默认走 transformers。加载模型前会自动尝试加载：
 
@@ -269,7 +272,7 @@ embedding.batch_size=8
 
 ### 5.5 本地推理能力
 
-当前方向不再依赖组件内 vLLM 子进程。本地 BGE-M3 embedding 在组件进程内完成，减少端口占用、子进程清理和 OpenAI-compatible server 兼容性风险。
+当前方向不再依赖组件内 vLLM 子进程。本地 Qwen3-Embedding-4B（或兼容的旧 bge-m3 包）在组件进程内完成 embedding，减少端口占用、子进程清理和 OpenAI-compatible server 兼容性风险。
 
 ### 5.6 `data/` 自定义依赖
 
@@ -438,13 +441,13 @@ SFS 异步 create：
 推荐先用装配脚本生成接近 MEP 平台的本地运行时目录：
 
 ```bash
-python /Volumes/SSD1/ragent/tools/build_mep_layout.py --model-package bge-m3
+python /Volumes/SSD1/ragent/tools/build_mep_layout.py --model-package qwen3-embedding-4b
 
 set -a
 source /Volumes/SSD1/ragent/.env
 set +a
 
-python /Volumes/SSD1/ragent/.mep_build/bge-m3/runtime/component/run_mep_local.py \
+python /Volumes/SSD1/ragent/.mep_build/qwen3-embedding-4b/runtime/component/run_mep_local.py \
   --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
 ```
 
@@ -454,7 +457,7 @@ python /Volumes/SSD1/ragent/.mep_build/bge-m3/runtime/component/run_mep_local.py
 
 ```bash
 python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
-  --model-package bge-m3 \
+  --model-package qwen3-embedding-4b \
   --materialize \
   --archive-format zip
 ```
@@ -463,11 +466,17 @@ python /Volumes/SSD1/ragent/tools/build_mep_layout.py \
 
 如果显式指定 `--archive-output`，输出路径必须位于 runtime 根目录之外，并且必须是文件路径而不是已有目录；装配脚本会拒绝把归档写到 runtime 内部，避免归档过程中把自身也打入包中。装配脚本会校验 `model/` 本身是 Hugging Face 模型目录，防止误把模型文件继续套进额外子目录。
 
+首次克隆仓库后，如 `modelDir/model` 未就绪，可执行：
+
+```bash
+tools/link_mep_qwen3_embedding_model.sh
+```
+
 兼容调试时仍可使用显式 env override 或直接传 `model_root`：
 
 ```bash
-export RAGENT_MEP_MODEL_DIR=/Volumes/SSD1/ragent/mep/model_packages/bge-m3/modelDir/model
-export RAGENT_MEP_DATA_DIR=/Volumes/SSD1/ragent/mep/model_packages/bge-m3/modelDir/data
+export RAGENT_MEP_MODEL_DIR=/Volumes/SSD1/ragent/mep/model_packages/qwen3-embedding-4b/modelDir/model
+export RAGENT_MEP_DATA_DIR=/Volumes/SSD1/ragent/mep/model_packages/qwen3-embedding-4b/modelDir/data
 python /Volumes/SSD1/ragent/run_mep_local.py \
   --request /Volumes/SSD1/ragent/example/mep_requests/sfs_create_request.json
 ```
@@ -477,13 +486,13 @@ python /Volumes/SSD1/ragent/run_mep_local.py \
 `tools/build_mep_layout.py` 用于本地 MEP 运行时仿真；真正准备平台上传目录时，使用独立的上传包构建脚本：
 
 ```bash
-python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py --model-package bge-m3
+python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py --model-package qwen3-embedding-4b
 ```
 
 默认输出：
 
 ```text
-/Volumes/SSD1/ragent/.mep_upload/bge-m3/
+/Volumes/SSD1/ragent/.mep_upload/qwen3-embedding-4b/
   component_package/
     config.json
     package.json
@@ -504,7 +513,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py --model-package b
 
 ```bash
 python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
-  --model-package bge-m3 \
+  --model-package qwen3-embedding-4b \
   --include-local-runner
 ```
 
@@ -512,11 +521,11 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 
 ```bash
 python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
-  --model-package bge-m3 \
+  --model-package qwen3-embedding-4b \
   --archive-format zip
 ```
 
-归档会分别写在 `.mep_upload/bge-m3/` 下：组件归档根目录直接是 `config.json`、`process.py`、`ragent/` 等文件；模型归档根目录直接是 `modelDir/`。手工压缩时也应保持同样结构，尤其模型包 zip 的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。
+归档会分别写在 `.mep_upload/qwen3-embedding-4b/` 下：组件归档根目录直接是 `config.json`、`process.py`、`ragent/` 等文件；模型归档根目录直接是 `modelDir/`。手工压缩时也应保持同样结构，尤其模型包 zip 的第一层必须是 `modelDir/`，不能额外套一层 `model_package/`。
 
 如需把两个上传归档写到其他目录，可在 `--archive-format` 基础上追加 `--archive-output-dir <dir>`。脚本会拒绝把归档写进正在打包的 `component_package/` 或 `model_package/` 内部，避免归档过程把自身也打入包中；自定义归档目录同样不能覆盖仓库根、组件源码或源模型包。
 
@@ -526,10 +535,10 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 
 ```bash
 python /Volumes/SSD1/ragent/tools/preflight_mep_upload_packages.py \
-  --upload-root /Volumes/SSD1/ragent/.mep_upload/bge-m3 \
+  --upload-root /Volumes/SSD1/ragent/.mep_upload/qwen3-embedding-4b \
   --platform-tag linux-arm64-py3.9 \
-  --component-archive /Volumes/SSD1/ragent/.mep_upload/bge-m3/ragent_inference_mep-component.zip \
-  --model-archive /Volumes/SSD1/ragent/.mep_upload/bge-m3/bge-m3-model.zip
+  --component-archive /Volumes/SSD1/ragent/.mep_upload/qwen3-embedding-4b/ragent_inference_mep-component.zip \
+  --model-archive /Volumes/SSD1/ragent/.mep_upload/qwen3-embedding-4b/qwen3-embedding-4b-model.zip
 ```
 
 ### 10.3 参照样例的目标容器布局

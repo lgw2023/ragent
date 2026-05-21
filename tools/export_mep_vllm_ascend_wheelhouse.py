@@ -20,7 +20,7 @@ DEFAULT_OUTPUT_DIR = (
     Path(__file__).resolve().parents[1]
     / "mep"
     / "model_packages"
-    / "bge-m3"
+    / "qwen3-embedding-4b"
     / "modelDir"
     / "data"
     / "deps"

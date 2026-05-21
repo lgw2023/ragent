@@ -1,0 +1,3 @@
+Manifest-Version:1.0.0
+Model-Type:python
+Model-Algorithm:Qwen3-Embedding-4B

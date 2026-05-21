@@ -40,7 +40,7 @@ _MANAGED_ENV_VARS = (
     "EMBEDDING_DIMENSIONS",
 )
 _LOCAL_PROVIDER = "custom_openai"
-_DEFAULT_MODEL_NAME = "BAAI/bge-m3"
+_DEFAULT_MODEL_NAME = "Qwen/Qwen3-Embedding-4B"
 _DEFAULT_API_KEY = "EMPTY"
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_BIND_HOST = _DEFAULT_HOST
@@ -1461,6 +1461,8 @@ def _resolve_sentence_transformers_pooling(model_path: Path) -> str:
         payload = json.loads(pooling_config_path.read_text(encoding="utf-8"))
     except Exception:
         return "cls"
+    if payload.get("pooling_mode_lasttoken") is True:
+        return "lasttoken"
     if payload.get("pooling_mode_cls_token") is True:
         return "cls"
     if payload.get("pooling_mode_mean_tokens") is True:
@@ -1512,10 +1514,15 @@ class _LocalTransformersEmbeddingModel:
                     f"Configured embedding device {device!r}, but torch.npu is not available."
                 )
 
+            tokenizer_kwargs: dict[str, Any] = {
+                "local_files_only": True,
+                "use_fast": True,
+            }
+            if self._pooling == "lasttoken":
+                tokenizer_kwargs["padding_side"] = "left"
             tokenizer = AutoTokenizer.from_pretrained(
                 str(self.config.model_path),
-                local_files_only=True,
-                use_fast=True,
+                **tokenizer_kwargs,
             )
             model = AutoModel.from_pretrained(
                 str(self.config.model_path),
@@ -1546,6 +1553,16 @@ class _LocalTransformersEmbeddingModel:
             raise RuntimeError("local transformers embedding model is not loaded")
 
         last_hidden = outputs.last_hidden_state.float()
+        if self._pooling == "lasttoken":
+            left_padding = attention_mask[:, -1].sum() == attention_mask.shape[0]
+            if left_padding:
+                return last_hidden[:, -1]
+            sequence_lengths = attention_mask.sum(dim=1) - 1
+            batch_size = last_hidden.shape[0]
+            return last_hidden[
+                torch.arange(batch_size, device=last_hidden.device),
+                sequence_lengths,
+            ]
         if self._pooling == "cls":
             return last_hidden[:, 0]
         if self._pooling == "max":

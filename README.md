@@ -52,7 +52,7 @@ the final platform runtime layout. Use [tools/build_mep_layout.py](tools/build_m
 to assemble a local MEP-like runtime under `.mep_build/`:
 
 ```bash
-python tools/build_mep_layout.py --model-package bge-m3
+python tools/build_mep_layout.py --model-package qwen3-embedding-4b
 ```
 
 The assembled runtime has sibling `component/`, `model/`, `data/`, and `meta/`
@@ -64,7 +64,7 @@ For a materialized local handoff artifact, copy the model package directories
 and archive the assembled runtime:
 
 ```bash
-python tools/build_mep_layout.py --model-package bge-m3 --materialize --archive-format zip
+python tools/build_mep_layout.py --model-package qwen3-embedding-4b --materialize --archive-format zip
 ```
 
 If `--archive-output` is provided, point it outside the assembled runtime root
@@ -77,11 +77,11 @@ For MEP platform upload, build the component package and model package upload
 directories instead:
 
 ```bash
-python tools/build_mep_upload_packages.py --model-package bge-m3
+python tools/build_mep_upload_packages.py --model-package qwen3-embedding-4b
 ```
 
-This writes `.mep_upload/bge-m3/component_package/` and
-`.mep_upload/bge-m3/model_package/modelDir/`. The component package contains the
+This writes `.mep_upload/qwen3-embedding-4b/component_package/` and
+`.mep_upload/qwen3-embedding-4b/model_package/modelDir/`. The component package contains the
 MEP entry files and `ragent/`, and excludes local-only files such as
 `run_mep_local.py` by default. Add `--include-local-runner` only when a debug
 runner must be bundled. The model package upload directory always has
@@ -91,7 +91,7 @@ also have `modelDir/` at the archive root.
 To generate upload-ready archives with the same roots:
 
 ```bash
-python tools/build_mep_upload_packages.py --model-package bge-m3 --archive-format zip
+python tools/build_mep_upload_packages.py --model-package qwen3-embedding-4b --archive-format zip
 ```
 
 By default these archives are written under `.mep_upload/<model-package>/`.
@@ -104,7 +104,7 @@ Before upload, run the preflight checker for the target Ascend Python platform:
 
 ```bash
 python tools/preflight_mep_upload_packages.py \
-  --upload-root .mep_upload/bge-m3 \
+  --upload-root .mep_upload/qwen3-embedding-4b \
   --platform-tag linux-arm64-py3.9
 ```
 

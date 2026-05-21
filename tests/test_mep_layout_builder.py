@@ -52,11 +52,21 @@ def _write_fake_repo(repo_root: Path) -> None:
 
 def test_build_mep_layout_creates_platform_shaped_runtime(tmp_path: Path):
     repo_root = Path(__file__).resolve().parents[1]
+    model_root = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "qwen3-embedding-4b"
+        / "modelDir"
+        / "model"
+    )
+    if not (model_root / "config.json").exists():
+        pytest.skip("Qwen3-Embedding-4B local model is not linked")
     output = tmp_path / "runtime"
 
     result = build_mep_layout(
         repo_root=repo_root,
-        model_package="bge-m3",
+        model_package="qwen3-embedding-4b",
         output=output,
     )
 
@@ -71,7 +81,7 @@ def test_build_mep_layout_creates_platform_shaped_runtime(tmp_path: Path):
     assert (output / "meta").is_symlink()
     assert (output / "model" / "config.json").exists()
     assert (output / "model" / "tokenizer.json").exists()
-    assert (output / "model" / "pytorch_model.bin").exists()
+    assert (output / "model" / "model.safetensors.index.json").exists()
     assert (output / "data" / "config" / "embedding.properties").exists()
     assert (output / "data" / "deps" / "README.md").exists()
     assert (output / "data" / "kg" / "sample_kg").is_dir()

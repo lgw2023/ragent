@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_MODEL_PACKAGE = "bge-m3"
+DEFAULT_MODEL_PACKAGE = "qwen3-embedding-4b"
 DEFAULT_PLATFORM_TAG = "linux-arm64-py3.9"
 DEFAULT_HF_MODEL_ID = "knowledgator/gliner-x-small"
 DEFAULT_HF_MODEL_DIR_NAME = "knowledgator-gliner-x-small"

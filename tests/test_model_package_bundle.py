@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_bge_m3_model_package_layout_exists():
     repo_root = Path(__file__).resolve().parents[1]
@@ -27,3 +29,24 @@ def test_bge_m3_model_package_layout_exists():
     assert (package_root / "model" / "pytorch_model.bin").exists()
     assert (package_root / "model" / "1_Pooling" / "config.json").exists()
     assert not (package_root / "model" / "baai_bge_m3" / "config.json").exists()
+
+
+def test_qwen3_embedding_4b_model_package_layout_exists():
+    repo_root = Path(__file__).resolve().parents[1]
+    package_root = repo_root / "mep" / "model_packages" / "qwen3-embedding-4b" / "modelDir"
+
+    assert package_root.exists()
+    assert (package_root / "meta" / "type.mf").exists()
+    assert (package_root / "data" / "config" / "embedding.properties").exists()
+    if not (package_root / "model" / "config.json").exists():
+        pytest.skip("Qwen3-Embedding-4B local model is not linked")
+    assert (package_root / "model" / "config.json").exists()
+    assert (package_root / "model" / "tokenizer.json").exists()
+    assert (package_root / "model" / "model.safetensors.index.json").exists()
+    assert (package_root / "model" / "1_Pooling" / "config.json").exists()
+    properties = (package_root / "data" / "config" / "embedding.properties").read_text(
+        encoding="utf-8"
+    )
+    assert "model.name=Qwen/Qwen3-Embedding-4B" in properties
+    assert "embedding.pooling=lasttoken" in properties
+    assert "embedding.dimensions=2560" in properties

@@ -319,7 +319,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model-package",
-        default="bge-m3",
+        default="qwen3-embedding-4b",
         help="Name under mep/model_packages/ to package.",
     )
     parser.add_argument(

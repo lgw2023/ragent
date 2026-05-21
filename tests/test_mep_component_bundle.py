@@ -578,6 +578,37 @@ def test_package_json_uses_non_placeholder_scope():
     assert package["name"] == "ragent_inference_mep"
 
 
+def test_qwen3_embedding_4b_properties_match_transformers_runtime():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_path = (
+        repo_root
+        / "mep"
+        / "model_packages"
+        / "qwen3-embedding-4b"
+        / "modelDir"
+        / "data"
+        / "config"
+        / "embedding.properties"
+    )
+    properties = {}
+    for line in config_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        properties[key] = value
+
+    assert properties["model.name"] == "Qwen/Qwen3-Embedding-4B"
+    assert properties["model.relative_path"] == "."
+    assert properties["embedding.runtime"] == "transformers"
+    assert properties["embedding.dimensions"] == "2560"
+    assert properties["embedding.max_token_size"] == "8192"
+    assert properties["embedding.device"] == "npu:0"
+    assert properties["embedding.pooling"] == "lasttoken"
+    assert properties["embedding.normalize"] == "true"
+    assert properties["embedding.batch_size"] == "4"
+
+
 def test_bge_m3_embedding_properties_match_validated_transformers_runtime():
     repo_root = Path(__file__).resolve().parents[1]
     config_path = (

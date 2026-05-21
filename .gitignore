@@ -21,6 +21,7 @@ vendor/mineru-models/
 vendor/modelscope/
 vendor/wheelhouse/
 ragent-offline*.tar*
+mep/model_packages/qwen3-embedding-4b/modelDir/model
 
 # Python 编译文件
 __pycache__/

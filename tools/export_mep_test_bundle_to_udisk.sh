@@ -11,7 +11,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 DEST="${DEST:-/Volumes/Udisk2/ragent}"
-MODEL_PACKAGE="${MODEL_PACKAGE:-bge-m3}"
+MODEL_PACKAGE="${MODEL_PACKAGE:-qwen3-embedding-4b}"
 PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.9}"
 
 RSYNC_EXCLUDES=(

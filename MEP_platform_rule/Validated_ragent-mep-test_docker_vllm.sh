@@ -24,7 +24,7 @@ fi
 HOST_TEST_DIR="${HOST_TEST_DIR:-$DEFAULT_HOST_TEST_DIR}"
 CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"
 RUNTIME_DIR="${RUNTIME_DIR:-/tmp/ragent-mep-runtime}"
-MODEL_PACKAGE="${MODEL_PACKAGE:-bge-m3}"
+MODEL_PACKAGE="${MODEL_PACKAGE:-qwen3-embedding-4b}"
 MODEL_PATH="${MODEL_PATH:-}"
 IMAGE="${IMAGE:-swr.cn-southwest-2.myhuaweicloud.com/mep-dev-ga/vllm_ascend:910B_0.13.0rc0.20260417141425}"
 CONTAINER_NAME="${CONTAINER_NAME:-vllm_ascend_910b_8cards}"

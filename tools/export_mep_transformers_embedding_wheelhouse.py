@@ -15,7 +15,7 @@ MODEL_DEPS_DIR = (
     PROJECT_ROOT
     / "mep"
     / "model_packages"
-    / "bge-m3"
+    / "qwen3-embedding-4b"
     / "modelDir"
     / "data"
     / "deps"
