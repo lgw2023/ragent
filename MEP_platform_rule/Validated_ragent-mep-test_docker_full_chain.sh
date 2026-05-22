@@ -504,6 +504,7 @@ source_if_exists() {
 }
 
 load_ascend_runtime_environment() {
+  local requested_atb_home_path="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
   local raw_scripts
   if [ -n "${RAGENT_ASCEND_SET_ENV_SH:-}" ]; then
     raw_scripts="$RAGENT_ASCEND_SET_ENV_SH"
@@ -532,7 +533,7 @@ load_ascend_runtime_environment() {
     fi
     echo "warning: no Ascend runtime env script was sourced; checked: $raw_scripts"
   fi
-  export ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+  export ATB_HOME_PATH="$requested_atb_home_path"
   export ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
   local atb_lib_path="${ATB_HOME_PATH}/${ATB_CXX_ABI}/lib"
   case ":${LD_LIBRARY_PATH:-}:" in
@@ -853,6 +854,7 @@ find "$RUNTIME_DIR/data/kg" -maxdepth 3 -type f | sort
 
 step "Load Ascend runtime environment"
 load_ascend_runtime_environment
+export RAGENT_ASCEND_SET_ENV_SH="${RAGENT_ASCEND_SET_ENV_SH:-/usr/local/Ascend/ascend-toolkit/set_env.sh}"
 
 if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
   step "Verify existing vLLM embedding service"

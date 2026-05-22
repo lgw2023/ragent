@@ -349,10 +349,11 @@ MODEL_PATH="$(resolve_model_path)"
 echo "resolved model path: $MODEL_PATH"
 
 step "Load Ascend runtime environment"
+REQUESTED_ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
 source_if_exists /usr/local/Ascend/ascend-toolkit/set_env.sh
 source_if_exists /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
 source_if_exists /usr/local/Ascend/nnal/asdsip/set_env.sh
-export ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+export ATB_HOME_PATH="$REQUESTED_ATB_HOME_PATH"
 export ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
 ATB_LIB_PATH="${ATB_HOME_PATH}/${ATB_CXX_ABI}/lib"
 case ":${LD_LIBRARY_PATH:-}:" in
