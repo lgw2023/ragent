@@ -348,6 +348,29 @@ python3 tools/build_mep_layout.py \
 MODEL_PATH="$(resolve_model_path)"
 echo "resolved model path: $MODEL_PATH"
 
+step "Load Ascend runtime environment"
+source_if_exists /usr/local/Ascend/ascend-toolkit/set_env.sh
+source_if_exists /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
+source_if_exists /usr/local/Ascend/nnal/asdsip/set_env.sh
+export ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+export ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
+ATB_LIB_PATH="${ATB_HOME_PATH}/${ATB_CXX_ABI}/lib"
+case ":${LD_LIBRARY_PATH:-}:" in
+  *":${ATB_LIB_PATH}:"*) ;;
+  *) export LD_LIBRARY_PATH="${ATB_LIB_PATH}:${LD_LIBRARY_PATH:-}" ;;
+esac
+export ASCEND_RT_VISIBLE_DEVICES
+export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-DEBUG}"
+export VLLM_USE_V1="${VLLM_USE_V1:-1}"
+export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:256}"
+export HCCL_OP_EXPANSION_MODE="${HCCL_OP_EXPANSION_MODE:-AIV}"
+export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
+
+echo "ATB_HOME_PATH=$ATB_HOME_PATH"
+echo "ATB_CXX_ABI=$ATB_CXX_ABI"
+echo "ATB lib path: $ATB_LIB_PATH"
+
 if [ "$INSTALL_VLLM_REPAIR_WHEELS" = "1" ]; then
   step "Install validated vLLM repair wheels from the offline bundle"
   CBOR2_WHEEL="$(single_match_glob "$RUNTIME_DIR/data/deps/wheelhouse/*/cbor2-*.whl" "cbor2 repair wheel")"
@@ -388,29 +411,6 @@ except Exception as exc:
     print("warning: vllm_ascend import failed:", repr(exc))
 PY
 fi
-
-step "Load Ascend runtime environment"
-source_if_exists /usr/local/Ascend/ascend-toolkit/set_env.sh
-source_if_exists /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
-source_if_exists /usr/local/Ascend/nnal/asdsip/set_env.sh
-export ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
-export ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
-ATB_LIB_PATH="${ATB_HOME_PATH}/${ATB_CXX_ABI}/lib"
-case ":${LD_LIBRARY_PATH:-}:" in
-  *":${ATB_LIB_PATH}:"*) ;;
-  *) export LD_LIBRARY_PATH="${ATB_LIB_PATH}:${LD_LIBRARY_PATH:-}" ;;
-esac
-export ASCEND_RT_VISIBLE_DEVICES
-export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-DEBUG}"
-export VLLM_USE_V1="${VLLM_USE_V1:-1}"
-export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:256}"
-export HCCL_OP_EXPANSION_MODE="${HCCL_OP_EXPANSION_MODE:-AIV}"
-export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
-
-echo "ATB_HOME_PATH=$ATB_HOME_PATH"
-echo "ATB_CXX_ABI=$ATB_CXX_ABI"
-echo "ATB lib path: $ATB_LIB_PATH"
 
 step "Start vLLM OpenAI-compatible embedding server"
 LOG_PATH=/tmp/ragent-mep-vllm.log
