@@ -42,7 +42,8 @@ GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-32768}"
 BLOCK_SIZE="${BLOCK_SIZE:-128}"
-ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+MEP_ATB_HOME_PATH="${MEP_ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+ATB_HOME_PATH="$MEP_ATB_HOME_PATH"
 ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
 STARTUP_TIMEOUT_SECONDS="${STARTUP_TIMEOUT_SECONDS:-900}"
 RECREATE_CONTAINER="${RECREATE_CONTAINER:-1}"
@@ -213,6 +214,7 @@ docker exec -i \
   -e MAX_NUM_SEQS="$MAX_NUM_SEQS" \
   -e MAX_NUM_BATCHED_TOKENS="$MAX_NUM_BATCHED_TOKENS" \
   -e BLOCK_SIZE="$BLOCK_SIZE" \
+  -e MEP_ATB_HOME_PATH="$MEP_ATB_HOME_PATH" \
   -e ATB_HOME_PATH="$ATB_HOME_PATH" \
   -e ATB_CXX_ABI="$ATB_CXX_ABI" \
   -e STARTUP_TIMEOUT_SECONDS="$STARTUP_TIMEOUT_SECONDS" \
@@ -349,7 +351,7 @@ MODEL_PATH="$(resolve_model_path)"
 echo "resolved model path: $MODEL_PATH"
 
 step "Load Ascend runtime environment"
-REQUESTED_ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+REQUESTED_ATB_HOME_PATH="${MEP_ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
 source_if_exists /usr/local/Ascend/ascend-toolkit/set_env.sh
 source_if_exists /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
 source_if_exists /usr/local/Ascend/nnal/asdsip/set_env.sh

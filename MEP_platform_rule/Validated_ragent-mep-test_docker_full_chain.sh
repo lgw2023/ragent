@@ -55,7 +55,8 @@ NPU_HOST_ID="${NPU_HOST_ID:-0}"
 NPU_CONTAINER_ID="${NPU_CONTAINER_ID:-0}"
 MAP_NPU_DEVICES="${MAP_NPU_DEVICES:-1}"
 VLLM_USE_V1="${VLLM_USE_V1:-1}"
-ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+MEP_ATB_HOME_PATH="${MEP_ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+ATB_HOME_PATH="$MEP_ATB_HOME_PATH"
 ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
 VLLM_PORT="${VLLM_PORT:-8000}"
 SKIP_VLLM_VALIDATION="${SKIP_VLLM_VALIDATION:-1}"
@@ -274,6 +275,7 @@ if [ -z "$MEP_ENV_FILE" ] && [ -f "$HOST_TEST_DIR/.env" ]; then
   MEP_ENV_FILE="$HOST_TEST_DIR/.env"
 fi
 source_env_file "$MEP_ENV_FILE"
+ATB_HOME_PATH="$MEP_ATB_HOME_PATH"
 
 if [ -z "$AUTO_START_CONTAINER" ]; then
   if [ "$SKIP_VLLM_VALIDATION" = "1" ] && [ -n "$IMAGE" ]; then
@@ -312,6 +314,7 @@ if [ "$SKIP_VLLM_VALIDATION" != "1" ]; then
     "NPU_CONTAINER_ID=$NPU_CONTAINER_ID"
     "MAP_NPU_DEVICES=$MAP_NPU_DEVICES"
     "VLLM_USE_V1=$VLLM_USE_V1"
+    "MEP_ATB_HOME_PATH=$MEP_ATB_HOME_PATH"
     "ATB_HOME_PATH=$ATB_HOME_PATH"
     "ATB_CXX_ABI=$ATB_CXX_ABI"
     "RECREATE_CONTAINER=$RECREATE_CONTAINER"
@@ -347,6 +350,7 @@ EXEC_ENV_ARGS=(
   "-e" "TOKENIZERS_PARALLELISM=true"
   "-e" "OMP_NUM_THREADS=16"
   "-e" "ATB_HOME_PATH=$ATB_HOME_PATH"
+  "-e" "MEP_ATB_HOME_PATH=$MEP_ATB_HOME_PATH"
   "-e" "ATB_CXX_ABI=$ATB_CXX_ABI"
   "-e" "RAGENT_MEP_VLLM_LAUNCH_MODE=${RAGENT_MEP_VLLM_LAUNCH_MODE:-cli}"
   "-e" "VLLM_PORT=$VLLM_PORT"
@@ -504,7 +508,7 @@ source_if_exists() {
 }
 
 load_ascend_runtime_environment() {
-  local requested_atb_home_path="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+  local requested_atb_home_path="${MEP_ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
   local raw_scripts
   if [ -n "${RAGENT_ASCEND_SET_ENV_SH:-}" ]; then
     raw_scripts="$RAGENT_ASCEND_SET_ENV_SH"
