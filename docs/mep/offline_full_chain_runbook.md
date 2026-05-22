@@ -179,7 +179,7 @@ python3 tools/build_mep_upload_packages.py --model-package qwen3-embedding-4b
 python3 tools/build_mep_layout.py --model-package qwen3-embedding-4b
 ```
 
-如果需要拷贝到服务器，可使用项目已有同步脚本或 `rsync`。同步时要包含：
+如果服务器不能直接 `git pull` 到最新代码，可用 `rsync` 从本机同步完整仓库目录。同步时要包含：
 
 - `process.py`、`run_mep_local.py`、`mep_dependency_bootstrap.py`
 - `ragent/`
