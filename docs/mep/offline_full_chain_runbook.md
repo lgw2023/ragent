@@ -183,7 +183,7 @@ python3 tools/build_mep_layout.py --model-package qwen3-embedding-4b
 
 - `process.py`、`run_mep_local.py`、`mep_dependency_bootstrap.py`
 - `ragent/`
-- `MEP_platform_rule/Validated_ragent-mep-test_docker_full_chain.sh`
+- `docs/mep/platform_rule/Validated_ragent-mep-test_docker_full_chain.sh`
 - `example/mep_requests/`
 - `mep/component_deps/`
 - `mep/model_packages/qwen3-embedding-4b/modelDir/`
@@ -239,7 +239,7 @@ SKIP_VLLM_VALIDATION=1 \
 MEP_REUSE_EXISTING_VLLM=0 \
 MEP_REQUEST_NAME=retrieval_only_request.json \
 MEP_ENABLE_RERANK=false \
-bash MEP_platform_rule/Validated_ragent-mep-test_docker_full_chain.sh
+bash docs/mep/platform_rule/Validated_ragent-mep-test_docker_full_chain.sh
 ```
 
 目标镜像默认值当前为：
@@ -251,7 +251,7 @@ swr.cn-southwest-2.myhuaweicloud.com/huaweiccs-hivoice-product-ga/vllm-ascend-0.
 如果要验证新镜像，显式加：
 
 ```bash
-IMAGE=<new-image> bash MEP_platform_rule/Validated_ragent-mep-test_docker_full_chain.sh
+IMAGE=<new-image> bash docs/mep/platform_rule/Validated_ragent-mep-test_docker_full_chain.sh
 ```
 
 ### 5.4 预期关键日志
@@ -435,7 +435,7 @@ Qwen3-Embedding-4B 使用 2560 维 KG。切换 embedding 模型或维度后，�
 建议保存服务器验证日志：
 
 ```bash
-bash MEP_platform_rule/Validated_ragent-mep-test_docker_full_chain.sh 2>&1 | tee /tmp/mep_full_chain_run.log
+bash docs/mep/platform_rule/Validated_ragent-mep-test_docker_full_chain.sh 2>&1 | tee /tmp/mep_full_chain_run.log
 ```
 
 容器内常见输出：
@@ -479,4 +479,3 @@ gen.json 路径：
 
 - 链路可用：MEP 离线依赖、vLLM embedding、KG runtime、接口调用均成功。
 - 检索质量：关键词质量、排序、rerank、弱相关 chunk 是否满足业务要求。
-

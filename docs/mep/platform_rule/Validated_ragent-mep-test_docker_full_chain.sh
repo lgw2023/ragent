@@ -15,7 +15,7 @@ set -euo pipefail
 #   SKIP_VLLM_VALIDATION=1 \
 #   MEP_REUSE_EXISTING_VLLM=0 \
 #   MEP_ENV_FILE=/data/disk1/ragent/.env \
-#   bash MEP_platform_rule/Validated_ragent-mep-test_docker_full_chain.sh
+#   bash docs/mep/platform_rule/Validated_ragent-mep-test_docker_full_chain.sh
 #
 # Useful overrides:
 #   HOST_REPO_DIR=/data/disk1/ragent        full repository root; alias of HOST_TEST_DIR
@@ -34,13 +34,21 @@ set -euo pipefail
 #   MEP_STRICT_OFFLINE=1                    force HF/Transformers/pip offline behavior in the container
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ "$(basename "$SCRIPT_DIR")" = "MEP_platform_rule" ]; then
+if [ "$(basename "$SCRIPT_DIR")" = "platform_rule" ] && \
+   [ "$(basename "$(dirname "$SCRIPT_DIR")")" = "mep" ] && \
+   [ "$(basename "$(dirname "$(dirname "$SCRIPT_DIR")")")" = "docs" ]; then
+  DEFAULT_HOST_TEST_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+elif [ "$(basename "$SCRIPT_DIR")" = "MEP_platform_rule" ]; then
   DEFAULT_HOST_TEST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 else
   DEFAULT_HOST_TEST_DIR="$(pwd)"
 fi
 
 HOST_TEST_DIR="${HOST_TEST_DIR:-${HOST_REPO_DIR:-$DEFAULT_HOST_TEST_DIR}}"
+PLATFORM_RULE_DIR="$HOST_TEST_DIR/docs/mep/platform_rule"
+if [ ! -d "$PLATFORM_RULE_DIR" ] && [ -d "$HOST_TEST_DIR/MEP_platform_rule" ]; then
+  PLATFORM_RULE_DIR="$HOST_TEST_DIR/MEP_platform_rule"
+fi
 CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"
 RUNTIME_DIR="${RUNTIME_DIR:-/tmp/ragent-mep-runtime}"
 MODEL_PACKAGE="${MODEL_PACKAGE:-qwen3-embedding-4b}"
@@ -268,7 +276,7 @@ PY
 
 require_command docker
 [ -d "$HOST_TEST_DIR" ] || die "HOST_TEST_DIR does not exist: $HOST_TEST_DIR"
-[ -f "$HOST_TEST_DIR/MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh" ] || \
+[ -f "$PLATFORM_RULE_DIR/Validated_ragent-mep-test_docker_vllm.sh" ] || \
   die "missing validated vLLM script under $HOST_TEST_DIR"
 
 if [ -z "$MEP_ENV_FILE" ] && [ -f "$HOST_TEST_DIR/.env" ]; then
@@ -325,7 +333,7 @@ if [ "$SKIP_VLLM_VALIDATION" != "1" ]; then
     VLLM_ENV_ARGS+=("IMAGE=$IMAGE")
   fi
   env "${VLLM_ENV_ARGS[@]}" \
-    bash "$HOST_TEST_DIR/MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh"
+    bash "$PLATFORM_RULE_DIR/Validated_ragent-mep-test_docker_vllm.sh"
 elif [ "$AUTO_START_CONTAINER" = "1" ]; then
   start_plain_container
 else

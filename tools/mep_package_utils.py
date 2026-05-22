@@ -50,6 +50,7 @@ FORBIDDEN_COMPONENT_PACKAGE_TOP_LEVEL = {
     ".venv",
     "MEP_platform_rule",
     "benchmark",
+    "docs",
     "example",
     "mep",
     "presentation",

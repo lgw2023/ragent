@@ -40,10 +40,11 @@ The repo includes two example env files:
 
 Copy the one that matches the environment you are preparing to `.env`.
 
-## Detailed guide
+## Documentation
 
-See [presentation/README.md](presentation/README.md) for the full setup,
-MinerU model download instructions, CLI usage, and Python examples.
+See [docs/README.md](docs/README.md) for the maintained documentation map.
+For setup details, MinerU model download instructions, CLI usage, and Python
+examples, see [presentation/README.md](presentation/README.md).
 
 ## MEP Component
 
@@ -122,6 +123,6 @@ legacy BGE-M3 `data/deps` wheelhouse. `action=create` writes
 `{generatePath}/gen.json` and returns `recommendResult`; direct local requests
 without `action` still return the result payload in `recommendResult.content`.
 
-See [MEP_COMPONENT.md](MEP_COMPONENT.md) for the full component/model package
-boundary, request parsing rules, async response contract, deployment notes, and
-local simulation flow.
+See [docs/mep/component.md](docs/mep/component.md) for the full
+component/model package boundary, request parsing rules, async response
+contract, deployment notes, and local simulation flow.

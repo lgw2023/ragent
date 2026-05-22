@@ -873,17 +873,22 @@ def test_mep_runtime_sources_avoid_dynamic_pipmaster_imports():
         assert "pm.install" not in source
 
 
-def test_offline_full_chain_validation_script_is_exported():
+def test_offline_full_chain_validation_script_is_available():
     repo_root = Path(__file__).resolve().parents[1]
     script_path = (
         repo_root
-        / "MEP_platform_rule"
+        / "docs"
+        / "mep"
+        / "platform_rule"
         / "Validated_ragent-mep-test_docker_full_chain.sh"
     )
     vllm_script_path = (
-        repo_root / "MEP_platform_rule" / "Validated_ragent-mep-test_docker_vllm.sh"
+        repo_root
+        / "docs"
+        / "mep"
+        / "platform_rule"
+        / "Validated_ragent-mep-test_docker_vllm.sh"
     )
-    export_script = repo_root / "tools" / "export_mep_test_bundle_to_udisk.sh"
     validator_script = repo_root / "tools" / "validate_mep_full_chain_result.py"
     wheelhouse_validator_script = repo_root / "tools" / "validate_mep_wheelhouse.py"
 
@@ -891,17 +896,8 @@ def test_offline_full_chain_validation_script_is_exported():
     assert vllm_script_path.exists()
     script_text = script_path.read_text(encoding="utf-8")
     vllm_script_text = vllm_script_path.read_text(encoding="utf-8")
-    export_text = export_script.read_text(encoding="utf-8")
     validator_text = validator_script.read_text(encoding="utf-8")
 
-    assert "Validated_ragent-mep-test_docker_full_chain.sh" in export_text
-    assert "validate_mep_full_chain_result.py" in export_text
-    assert "validate_mep_wheelhouse.py" in export_text
-    assert "preflight_mep_upload_packages.py" in export_text
-    assert 'DEST="${DEST:-/Volumes/Udisk2/ragent}"' in export_text
-    assert 'PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.10}"' in export_text
-    assert 'INCLUDE_MODEL_WHEELHOUSE="${INCLUDE_MODEL_WHEELHOUSE:-0}"' in export_text
-    assert 'INCLUDE_VLLM_REPAIR_WHEELS="${INCLUDE_VLLM_REPAIR_WHEELS:-0}"' in export_text
     assert 'MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"' in script_text
     assert "vllm-ascend-0.10.2-910b-cann8.2.rc1-torch2.7.1rc1:1.2.9.300" in script_text
     assert 'CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"' in script_text

@@ -62,6 +62,7 @@ COMPONENT_EXCLUDED_NAMES = {
     "benchmark",
     "vendor",
     "presentation",
+    "docs",
     "MEP_platform_rule",
     ".venv",
     ".git",

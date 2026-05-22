@@ -1,6 +1,6 @@
 # MEP KG Inference Component
 
-当前仓库定义为一个 **MEP SFS 异步模板下的知识图谱问答 inference 组件**。参照 `/Volumes/SSD1/ragent/MEP_platform_rule/qwen_vllm_async_copilot/` 样例后，本文明确区分两个概念：
+当前仓库定义为一个 **MEP SFS 异步模板下的知识图谱问答 inference 组件**。参照 [platform_rule/qwen_vllm_async_copilot/](platform_rule/qwen_vllm_async_copilot/) 样例后，本文明确区分两个概念：
 
 - 源码目录：当前仓库如何组织代码
 - 平台运行时目录：组件包和模型包在 MEP 容器里如何落盘
@@ -545,7 +545,7 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 
 如需把两个上传归档写到其他目录，可在 `--archive-format` 基础上追加 `--archive-output-dir <dir>`。脚本会拒绝把归档写进正在打包的 `component_package/` 或 `model_package/` 内部，避免归档过程把自身也打入包中；自定义归档目录同样不能覆盖仓库根、组件源码或源模型包。
 
-上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝会覆盖仓库根、组件源码或源模型包的危险输出目录，并强校验 `modelDir/meta/type.mf` 非空以及 `modelDir/model` 本身直接包含 Hugging Face 模型文件。
+上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`docs/`、历史 `MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝会覆盖仓库根、组件源码或源模型包的危险输出目录，并强校验 `modelDir/meta/type.mf` 非空以及 `modelDir/model` 本身直接包含 Hugging Face 模型文件。
 
 上传前可运行统一 preflight，检查组件包入口、模型包第一层、KG/vdb 维度，并在存在 wheelhouse 时校验 wheelhouse payload：
 
@@ -585,7 +585,7 @@ python /Volumes/SSD1/ragent/tools/preflight_mep_upload_packages.py \
 
 ## 11. 平台待确认事项
 
-真实 MEP 平台联调时需要显式记录以下事实，完整 checklist 见 `/Volumes/SSD1/ragent/MEP_E2E_VALIDATION_PLAN.md`。
+真实 MEP 平台联调时需要显式记录以下事实，完整 checklist 见 [e2e_validation_plan.md](e2e_validation_plan.md)。
 
 - 入口 `__file__`、`cwd`、`component/`、`model/`、`data/`、`meta/` 的实际落盘位置
 - 平台是否传入 `model_root`，以及传入值的真实含义

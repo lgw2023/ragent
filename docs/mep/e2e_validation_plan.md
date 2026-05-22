@@ -6,7 +6,7 @@
 
 本次讨论最初的目标是：检查当前代码仓库在最近几次 MEP 相关修改之后，原本项目功能是否仍然正常。
 
-随后目标扩展为：明确如何做真实端到端推理调用，以及 MEP 平台到底如何加载组件包、模型包、vLLM 镜像和外部业务请求。为此，我们检查了当前仓库代码、测试结果、`/Volumes/SSD1/ragent/MEP_platform_rule/` 下的平台规则文档，以及新增的样例目录 `/Volumes/SSD1/ragent/MEP_platform_rule/qwen_vllm_async_copilot/`。
+随后目标扩展为：明确如何做真实端到端推理调用，以及 MEP 平台到底如何加载组件包、模型包、vLLM 镜像和外部业务请求。为此，我们检查了当前仓库代码、测试结果、[platform_rule/](platform_rule/) 下的平台规则文档，以及新增的样例目录 [platform_rule/qwen_vllm_async_copilot/](platform_rule/qwen_vllm_async_copilot/)。
 
 当前阶段的目标不是立即修改所有代码，而是先把：
 
@@ -122,7 +122,7 @@ MEP/runtime -> process.CustomerModel.load()
 - `config.json`
 - `package.json`
 - `ragent/`
-- `MEP_COMPONENT.md`
+- [component.md](component.md)
 
 `config.json` 当前内容：
 
@@ -180,7 +180,7 @@ class CustomerModel:
 
 ### 3.4 参照样例后修正的目标理解
 
-样例 `/Volumes/SSD1/ragent/MEP_platform_rule/qwen_vllm_async_copilot/init.py` 明确把运行时目录建模为：
+样例 [platform_rule/qwen_vllm_async_copilot/init.py](platform_rule/qwen_vllm_async_copilot/init.py) 明确把运行时目录建模为：
 
 ```python
 COMPONENT_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -322,7 +322,7 @@ result_file_path
 
 ## 4. MEP 平台规则中已经明确的信息
 
-以下信息综合来自 `MEP_platform_rule/`、`MEP_platform_rule/MEP-QA/`，以及新增样例目录 `qwen_vllm_async_copilot/`。
+以下信息综合来自 [platform_rule/](platform_rule/)、[platform_rule/MEP-QA/](platform_rule/MEP-QA/)，以及新增样例目录 [platform_rule/qwen_vllm_async_copilot/](platform_rule/qwen_vllm_async_copilot/)。
 
 ### 4.1 组件包入口
 
@@ -900,7 +900,7 @@ MODEL_SFS + MODEL_OBJECT_ID + "/model"
 
 ### 7.4 输出 schema 与业务方对齐
 
-当前 `gen.json` schema 仍需业务方确认。建议在确认后固化到 `MEP_COMPONENT.md`，并补一组 schema 测试。
+当前 `gen.json` schema 仍需业务方确认。建议在确认后固化到 [component.md](component.md)，并补一组 schema 测试。
 
 ## 8. 当前结论
 

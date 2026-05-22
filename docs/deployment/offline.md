@@ -91,7 +91,7 @@ the working container:
 
 ```bash
 python3 tools/export_mep_vllm_ascend_wheelhouse.py \
-  --freeze-file MEP_platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt \
+  --freeze-file docs/mep/platform_rule/Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt \
   --output mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.10
 ```
 

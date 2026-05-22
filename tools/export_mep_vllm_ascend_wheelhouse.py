@@ -13,7 +13,9 @@ from urllib.parse import unquote, urlparse
 
 DEFAULT_FREEZE_FILE = (
     Path(__file__).resolve().parents[1]
-    / "MEP_platform_rule"
+    / "docs"
+    / "mep"
+    / "platform_rule"
     / "Validated_ragent-mep-test_docker_vllm_requirements.freeze.txt"
 )
 DEFAULT_OUTPUT_DIR = (

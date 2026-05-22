@@ -5,17 +5,21 @@ set -euo pipefail
 #
 # Typical usage:
 #   cd /data/disk1/ragent
-#   bash MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh
+#   bash docs/mep/platform_rule/Validated_ragent-mep-test_docker_vllm.sh
 #
 # Optional overrides:
 #   HOST_TEST_DIR=/data/disk1/ragent \
 #   CONTAINER_NAME=qwen3_embedding_4b_vllm_ascend_validation \
 #   NPU_HOST_ID=0 \
 #   ASCEND_RT_VISIBLE_DEVICES=0 \
-#   bash MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh
+#   bash docs/mep/platform_rule/Validated_ragent-mep-test_docker_vllm.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ "$(basename "$SCRIPT_DIR")" = "MEP_platform_rule" ]; then
+if [ "$(basename "$SCRIPT_DIR")" = "platform_rule" ] && \
+   [ "$(basename "$(dirname "$SCRIPT_DIR")")" = "mep" ] && \
+   [ "$(basename "$(dirname "$(dirname "$SCRIPT_DIR")")")" = "docs" ]; then
+  DEFAULT_HOST_TEST_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+elif [ "$(basename "$SCRIPT_DIR")" = "MEP_platform_rule" ]; then
   DEFAULT_HOST_TEST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 else
   DEFAULT_HOST_TEST_DIR="$(pwd)"
