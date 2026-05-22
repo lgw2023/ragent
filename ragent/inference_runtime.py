@@ -16,6 +16,7 @@ from . import keyword_extraction
 from .base import QueryParam
 from .constants import GRAPH_FIELD_SEP
 from .kg.shared_storage import finalize_share_data, initialize_pipeline_status
+from .portable_paths import make_portable_file_path, normalize_portable_file_paths
 from .prompt import dismantle_prompt
 from .runtime_env import bootstrap_runtime_environment, is_mep_runtime
 from .utils import (
@@ -523,9 +524,10 @@ def _normalize_referenced_file_paths(file_paths: list[str] | None) -> list[str]:
         file_paths = [file_paths]  # type: ignore[list-item]
     return sorted(
         {
-            str(item).strip()
+            make_portable_file_path(item)
             for item in file_paths or []
-            if str(item or "").strip() and str(item).strip() != "unknown_source"
+            if str(item or "").strip()
+            and make_portable_file_path(item) != "unknown_source"
         }
     )
 
@@ -652,13 +654,13 @@ def _build_one_hop_trace(
             if isinstance(item, dict)
         ]
 
-    return trace
+    return normalize_portable_file_paths(trace)
 
 
 def _build_retrieval_result_from_trace(trace: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(trace, dict):
         return {}
-    return {
+    return normalize_portable_file_paths({
         "high_level_keywords": list(trace.get("high_level_keywords") or []),
         "low_level_keywords": list(trace.get("low_level_keywords") or []),
         "keyword_source": trace.get("keyword_source"),
@@ -682,7 +684,7 @@ def _build_retrieval_result_from_trace(trace: dict[str, Any] | None) -> dict[str
             trace.get("final_context_document_chunks") or []
         ),
         "final_context_text": str(trace.get("final_context_text") or ""),
-    }
+    })
 
 
 async def _run_one_hop_with_rag(

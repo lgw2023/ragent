@@ -49,6 +49,7 @@ from .constants import (
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_RELATED_CHUNK_NUMBER,
 )
+from .portable_paths import make_portable_file_path, normalize_portable_file_paths
 from .kg.shared_storage import get_storage_keyed_lock
 import time
 
@@ -177,7 +178,7 @@ def _normalize_referenced_file_paths(file_paths: Any) -> list[str]:
         file_paths = [file_paths]
     normalized_paths: set[str] = set()
     for item in file_paths:
-        file_path = str(item or "").strip()
+        file_path = make_portable_file_path(item)
         if file_path and file_path != "unknown_source":
             normalized_paths.add(file_path)
     return sorted(normalized_paths)
@@ -632,8 +633,12 @@ def _build_query_cache_payload(
         "referenced_file_paths": _normalize_referenced_file_paths(
             referenced_file_paths or []
         ),
-        "final_context_document_chunks": list(final_context_document_chunks or []),
-        "debug_payload_cacheable": dict(debug_payload_cacheable or {}),
+        "final_context_document_chunks": normalize_portable_file_paths(
+            list(final_context_document_chunks or [])
+        ),
+        "debug_payload_cacheable": normalize_portable_file_paths(
+            dict(debug_payload_cacheable or {})
+        ),
         "context_available": context_available,
         "corpus_revision": _coerce_non_negative_int(corpus_revision, 0),
         "dependency_chunk_ids": _collect_dependency_chunk_ids(
@@ -678,8 +683,12 @@ def _coerce_query_cache_payload(
         "referenced_file_paths": _normalize_referenced_file_paths(
             payload.get("referenced_file_paths") or []
         ),
-        "final_context_document_chunks": list(final_context_document_chunks),
-        "debug_payload_cacheable": dict(debug_payload_cacheable),
+        "final_context_document_chunks": normalize_portable_file_paths(
+            list(final_context_document_chunks)
+        ),
+        "debug_payload_cacheable": normalize_portable_file_paths(
+            dict(debug_payload_cacheable)
+        ),
         "context_available": bool(payload.get("context_available", True)),
         "corpus_revision": _coerce_non_negative_int(
             payload.get("corpus_revision"),
@@ -857,7 +866,7 @@ def _sanitize_llm_context_payload(
     answer_prompt_mode: str,
 ) -> Any:
     if answer_prompt_mode != "single_prompt":
-        return payload
+        return normalize_portable_file_paths(payload)
     if isinstance(payload, dict):
         has_chunk_like_fields = any(
             key in payload
@@ -873,7 +882,7 @@ def _sanitize_llm_context_payload(
         source_ref = str(payload.get("source_ref") or "").strip()
         base_name = ""
         if source_ref:
-            base_name = source_ref.split(" | ", 1)[0].strip()
+            base_name = make_portable_file_path(source_ref.split(" | ", 1)[0].strip())
         file_path = str(payload.get("file_path") or "").strip()
         if not base_name and file_path and file_path != "unknown_source":
             base_name = os.path.basename(file_path)

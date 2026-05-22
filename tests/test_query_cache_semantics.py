@@ -15,6 +15,7 @@ from ragent.operate import (
     hybrid_query,
     kg_query_with_keywords,
 )
+from ragent.portable_paths import make_portable_file_path, normalize_portable_file_paths
 from ragent.utils import compute_args_hash
 
 
@@ -320,6 +321,40 @@ class QueryCacheSemanticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored["created_at"], 123)
         self.assertEqual(restored["last_accessed_at"], 456)
         self.assertEqual(restored["access_count"], 3)
+
+    def test_portable_paths_rewrite_repo_absolute_file_paths(self):
+        self.assertEqual(
+            make_portable_file_path(
+                "/Volumes/SSD1/ragent/example/中国居民膳食指南_2022.pdf"
+            ),
+            "example/中国居民膳食指南_2022.pdf",
+        )
+        self.assertEqual(make_portable_file_path("/tmp/source.pdf"), "/tmp/source.pdf")
+
+        payload = normalize_portable_file_paths(
+            {
+                "referenced_file_paths": [
+                    "/Volumes/SSD1/ragent/example/doc.pdf",
+                    "unknown_source",
+                ],
+                "final_context_document_chunks": [
+                    {
+                        "file_path": "/data/disk2/ragent/example/doc.pdf",
+                        "source_ref": "/data/disk2/ragent/example/doc.pdf | p.1",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(payload["referenced_file_paths"][0], "example/doc.pdf")
+        self.assertEqual(
+            payload["final_context_document_chunks"][0]["file_path"],
+            "example/doc.pdf",
+        )
+        self.assertEqual(
+            payload["final_context_document_chunks"][0]["source_ref"],
+            "example/doc.pdf | p.1",
+        )
 
     async def test_hybrid_answer_cache_short_circuits_warm_run(self):
         model = _Model("hybrid answer")

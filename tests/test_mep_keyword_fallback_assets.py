@@ -489,6 +489,17 @@ def test_summarize_requests_defaults_unset_mode_to_retrieval_only(tmp_path: Path
     assert summary["requests"][0]["retrieval_only"] is True
 
 
+def test_default_retrieval_only_request_requires_keyword_fallback():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    summary = summarize_requests(repo_root, "retrieval_only_request.json")
+
+    assert summary["requests_require_llm"] is False
+    assert summary["requests_have_retrieval_only"] is True
+    assert summary["requests_require_keyword_fallback"] is True
+    assert summary["requests"][0]["has_explicit_keywords"] is False
+
+
 def test_summarize_requests_does_not_require_keyword_fallback_with_explicit_keywords(
     tmp_path: Path,
 ):
