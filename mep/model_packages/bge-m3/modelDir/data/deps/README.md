@@ -1,9 +1,14 @@
 # data/deps
 
-Place MEP image-specific runtime dependencies here when the target image does
-not already include them. This directory is part of the model package's
-read-only `data/` payload, so it is available when the MEP server has no
-network access.
+Place BGE-M3 model-specific offline runtime dependencies here when the target
+image does not already include them. This directory is part of the model
+package's read-only `data/` payload, so it is available when the MEP server has
+no network access.
+
+Component-wide Python application dependencies such as `litellm` and `openai`
+now live under `mep/component_deps/site-packages/`, which is copied to
+`component/deps/` and loaded before model `data/deps/`. Do not add shared
+component packages back under this BGE-M3 model data directory.
 
 The current target image is:
 
@@ -20,7 +25,7 @@ linux-arm64-py3.9
 Supported local bootstrap paths:
 
 - `pythonpath/`
-- `site-packages/`
+- `site-packages/` (bootstrap-supported, not currently populated here)
 - `python/`
 - `keyword_wheelhouse/<platform-tag>/*.whl`
 - `wheelhouse/<platform-tag>/*.whl`
