@@ -27,7 +27,7 @@ set -euo pipefail
 #   MEP_REQUEST_NAME=sfs_create_request.json run a normal generation request sample
 #   MEP_WHEELHOUSE_PLATFORM_TAG=linux-arm64-py3.10 host-side wheelhouse preflight tag
 #   MEP_VALIDATE_HOST_WHEELHOUSE=0          default for the new image; set 1 for legacy bundles
-#   RAGENT_MEP_OFFLINE_PIP_INSTALL=0        do not pip-install model wheelhouse at component startup
+#   RAGENT_MEP_OFFLINE_PIP_INSTALL=0        skip offline wheelhouse install at component startup
 #   RAGENT_MEP_WHEELHOUSE_ZIPIMPORT=0       do not overlay model wheelhouse on sys.path
 #   MEP_REQUIRE_RERANK=1                    fail if RERANK_* is incomplete
 #   MEP_ENABLE_RERANK=false                 force rerank off for this validation
@@ -76,7 +76,7 @@ MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-0}"
 MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.10}}"
 MEP_REQUIRE_ASCEND_ENV="${MEP_REQUIRE_ASCEND_ENV:-}"
 MEP_STRICT_OFFLINE="${MEP_STRICT_OFFLINE:-1}"
-RAGENT_MEP_OFFLINE_PIP_INSTALL="${RAGENT_MEP_OFFLINE_PIP_INSTALL:-0}"
+RAGENT_MEP_OFFLINE_PIP_INSTALL="${RAGENT_MEP_OFFLINE_PIP_INSTALL:-1}"
 RAGENT_MEP_WHEELHOUSE_ZIPIMPORT="${RAGENT_MEP_WHEELHOUSE_ZIPIMPORT:-0}"
 
 NO_PROXY_DEFAULT="localhost,127.0.0.1,::1,*.huawei.com,*.huaweicloud.com"
