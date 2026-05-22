@@ -60,6 +60,43 @@ def test_validate_keyword_fallback_assets_uses_conventional_paths(tmp_path: Path
     assert result["wheel_count"] == 4
 
 
+def test_validate_keyword_fallback_assets_supports_component_target(
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+    model_dir = exporter.component_keyword_model_dir(repo_root)
+    model_dir.mkdir(parents=True)
+    (model_dir / "gliner_config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer_config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "model.safetensors").write_bytes(b"fake")
+    wheelhouse_dir = exporter.component_keyword_wheelhouse_dir(
+        repo_root,
+        "linux-arm64-py3.11",
+    )
+    wheelhouse_dir.mkdir(parents=True)
+    for name in (
+        "gliner-0.2.26-py3-none-any.whl",
+        "stanza-1.10.1-py3-none-any.whl",
+        "onnxruntime-1.16.3-cp311-cp311-manylinux2014_aarch64.whl",
+        "langdetect-1.0.9-py3-none-any.whl",
+    ):
+        (wheelhouse_dir / name).write_bytes(b"fake")
+
+    result = exporter.validate_keyword_fallback_assets(
+        repo_root=repo_root,
+        platform_tag="linux-arm64-py3.11",
+        target="component",
+    )
+
+    assert result["model_dir"].endswith(
+        "mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small"
+    )
+    assert result["wheelhouse_dir"].endswith(
+        "mep/component_deps/keyword_wheelhouse/linux-arm64-py3.11"
+    )
+    assert result["wheel_count"] == 4
+
+
 def test_validate_keyword_fallback_assets_rejects_duplicate_required_wheels(
     tmp_path: Path,
 ):
@@ -196,6 +233,56 @@ def test_export_keyword_fallback_assets_populates_model_and_wheels(
         platform_tag="linux-arm64-py3.9",
         python_bin="python3",
         model_id="knowledgator/gliner-x-small",
+    )
+
+    assert Path(result["model_dir"]).is_dir()
+    assert Path(result["wheelhouse_dir"]).is_dir()
+    assert result["wheel_count"] == 4
+
+
+def test_export_keyword_fallback_assets_populates_component_deps(
+    monkeypatch,
+    tmp_path: Path,
+):
+    repo_root = tmp_path / "repo"
+
+    def fake_download_model(*, model_id, output_dir, allow_patterns=()):
+        assert model_id == "knowledgator/gliner-x-small"
+        output_dir.mkdir(parents=True)
+        (output_dir / "gliner_config.json").write_text("{}", encoding="utf-8")
+        (output_dir / "tokenizer_config.json").write_text("{}", encoding="utf-8")
+        (output_dir / "model.safetensors").write_bytes(b"fake")
+
+    def fake_download_wheels(
+        *,
+        output_dir,
+        platform_tag,
+        python_bin,
+        binary_requirements=(),
+        pure_wheel_requirements=(),
+    ):
+        assert platform_tag == "linux-arm64-py3.11"
+        assert python_bin == "python3"
+        output_dir.mkdir(parents=True)
+        for name in (
+            "gliner-0.2.26-py3-none-any.whl",
+            "stanza-1.10.1-py3-none-any.whl",
+            "onnxruntime-1.16.3-cp311-cp311-manylinux2014_aarch64.whl",
+            "langdetect-1.0.9-py3-none-any.whl",
+        ):
+            (output_dir / name).write_bytes(b"fake")
+        return sorted(item.name for item in output_dir.iterdir())
+
+    monkeypatch.setattr(exporter, "download_keyword_model_snapshot", fake_download_model)
+    monkeypatch.setattr(exporter, "download_keyword_wheels", fake_download_wheels)
+
+    result = exporter.export_keyword_fallback_assets(
+        repo_root=repo_root,
+        model_package="unused",
+        platform_tag="linux-arm64-py3.11",
+        python_bin="python3",
+        model_id="knowledgator/gliner-x-small",
+        target="component",
     )
 
     assert Path(result["model_dir"]).is_dir()

@@ -610,22 +610,42 @@ if any(root.glob("*.whl")):
 PY
 }
 
+resolve_keyword_model_dir() {
+  local candidate
+  for candidate in \
+    "$RUNTIME_DIR/component/deps/models/keyword_extraction/knowledgator-gliner-x-small" \
+    "$RUNTIME_DIR/data/models/keyword_extraction/knowledgator-gliner-x-small"
+  do
+    if [ -d "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+}
+
 install_keyword_fallback_dependencies() {
   local required="$1"
-  local model_dir="$RUNTIME_DIR/data/models/keyword_extraction/knowledgator-gliner-x-small"
-  local wheelhouse_root="$RUNTIME_DIR/data/deps/keyword_wheelhouse"
+  local model_dir
+  model_dir="$(resolve_keyword_model_dir)"
+  local component_wheelhouse_root="$RUNTIME_DIR/component/deps/keyword_wheelhouse"
+  local data_wheelhouse_root="$RUNTIME_DIR/data/deps/keyword_wheelhouse"
   local wheelhouse_dir
-  wheelhouse_dir="$(resolve_keyword_wheelhouse_dir "$wheelhouse_root")"
+  wheelhouse_dir="$(resolve_keyword_wheelhouse_dir "$component_wheelhouse_root")"
+  if [ -z "$wheelhouse_dir" ]; then
+    wheelhouse_dir="$(resolve_keyword_wheelhouse_dir "$data_wheelhouse_root")"
+  fi
 
   if [ "$required" = "true" ]; then
-    [ -d "$model_dir" ] || die "missing GLiNER keyword model directory: $model_dir"
+    [ -n "$model_dir" ] || die "missing GLiNER keyword model directory under component/deps or data"
     [ -f "$model_dir/gliner_config.json" ] || die "missing GLiNER keyword model gliner_config.json: $model_dir"
     if [ ! -f "$model_dir/model.safetensors" ] && [ ! -f "$model_dir/pytorch_model.bin" ]; then
       die "missing GLiNER keyword model weights under $model_dir"
     fi
-    [ -n "$wheelhouse_dir" ] || die "missing keyword wheelhouse under $wheelhouse_root"
+    [ -n "$wheelhouse_dir" ] || die "missing keyword wheelhouse under component/deps or data"
   elif [ -z "$wheelhouse_dir" ]; then
     return 0
+  elif [ -z "$model_dir" ]; then
+    die "keyword wheelhouse is present but GLiNER keyword model directory is missing under component/deps or data"
   fi
 
   local wheels=()

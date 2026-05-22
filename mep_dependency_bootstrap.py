@@ -258,6 +258,7 @@ def _run_offline_pip_install(
     requirements_file: Path,
     constraints_file: Path | None,
     wheelhouse_dirs: tuple[Path, ...],
+    install_no_deps: bool = False,
 ) -> None:
     _validate_wheelhouse_wheels(wheelhouse_dirs)
 
@@ -269,6 +270,8 @@ def _run_offline_pip_install(
         "--disable-pip-version-check",
         "--no-index",
     ]
+    if install_no_deps:
+        command.append("--no-deps")
     for wheelhouse_dir in wheelhouse_dirs:
         command.extend(["--find-links", str(wheelhouse_dir)])
     if constraints_file is not None:
@@ -361,6 +364,9 @@ def ensure_mep_offline_requirements(
                 requirements_file=requirements_file,
                 constraints_file=constraints_file,
                 wheelhouse_dirs=wheelhouse_dirs,
+                install_no_deps=requirements_file.name.startswith(
+                    "keyword-requirements-"
+                ),
             )
             _OFFLINE_REQUIREMENTS_DONE.add(requirements_file)
             installed_from.append(str(requirements_file))
@@ -429,6 +435,15 @@ def _prepend_import_path(path: Path, *, index: int = 0) -> bool:
 def bootstrap_mep_data_dependencies(current_dir: str | os.PathLike[str]) -> tuple[str, ...]:
     resolved_current_dir = Path(current_dir).expanduser().resolve()
     added_paths: list[str] = []
+
+    seen_keyword_roots: set[Path] = set()
+    for deps_dir in iter_mep_dependency_dir_candidates(resolved_current_dir):
+        if deps_dir in seen_keyword_roots:
+            continue
+        seen_keyword_roots.add(deps_dir)
+        if deps_dir.is_dir():
+            _configure_keyword_fallback_model(deps_dir)
+
     seen_data_dirs: set[Path] = set()
     for data_dir in iter_mep_data_dir_candidates(resolved_current_dir):
         if data_dir in seen_data_dirs:

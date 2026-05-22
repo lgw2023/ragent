@@ -19,10 +19,14 @@ by the component package. Put small missing application dependencies under
 
 ```text
 mep/component_deps/site-packages/linux-arm64-py3.10/
+mep/component_deps/keyword_wheelhouse/linux-arm64-py3.10/
+mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small/
 mep/component_deps/pythonpath/
 ```
 
-Legacy model-specific dependencies may still live under
+The no-LLM GLiNER keyword fallback is a component capability, not an embedding
+model dependency. Keep its wheels and local model snapshot under
+`mep/component_deps/`. Legacy model-specific dependencies may still live under
 `modelDir/data/deps/`, but Qwen3 no longer reuses the BGE-M3 dependency tree.
 Use `wheelhouse/<platform>/` only when a configured offline repair step really
 needs it. Use `site-packages/<platform>/` for packages unpacked in an

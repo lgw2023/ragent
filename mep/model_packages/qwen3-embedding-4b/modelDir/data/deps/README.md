@@ -10,3 +10,7 @@ package under `component/deps` when an image probe shows they are missing.
 In this repository those shared component dependencies are sourced from
 `mep/component_deps/` and copied into the assembled MEP runtime as
 `component/deps/`.
+
+The GLiNER no-LLM keyword fallback is also component-owned. Its Python wheels
+and local `knowledgator-gliner-x-small` snapshot live under
+`mep/component_deps/`, not under this Qwen3 model package.

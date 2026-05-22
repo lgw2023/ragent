@@ -1,0 +1,11 @@
+# Native Python packages required by no-LLM keyword fallback.
+#
+# Installed with pip --no-deps from component/deps/keyword_wheelhouse.
+gliner==0.2.26
+stanza==1.10.1
+onnxruntime==1.16.3
+coloredlogs==15.0.1
+flatbuffers==25.12.19
+humanfriendly==10.0
+emoji==2.14.1
+langdetect==1.0.9

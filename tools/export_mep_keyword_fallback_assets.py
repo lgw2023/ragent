@@ -12,7 +12,7 @@ from typing import Any
 
 
 DEFAULT_MODEL_PACKAGE = "qwen3-embedding-4b"
-DEFAULT_PLATFORM_TAG = "linux-arm64-py3.9"
+DEFAULT_PLATFORM_TAG = "linux-arm64-py3.11"
 DEFAULT_HF_MODEL_ID = "knowledgator/gliner-x-small"
 DEFAULT_HF_MODEL_DIR_NAME = "knowledgator-gliner-x-small"
 KEYWORD_MODEL_RELATIVE_DIR = (
@@ -22,6 +22,7 @@ KEYWORD_MODEL_RELATIVE_DIR = (
     / DEFAULT_HF_MODEL_DIR_NAME
 )
 KEYWORD_WHEELHOUSE_RELATIVE_DIR = Path("data") / "deps" / "keyword_wheelhouse"
+COMPONENT_DEPS_RELATIVE_DIR = Path("mep") / "component_deps"
 DEFAULT_BINARY_REQUIREMENTS = (
     "gliner==0.2.26",
     "stanza==1.10.1",
@@ -61,6 +62,20 @@ def keyword_model_dir(model_dir_root: Path) -> Path:
 
 def keyword_wheelhouse_dir(model_dir_root: Path, platform_tag: str) -> Path:
     return model_dir_root / KEYWORD_WHEELHOUSE_RELATIVE_DIR / platform_tag
+
+
+def component_keyword_model_dir(repo_root: Path) -> Path:
+    return (
+        repo_root
+        / COMPONENT_DEPS_RELATIVE_DIR
+        / "models"
+        / "keyword_extraction"
+        / DEFAULT_HF_MODEL_DIR_NAME
+    )
+
+
+def component_keyword_wheelhouse_dir(repo_root: Path, platform_tag: str) -> Path:
+    return repo_root / COMPONENT_DEPS_RELATIVE_DIR / "keyword_wheelhouse" / platform_tag
 
 
 def _run(command: list[str]) -> None:
@@ -197,11 +212,23 @@ def download_keyword_model_snapshot(
 
 def validate_keyword_fallback_assets(
     *,
-    model_dir_root: Path,
+    model_dir_root: Path | None = None,
+    repo_root: Path | None = None,
     platform_tag: str,
+    target: str = "model",
 ) -> dict[str, Any]:
-    model_dir = keyword_model_dir(model_dir_root)
-    wheelhouse_dir = keyword_wheelhouse_dir(model_dir_root, platform_tag)
+    if target == "component":
+        if repo_root is None:
+            raise ValueError("repo_root is required for component keyword assets")
+        model_dir = component_keyword_model_dir(repo_root)
+        wheelhouse_dir = component_keyword_wheelhouse_dir(repo_root, platform_tag)
+    elif target == "model":
+        if model_dir_root is None:
+            raise ValueError("model_dir_root is required for model keyword assets")
+        model_dir = keyword_model_dir(model_dir_root)
+        wheelhouse_dir = keyword_wheelhouse_dir(model_dir_root, platform_tag)
+    else:
+        raise ValueError(f"unsupported keyword fallback target: {target}")
     if not model_dir.is_dir():
         raise FileNotFoundError(f"GLiNER keyword model directory is missing: {model_dir}")
     missing_markers = [
@@ -270,17 +297,25 @@ def export_keyword_fallback_assets(
     platform_tag: str,
     python_bin: str,
     model_id: str,
+    target: str = "model",
     skip_model: bool = False,
     skip_wheels: bool = False,
 ) -> dict[str, Any]:
-    model_dir_root = (
-        repo_root / "mep" / "model_packages" / model_package / "modelDir"
-    ).resolve()
-    if not model_dir_root.is_dir():
-        raise FileNotFoundError(f"MEP modelDir is missing: {model_dir_root}")
-
-    model_dir = keyword_model_dir(model_dir_root)
-    wheelhouse_dir = keyword_wheelhouse_dir(model_dir_root, platform_tag)
+    repo_root = repo_root.resolve()
+    model_dir_root: Path | None = None
+    if target == "component":
+        model_dir = component_keyword_model_dir(repo_root)
+        wheelhouse_dir = component_keyword_wheelhouse_dir(repo_root, platform_tag)
+    elif target == "model":
+        model_dir_root = (
+            repo_root / "mep" / "model_packages" / model_package / "modelDir"
+        ).resolve()
+        if not model_dir_root.is_dir():
+            raise FileNotFoundError(f"MEP modelDir is missing: {model_dir_root}")
+        model_dir = keyword_model_dir(model_dir_root)
+        wheelhouse_dir = keyword_wheelhouse_dir(model_dir_root, platform_tag)
+    else:
+        raise ValueError(f"unsupported keyword fallback target: {target}")
     if not skip_model:
         download_keyword_model_snapshot(model_id=model_id, output_dir=model_dir)
     if not skip_wheels:
@@ -290,8 +325,10 @@ def export_keyword_fallback_assets(
             python_bin=python_bin,
         )
     return validate_keyword_fallback_assets(
+        repo_root=repo_root,
         model_dir_root=model_dir_root,
         platform_tag=platform_tag,
+        target=target,
     )
 
 
@@ -299,7 +336,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Export GLiNER keyword fallback dependencies and model snapshot into "
-            "the MEP model package."
+            "the MEP component deps directory, or a legacy MEP model package."
         )
     )
     parser.add_argument(
@@ -311,7 +348,13 @@ def main() -> None:
     parser.add_argument(
         "--model-package",
         default=DEFAULT_MODEL_PACKAGE,
-        help="Name under mep/model_packages/.",
+        help="Name under mep/model_packages/ when --target=model.",
+    )
+    parser.add_argument(
+        "--target",
+        choices=("component", "model"),
+        default="component",
+        help="Export assets to component deps by default; use model for legacy packages.",
     )
     parser.add_argument(
         "--platform-tag",
@@ -346,6 +389,7 @@ def main() -> None:
         platform_tag=args.platform_tag,
         python_bin=args.python_bin,
         model_id=args.model_id,
+        target=args.target,
         skip_model=args.skip_model,
         skip_wheels=args.skip_wheels,
     )

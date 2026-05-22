@@ -6,8 +6,9 @@ set -euo pipefail
 #
 # The target host/container is assumed to have no working pip index access.
 # The new Qwen3 Ascend image should use its built-in vLLM runtime by default.
-# Model wheelhouses, keyword fallback assets, and root-level vLLM repair wheels
-# are copied only when the matching INCLUDE_* switch is enabled.
+# Legacy model wheelhouses and root-level vLLM repair wheels are copied only
+# when the matching INCLUDE_* switch is enabled. Component-owned dependencies,
+# including GLiNER keyword fallback assets, are copied from mep/component_deps.
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -113,10 +114,10 @@ MODEL_PACKAGE_SRC="$PROJECT_ROOT/mep/model_packages/$MODEL_PACKAGE"
 MODEL_PACKAGE_DEST="$DEST/mep/model_packages/$MODEL_PACKAGE"
 WHEELHOUSE_SRC="$MODEL_PACKAGE_SRC/modelDir/data/deps/wheelhouse/$PLATFORM_TAG"
 WHEELHOUSE_DEST="$MODEL_PACKAGE_DEST/modelDir/data/deps/wheelhouse/$PLATFORM_TAG"
-KEYWORD_MODEL_SRC="$MODEL_PACKAGE_SRC/modelDir/data/models/keyword_extraction/knowledgator-gliner-x-small"
-KEYWORD_MODEL_DEST="$MODEL_PACKAGE_DEST/modelDir/data/models/keyword_extraction/knowledgator-gliner-x-small"
-KEYWORD_WHEELHOUSE_SRC="$MODEL_PACKAGE_SRC/modelDir/data/deps/keyword_wheelhouse/$PLATFORM_TAG"
-KEYWORD_WHEELHOUSE_DEST="$MODEL_PACKAGE_DEST/modelDir/data/deps/keyword_wheelhouse/$PLATFORM_TAG"
+KEYWORD_MODEL_SRC="$PROJECT_ROOT/mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small"
+KEYWORD_MODEL_DEST="$DEST/mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small"
+KEYWORD_WHEELHOUSE_SRC="$PROJECT_ROOT/mep/component_deps/keyword_wheelhouse/$PLATFORM_TAG"
+KEYWORD_WHEELHOUSE_DEST="$DEST/mep/component_deps/keyword_wheelhouse/$PLATFORM_TAG"
 
 safe_prepare_dest
 

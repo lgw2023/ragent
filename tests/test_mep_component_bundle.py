@@ -207,6 +207,64 @@ def test_mep_data_dependency_bootstrap_configures_keyword_fallback_assets(
     assert sys.path[0] == str(keyword_wheel.resolve())
 
 
+def test_mep_dependency_bootstrap_prefers_component_keyword_fallback_assets(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    component_keyword_model_dir = (
+        component_dir
+        / "deps"
+        / "models"
+        / "keyword_extraction"
+        / "knowledgator-gliner-x-small"
+    )
+    component_keyword_model_dir.mkdir(parents=True)
+    (component_keyword_model_dir / "gliner_config.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    (component_keyword_model_dir / "pytorch_model.bin").write_bytes(b"fake")
+    data_keyword_model_dir = (
+        runtime_root
+        / "data"
+        / "models"
+        / "keyword_extraction"
+        / "knowledgator-gliner-x-small"
+    )
+    data_keyword_model_dir.mkdir(parents=True)
+    component_keyword_wheelhouse = (
+        component_dir / "deps" / "keyword_wheelhouse" / "test-platform"
+    )
+    component_keyword_wheelhouse.mkdir(parents=True)
+    keyword_wheel = component_keyword_wheelhouse / "gliner-0.2.26-py3-none-any.whl"
+    with zipfile.ZipFile(keyword_wheel, "w") as wheel:
+        wheel.writestr("gliner/__init__.py", "")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_MODEL", raising=False)
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_DEVICE", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "test-platform")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert os.environ["RAG_KEYWORD_FALLBACK_MODEL"] == str(
+        component_keyword_model_dir.resolve()
+    )
+    assert os.environ["RAG_KEYWORD_FALLBACK_DEVICE"] == "cpu"
+    assert str(keyword_wheel.resolve()) in added_paths
+    assert sys.path[0] == str(keyword_wheel.resolve())
+
+
 def test_mep_data_dependency_bootstrap_preserves_explicit_keyword_model_env(
     monkeypatch,
     tmp_path: Path,
@@ -551,6 +609,7 @@ def test_mep_offline_requirements_install_includes_keyword_wheelhouse(
 
     assert installed == (str(requirements.resolve()),)
     command = commands[0]
+    assert "--no-deps" in command
     find_links = [
         command[index + 1]
         for index, value in enumerate(command)
