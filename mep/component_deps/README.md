@@ -20,9 +20,11 @@ packages required by the component. They are shared by Qwen3 and legacy BGE
 model packages because they belong to the component runtime, not to a specific
 embedding model.
 
-The wheelhouse currently carries `fastuuid`, a native LiteLLM dependency that
-must be installed by `process.py` inside the Linux ARM64 container instead of
-being imported from the unpacked `site-packages` tree.
+The wheelhouse currently carries small component runtime requirements that the
+target images do not provide, including `fastuuid` for LiteLLM and `tenacity`
+for `ragent.llm.openai`. Native wheels such as `fastuuid` must be installed by
+`process.py` inside the Linux ARM64 container instead of being imported from the
+unpacked `site-packages` tree.
 
 For the Qwen3 vLLM Ascend image, do not place the validated Ascend/vLLM stack
 here. The image owns `torch`, `torch_npu`, `vllm`, `vllm_ascend`, and the

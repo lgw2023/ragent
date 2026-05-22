@@ -1,3 +1,4 @@
 # Component runtime dependencies missing from the target Linux ARM64 Python 3.10
 # image. Installed offline from component/deps/wheelhouse/linux-arm64-py3.10.
 fastuuid==0.14.0
+tenacity==9.1.4

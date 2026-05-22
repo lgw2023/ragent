@@ -849,7 +849,7 @@ def test_offline_full_chain_validation_script_is_exported():
     assert 'MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.10}}"' in script_text
     assert 'MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-0}"' in script_text
     assert 'MEP_STRICT_OFFLINE="${MEP_STRICT_OFFLINE:-1}"' in script_text
-    assert 'RAGENT_MEP_OFFLINE_PIP_INSTALL="${RAGENT_MEP_OFFLINE_PIP_INSTALL:-0}"' in script_text
+    assert 'RAGENT_MEP_OFFLINE_PIP_INSTALL="${RAGENT_MEP_OFFLINE_PIP_INSTALL:-1}"' in script_text
     assert 'RAGENT_MEP_WHEELHOUSE_ZIPIMPORT="${RAGENT_MEP_WHEELHOUSE_ZIPIMPORT:-0}"' in script_text
     assert 'SKIP_VLLM_VALIDATION="${SKIP_VLLM_VALIDATION:-1}"' in script_text
     assert 'MEP_REUSE_EXISTING_VLLM="${MEP_REUSE_EXISTING_VLLM:-0}"' in script_text

@@ -300,7 +300,7 @@ MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 
 <deps>/wheelhouse/*.whl
 ```
 
-这用于承载目标镜像中没有的轻量 Python 依赖。`<platform-tag>` 形如 `linux-arm64-py3.10`；当前 Qwen3 vLLM Ascend 目标镜像使用 `linux-arm64-py3.10`。运行时只有在 `RAGENT_MEP_OFFLINE_PIP_INSTALL` 未关闭、且 `<deps>/requirements-<platform-tag>.txt` 存在时，才会用匹配的 `wheelhouse/<platform-tag>/` 执行 `pip install --no-index`。新 Qwen3 验证脚本默认设置 `RAGENT_MEP_OFFLINE_PIP_INSTALL=0`，不再安装模型包 wheelhouse。
+这用于承载目标镜像中没有的轻量 Python 依赖。`<platform-tag>` 形如 `linux-arm64-py3.10` 或 `linux-arm64-py3.11`，由目标镜像的 Python 版本决定。运行时只有在 `RAGENT_MEP_OFFLINE_PIP_INSTALL` 未关闭、且 `<deps>/requirements-<platform-tag>.txt` 存在时，才会用匹配的 `wheelhouse/<platform-tag>/` 执行 `pip install --no-index`。新 Qwen3 验证脚本默认设置 `RAGENT_MEP_OFFLINE_PIP_INSTALL=1`，以便安装组件级离线 requirements；模型包 wheelhouse 仍不作为默认安装来源。
 
 wheelhouse zipimport 也可通过 `RAGENT_MEP_WHEELHOUSE_ZIPIMPORT=0` 关闭。新 Qwen3 验证脚本默认关闭它，避免把旧的大型 wheelhouse overlay 到目标镜像的已验证运行栈上。strict offline 仍然保留，它的目标是阻止联网下载，而不是强制安装离线环境。
 
