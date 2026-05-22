@@ -376,6 +376,7 @@ def test_summarize_requests_uses_process_spec_aliases(tmp_path: Path):
 
     assert summary["requests_require_llm"] is False
     assert summary["requests_have_retrieval_only"] is True
+    assert summary["requests_require_keyword_fallback"] is True
 
 
 def test_summarize_requests_defaults_unset_mode_to_retrieval_only(tmp_path: Path):
@@ -397,7 +398,34 @@ def test_summarize_requests_defaults_unset_mode_to_retrieval_only(tmp_path: Path
 
     assert summary["requests_require_llm"] is False
     assert summary["requests_have_retrieval_only"] is True
+    assert summary["requests_require_keyword_fallback"] is True
     assert summary["requests"][0]["retrieval_only"] is True
+
+
+def test_summarize_requests_does_not_require_keyword_fallback_with_explicit_keywords(
+    tmp_path: Path,
+):
+    request_dir = tmp_path / "example" / "mep_requests"
+    request_dir.mkdir(parents=True)
+    (request_dir / "retrieval_with_keywords.json").write_text(
+        json.dumps(
+            {
+                "data": {
+                    "retrieval_only": True,
+                    "query": "糖饮料运动补偿",
+                    "high_level_keywords": ["含糖饮料"],
+                    "low_level_keywords": ["330ml"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_requests(tmp_path, "retrieval_with_keywords.json")
+
+    assert summary["requests_require_llm"] is False
+    assert summary["requests_have_retrieval_only"] is True
+    assert summary["requests_require_keyword_fallback"] is False
 
 
 @pytest.mark.parametrize(

@@ -158,6 +158,24 @@ def test_resolve_embedding_launch_config_reads_sysconfig(tmp_path: Path):
     assert config.config_path == (model_dir / "sysconfig.properties").resolve()
 
 
+def test_resolve_embedding_launch_config_uses_qwen3_component_defaults(tmp_path: Path):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text("{}", encoding="utf-8")
+    (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+
+    config = resolve_embedding_launch_config(model_dir)
+
+    assert config.served_model_name == "qwen3-embedding-4b-local"
+    assert config.runtime == "vllm"
+    assert config.dimensions == 2560
+    assert config.max_token_size == 8192
+    assert config.max_model_len == 8192
+    assert "--task" in config.extra_args
+    assert "embed" in config.extra_args
+    assert "--trust-remote-code" in config.extra_args
+
+
 def test_resolve_embedding_launch_config_prefers_data_config(tmp_path: Path):
     model_dir = tmp_path / "model"
     embedding_root = model_dir
@@ -581,13 +599,20 @@ def test_build_vllm_subprocess_env_defaults_to_spawn(monkeypatch, tmp_path: Path
     env = build_vllm_subprocess_env()
 
     assert env["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
+    assert env["VLLM_USE_V1"] == "1"
+    assert env["ASCEND_RT_VISIBLE_DEVICES"] == "0"
+    assert env["ATB_CXX_ABI"] == "cxx_abi_0"
+    assert (
+        "/usr/local/Ascend/nnal/atb/latest/atb/cxx_abi_0/lib"
+        in env["LD_LIBRARY_PATH"].split(os.pathsep)
+    )
 
 
 def test_default_ascend_env_scripts_include_latest_paths():
     assert "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh" in (
         mep_embedding_runtime._DEFAULT_ASCEND_ENV_SCRIPTS
     )
-    assert "/usr/local/Ascend/nnal/atb/latest/atb/set_env.sh" in (
+    assert "/usr/local/Ascend/nnal/asdsip/set_env.sh" in (
         mep_embedding_runtime._DEFAULT_ASCEND_ENV_SCRIPTS
     )
 
@@ -632,7 +657,9 @@ def test_build_vllm_subprocess_env_sources_ascend_set_env(monkeypatch, tmp_path:
 
     assert env["RAGENT_TEST_ASCEND_ENV"] == "loaded"
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(tmp_path / "deps")
-    assert env["LD_LIBRARY_PATH"].split(":")[0] == "/fake/ascend/lib"
+    ld_library_path = env["LD_LIBRARY_PATH"].split(os.pathsep)
+    assert ld_library_path[0] == "/usr/local/Ascend/nnal/atb/latest/atb/cxx_abi_0/lib"
+    assert "/fake/ascend/lib" in ld_library_path
     assert env["VLLM_WORKER_MULTIPROC_METHOD"] == "spawn"
 
 
@@ -659,7 +686,9 @@ def test_build_vllm_subprocess_env_sources_default_ascend_scripts(
     env = build_vllm_subprocess_env()
 
     assert env["PYTHONPATH"].split(os.pathsep)[0] == "/fake/toolkit"
-    assert env["LD_LIBRARY_PATH"].split(os.pathsep)[0] == "/fake/atb"
+    ld_library_path = env["LD_LIBRARY_PATH"].split(os.pathsep)
+    assert ld_library_path[0] == "/usr/local/Ascend/nnal/atb/latest/atb/cxx_abi_0/lib"
+    assert "/fake/atb" in ld_library_path
 
 
 def test_build_vllm_subprocess_env_applies_config_env_overrides(

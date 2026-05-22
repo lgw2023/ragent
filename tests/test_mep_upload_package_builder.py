@@ -59,6 +59,12 @@ def _write_fake_repo(repo_root: Path) -> None:
 
     (repo_root / "ragent").mkdir()
     (repo_root / "ragent" / "__init__.py").write_text("", encoding="utf-8")
+    component_deps = repo_root / "mep" / "component_deps" / "pythonpath"
+    component_deps.mkdir(parents=True)
+    (component_deps / "component_runtime_marker.py").write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+    )
 
     for excluded_dir in (
         "tests",
@@ -159,6 +165,9 @@ def test_build_mep_upload_packages_creates_upload_directories(tmp_path: Path):
     ):
         assert (component_dir / filename).is_file()
     assert (component_dir / "ragent" / "__init__.py").is_file()
+    assert (
+        component_dir / "deps" / "pythonpath" / "component_runtime_marker.py"
+    ).is_file()
     assert not (component_dir / "run_mep_local.py").exists()
 
     for excluded_dir in (
@@ -437,6 +446,7 @@ def test_build_mep_upload_packages_archives_zip_with_upload_shapes(tmp_path: Pat
     assert "process.py" in component_names
     assert "mep_dependency_bootstrap.py" in component_names
     assert "ragent/__init__.py" in component_names
+    assert "deps/pythonpath/component_runtime_marker.py" in component_names
     assert not any(name.startswith("component_package/") for name in component_names)
 
     with zipfile.ZipFile(model_archive) as zf:

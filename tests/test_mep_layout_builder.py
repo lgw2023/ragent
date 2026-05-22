@@ -25,6 +25,12 @@ def _write_fake_repo(repo_root: Path) -> None:
         (repo_root / filename).write_text("# component file\n", encoding="utf-8")
     (repo_root / "ragent").mkdir()
     (repo_root / "ragent" / "__init__.py").write_text("", encoding="utf-8")
+    component_deps = repo_root / "mep" / "component_deps" / "pythonpath"
+    component_deps.mkdir(parents=True)
+    (component_deps / "component_runtime_marker.py").write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+    )
 
     model_dir = repo_root / "mep" / "model_packages" / "demo" / "modelDir"
     (model_dir / "model").mkdir(parents=True)
@@ -82,7 +88,8 @@ def test_build_mep_layout_creates_platform_shaped_runtime(tmp_path: Path):
     assert (output / "model" / "config.json").exists()
     assert (output / "model" / "tokenizer.json").exists()
     assert (output / "model" / "model.safetensors.index.json").exists()
-    assert (output / "data" / "config" / "embedding.properties").exists()
+    assert not (output / "data" / "config" / "embedding.properties").exists()
+    assert (output / "data" / "kg" / "sample_kg" / "kv_store_text_chunks.sqlite").exists()
     assert (output / "data" / "deps" / "README.md").exists()
     assert (output / "data" / "kg" / "sample_kg").is_dir()
 
@@ -108,11 +115,19 @@ def test_build_mep_layout_materializes_and_archives_zip(tmp_path: Path):
     assert archive_path.exists()
     assert not (output / "model").is_symlink()
     assert (output / "component" / "mep_dependency_bootstrap.py").exists()
+    assert (
+        output
+        / "component"
+        / "deps"
+        / "pythonpath"
+        / "component_runtime_marker.py"
+    ).is_file()
 
     with zipfile.ZipFile(archive_path) as zf:
         names = set(zf.namelist())
     assert "component/process.py" in names
     assert "component/mep_dependency_bootstrap.py" in names
+    assert "component/deps/pythonpath/component_runtime_marker.py" in names
     assert "model/config.json" in names
     assert "model/tokenizer.json" in names
     assert "model/pytorch_model.bin" in names

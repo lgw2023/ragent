@@ -243,12 +243,17 @@ def summarize_requests(container_test_dir: Path, request_items: str) -> dict[str
     requests: list[dict[str, Any]] = []
     requests_require_llm = False
     requests_have_retrieval_only = False
+    requests_require_keyword_fallback = False
     for request_item in items:
         request_path = _resolve_request_path(container_test_dir, request_item)
         request = json.loads(request_path.read_text(encoding="utf-8"))
         info = request_keyword_info(request)
         requests_require_llm = requests_require_llm or not info.retrieval_only
         requests_have_retrieval_only = requests_have_retrieval_only or info.retrieval_only
+        requests_require_keyword_fallback = (
+            requests_require_keyword_fallback
+            or (info.retrieval_only and not info.has_explicit_keywords)
+        )
         requests.append(
             {
                 "request": str(request_path),
@@ -259,6 +264,7 @@ def summarize_requests(container_test_dir: Path, request_items: str) -> dict[str
     return {
         "requests_require_llm": requests_require_llm,
         "requests_have_retrieval_only": requests_have_retrieval_only,
+        "requests_require_keyword_fallback": requests_require_keyword_fallback,
         "requests": requests,
     }
 
@@ -431,6 +437,7 @@ def main() -> None:
         "request-summary",
         "request-requires-llm",
         "request-has-retrieval-only",
+        "request-requires-keyword-fallback",
     }:
         command = sys.argv[1]
         parser = argparse.ArgumentParser(
@@ -448,6 +455,8 @@ def main() -> None:
             print("true" if summary["requests_require_llm"] else "false")
         elif command == "request-has-retrieval-only":
             print("true" if summary["requests_have_retrieval_only"] else "false")
+        elif command == "request-requires-keyword-fallback":
+            print("true" if summary["requests_require_keyword_fallback"] else "false")
         else:
             print(json.dumps(summary, ensure_ascii=False, indent=2))
         return

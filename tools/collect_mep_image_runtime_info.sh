@@ -33,7 +33,7 @@ INCLUDE_RAW_DOCKER_JSON="${INCLUDE_RAW_DOCKER_JSON:-0}"
 INCLUDE_SECRET_VALUES="${INCLUDE_SECRET_VALUES:-0}"
 
 ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0-7}"
-ASCEND_ENV_SCRIPTS="${ASCEND_ENV_SCRIPTS:-/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/set_env.sh /usr/local/Ascend/nnal/atb/set_env.sh}"
+ASCEND_ENV_SCRIPTS="${ASCEND_ENV_SCRIPTS:-/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/set_env.sh /usr/local/Ascend/nnal/asdsip/set_env.sh}"
 START_COMMAND="${START_COMMAND:-while true; do sleep 3600; done}"
 RUN_VLLM_EMBEDDING_SMOKE="${RUN_VLLM_EMBEDDING_SMOKE:-0}"
 VLLM_SMOKE_MODEL_PATH="${VLLM_SMOKE_MODEL_PATH:-/tmp/ragent-project/mep/model_packages/bge-m3/modelDir/model}"
@@ -298,7 +298,7 @@ set +e
 
 PROBE_DIR="${RAGENT_MEP_PROBE_DIR:-/tmp/ragent-mep-image-probe}"
 INCLUDE_SECRET_VALUES="${INCLUDE_SECRET_VALUES:-0}"
-ASCEND_ENV_SCRIPTS="${ASCEND_ENV_SCRIPTS:-/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/set_env.sh /usr/local/Ascend/nnal/atb/set_env.sh}"
+ASCEND_ENV_SCRIPTS="${ASCEND_ENV_SCRIPTS:-/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/set_env.sh /usr/local/Ascend/nnal/asdsip/set_env.sh}"
 RUN_VLLM_EMBEDDING_SMOKE="${RUN_VLLM_EMBEDDING_SMOKE:-0}"
 VLLM_SMOKE_MODEL_PATH="${VLLM_SMOKE_MODEL_PATH:-/tmp/ragent-project/mep/model_packages/bge-m3/modelDir/model}"
 VLLM_SMOKE_PORT="${VLLM_SMOKE_PORT:-8000}"
@@ -420,6 +420,7 @@ capture_shell ascend_probe.txt '
   command -v npu-smi >/dev/null 2>&1 && npu-smi info || true
   for path in \
     /usr/local/Ascend/ascend-toolkit/set_env.sh \
+    /usr/local/Ascend/nnal/asdsip/set_env.sh \
     /usr/local/Ascend/nnal/atb/set_env.sh \
     /usr/local/Ascend/ascend-toolkit/latest/bin/setenv.bash; do
     printf "\n----- %s -----\n" "$path"
@@ -489,6 +490,14 @@ packages = [
     "numpy",
     "openai",
     "litellm",
+    "nano_vectordb",
+    "networkx",
+    "requests",
+    "dotenv",
+    "tenacity",
+    "tiktoken",
+    "pyuca",
+    "httpx",
     "pydantic",
     "cbor2",
     "triton",
@@ -514,7 +523,7 @@ capture_shell pip_freeze.txt '
 '
 
 capture_shell pip_key_packages.txt '
-  packages="vllm vllm-ascend vllm_ascend torch torch-npu torch_npu transformers tokenizers sentence-transformers numpy openai litellm pydantic cbor2 triton triton-ascend model-hosting-container-standards"
+  packages="vllm vllm-ascend vllm_ascend torch torch-npu torch_npu transformers tokenizers sentence-transformers numpy openai litellm nano-vectordb networkx requests python-dotenv tenacity tiktoken pyuca httpx pydantic cbor2 triton triton-ascend model-hosting-container-standards"
   for python_bin in python3 python3.10 /usr/local/python3.10.2/bin/python3 python; do
     if command -v "$python_bin" >/dev/null 2>&1 || [ -x "$python_bin" ]; then
       printf "\n----- %s -m pip show key packages -----\n" "$python_bin"

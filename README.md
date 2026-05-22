@@ -105,7 +105,7 @@ Before upload, run the preflight checker for the target Ascend Python platform:
 ```bash
 python tools/preflight_mep_upload_packages.py \
   --upload-root .mep_upload/qwen3-embedding-4b \
-  --platform-tag linux-arm64-py3.9
+  --platform-tag linux-arm64-py3.10
 ```
 
 Both MEP builders reject output paths that would overwrite the repository root,
@@ -115,8 +115,10 @@ package must include a non-empty `modelDir/meta/type.mf`.
 The component only queries an existing KG snapshot. In the MEP model package,
 `modelDir/model/` is the Hugging Face model directory itself, with files such as
 `config.json`, `tokenizer.json`, and model weights directly inside it.
-`modelDir/data/` holds component-readable read-only data such as embedding
-config, KG snapshots, dependency payloads, and samples. `action=create` writes
+`modelDir/data/` holds component-readable read-only data such as KG snapshots
+and samples. Component runtime dependencies belong in `component/deps/` when
+the target image probe proves they are missing; Qwen3 no longer reuses the
+legacy BGE-M3 `data/deps` wheelhouse. `action=create` writes
 `{generatePath}/gen.json` and returns `recommendResult`; direct local requests
 without `action` still return the result payload in `recommendResult.content`.
 

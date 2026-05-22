@@ -10,6 +10,16 @@
     "mode": "hybrid",
     "retrieval_only": true,
     "only_need_context": true,
+    "high_level_keywords": [
+      "含糖饮料",
+      "能量消耗",
+      "体力活动"
+    ],
+    "low_level_keywords": [
+      "330ml",
+      "中速步行30分钟",
+      "爬楼"
+    ],
     "enable_rerank": false,
     "generatePath": "/tmp/ragent_mep_retrieval_only_output"
   }

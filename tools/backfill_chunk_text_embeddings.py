@@ -180,7 +180,7 @@ async def _backfill_embeddings(args: argparse.Namespace) -> None:
         and graph_embedding_dim != vdb_embedding_dim
     )
     current_embedding_dim = get_configured_embedding_dim(
-        getattr(openai_embed, "embedding_dim", 1024)
+        getattr(openai_embed, "embedding_dim", 2560)
     )
     runtime_dim_mismatch = (
         expected_embedding_dim is not None

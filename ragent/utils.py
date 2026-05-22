@@ -90,7 +90,7 @@ def get_configured_embedding_dimensions() -> str | None:
     return os.getenv("EMBEDDING_DIMENSIONS") or os.getenv("EMBEDDING_DIM")
 
 
-def get_configured_embedding_dim(default: int = 1024) -> int:
+def get_configured_embedding_dim(default: int = 2560) -> int:
     configured_dimensions = get_configured_embedding_dimensions()
     if configured_dimensions is None:
         return default

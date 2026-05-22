@@ -593,6 +593,27 @@ def test_resolve_single_snapshot_from_data_dir_supports_data_kg_layout(tmp_path:
     assert resolved == snapshot_dir.resolve()
 
 
+def test_resolve_single_snapshot_from_data_dir_supports_sqlite_kv_snapshot(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    snapshot_dir = data_dir / "kg" / "demo_kg"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    (snapshot_dir / "graph_chunk_entity_relation.graphml").write_text(
+        "<graphml />\n",
+        encoding="utf-8",
+    )
+    (snapshot_dir / "kv_store_text_chunks.sqlite").write_bytes(b"sqlite")
+    (snapshot_dir / "vdb_chunks.json").write_text(
+        '{"embedding_dim": 2560, "data": []}\n',
+        encoding="utf-8",
+    )
+
+    resolved = resolve_single_snapshot_from_data_dir(data_dir)
+
+    assert resolved == snapshot_dir.resolve()
+
+
 def test_resolve_single_snapshot_from_data_dir_supports_relative_env_override(
     monkeypatch,
     tmp_path: Path,

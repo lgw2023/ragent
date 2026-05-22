@@ -31,6 +31,8 @@ class BenchmarkQueryRequest(BaseModel):
     mode: Literal["graph", "hybrid"] = "hybrid"
     enable_rerank: bool = True
     include_trace: bool = False
+    retrieval_only: bool = False
+    only_need_context: bool = False
     response_type: str = "Multiple Paragraphs"
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     history_turns: int | None = None
@@ -106,6 +108,9 @@ class BenchmarkServiceState:
     async def get_or_create_session(
         self,
         project_dir: str,
+        *,
+        require_llm: bool = True,
+        enable_rerank: bool | None = None,
     ) -> tuple[ProjectSession, bool, list[dict[str, Any]]]:
         existing = self._sessions.get(project_dir)
         if existing is not None:
@@ -120,7 +125,12 @@ class BenchmarkServiceState:
                 return existing, True, []
 
             init_stage_timings: list[dict[str, Any]] = []
-            rag = await initialize_rag(project_dir, stage_timings=init_stage_timings)
+            rag = await initialize_rag(
+                project_dir,
+                stage_timings=init_stage_timings,
+                require_llm=require_llm,
+                enable_rerank=enable_rerank,
+            )
             session = ProjectSession(project_dir=project_dir, rag=rag)
             async with self._registry_lock:
                 self._sessions[project_dir] = session
@@ -216,7 +226,10 @@ def _response_payload(
         "mode": request.mode,
         "enable_rerank": request.enable_rerank,
         "include_trace": request.include_trace,
+        "retrieval_only": request.retrieval_only,
+        "only_need_context": request.only_need_context or request.retrieval_only,
         "answer": result.get("answer", ""),
+        "retrieval_result": result.get("retrieval_result"),
         "referenced_file_paths": referenced_file_paths,
         "stage_timings": stage_timings,
         "cache_hit_stages": cache_hit_stages,
@@ -262,8 +275,11 @@ def create_app() -> FastAPI:
     @app.post("/v1/benchmark/query")
     async def benchmark_query(request: BenchmarkQueryRequest) -> dict[str, Any]:
         project_dir = _normalize_and_validate_project_dir(request.project_dir)
+        context_only = request.retrieval_only or request.only_need_context
         session, initialized_before_request, init_stage_timings = await state.get_or_create_session(
-            project_dir
+            project_dir,
+            require_llm=not context_only,
+            enable_rerank=request.enable_rerank,
         )
         project_first_request = session.query_count == 0
         started_at = time.perf_counter()
@@ -279,6 +295,8 @@ def create_app() -> FastAPI:
                 prefill_stage_timings=init_stage_timings if not initialized_before_request else None,
                 enable_rerank=request.enable_rerank,
                 response_type=request.response_type,
+                retrieval_only=request.retrieval_only,
+                only_need_context=request.only_need_context or request.retrieval_only,
             )
             session.query_count += 1
 

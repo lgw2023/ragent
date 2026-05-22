@@ -27,6 +27,12 @@ Component-owned compatibility behavior for the target MEP image, such as local
 service startup, Ascend environment setup, and process-level runtime defaults.
 _Avoid_: model package config
 
+**Component Runtime Deps**:
+Small Python packages carried by the **MEP Component** under `component/deps/`
+when the target image lacks them. They support Ragent code itself and are not
+part of the Hugging Face **Model Package**.
+_Avoid_: model wheelhouse, embedding runtime stack
+
 **vLLM Embedding Service**:
 An OpenAI-compatible embedding server started by the **MEP Component** inside
 the same MEP container. It is the primary **Embedding Runtime** for
@@ -42,6 +48,13 @@ _Avoid_: default transformers runtime
 A read-only knowledge graph and vector index consumed by the **MEP Component**
 at inference time.
 _Avoid_: online graph build, project data
+
+**Qwen3 Embedding Dimension**:
+The full 2560-dimensional vector size produced by Qwen3-Embedding-4B and used
+by Qwen3-backed **KG Snapshot** data. The **MEP Component** should default to
+this dimension and should not truncate it unless a future **KG Snapshot** is
+explicitly built at a smaller dimension.
+_Avoid_: 256-dim Qwen3 default, implicit MRL truncation
 
 ## Example Dialogue
 
@@ -59,3 +72,8 @@ Dev: Should the Qwen3 model package encode the vLLM command?
 
 Domain Expert: No. The model directory stays standard Hugging Face; the MEP
 Component owns Runtime Adaptation for the target image.
+
+Dev: Can we keep the old 256-dimensional demo KG for Qwen3?
+
+Domain Expert: No. Qwen3 KG snapshots use the full Qwen3 Embedding Dimension,
+so demo data must also be rebuilt at 2560 dimensions.

@@ -7,7 +7,9 @@ MEP 独立模型包，压缩包第一层必须是 `modelDir/`。
 - `modelDir/meta/type.mf`：MEP 元信息
 - `modelDir/model/`：`Qwen/Qwen3-Embedding-4B` 标准 Hugging Face 权重目录（`config.json`、`tokenizer.json`、`model*.safetensors` 等）
 - `modelDir/data/`：组件可读取的只读 KG、依赖和样例数据；vLLM 启动和镜像 runtime 适配由组件包负责
-- `modelDir/data/kg/`、`data/deps/`、`data/samples/`：与 bge-m3 包共用（软链），离线 wheelhouse 与示例 KG 快照
+- `modelDir/data/kg/sample_kg/`：Qwen3-Embedding-4B 以 2560 维构建的示例 KG 快照
+- `modelDir/data/deps/`：仅保留说明文件；Qwen3 不再复用 bge-m3 离线 wheelhouse
+- `modelDir/data/samples/`：样例请求资产，可按构建器布局复用历史包资产
 
 ## 本地权重
 
@@ -21,9 +23,9 @@ MEP 独立模型包，压缩包第一层必须是 `modelDir/`。
 
 ## embedding runtime
 
-Qwen3 在 MEP 上默认由组件同容器启动 vLLM OpenAI-compatible embedding 服务。镜像 runtime 适配、vLLM 命令参数、Ascend/ATB 环境处理和 transformers fallback 都属于组件包职责；模型包中的 `model/` 保持标准 Hugging Face 目录。支持 MRL：组件可配置更小的输出维度（32–2560）。
+Qwen3 在 MEP 上默认由组件同容器启动 vLLM OpenAI-compatible embedding 服务。镜像 runtime 适配、vLLM 命令参数、Ascend/ATB 环境处理和 transformers fallback 都属于组件包职责；模型包中的 `model/` 保持标准 Hugging Face 目录。当前默认使用完整 2560 维，不做 MRL 截断。
 
-**注意**：从 bge-m3（256 维）切换后，既有 KG 向量库需按新维度重新建索引。
+**注意**：从 bge-m3（256 维）切换后，既有 KG 向量库需按 2560 维重新建索引。当前内置 `data/kg/sample_kg/` 来自 `example/qwen4b_diet_kg`，三个 VDB 文件的 `embedding_dim` 均为 2560。
 
 ## 构建与本地验证
 

@@ -13,9 +13,10 @@ _FALSE_VALUES = {"0", "false", "no", "off"}
 _DEFAULT_ASCEND_ENV_SCRIPTS = (
     "/usr/local/Ascend/ascend-toolkit/set_env.sh",
     "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh",
-    "/usr/local/Ascend/nnal/atb/set_env.sh",
-    "/usr/local/Ascend/nnal/atb/latest/atb/set_env.sh",
+    "/usr/local/Ascend/nnal/asdsip/set_env.sh",
 )
+_DEFAULT_ATB_HOME_PATH = "/usr/local/Ascend/nnal/atb/latest/atb"
+_DEFAULT_ATB_CXX_ABI = "cxx_abi_0"
 _SOURCED_ENV_IGNORED_KEYS = {"_", "SHLVL", "PWD", "OLDPWD"}
 
 
@@ -140,6 +141,21 @@ def _prepend_sys_path_from_pythonpath(raw_pythonpath: str | None) -> None:
         sys.path.insert(0, normalized)
 
 
+def _prepend_env_path(raw_value: str | None, prefix: str) -> str:
+    parts = [part for part in (raw_value or "").split(os.pathsep) if part]
+    return os.pathsep.join([prefix, *[part for part in parts if part != prefix]])
+
+
+def _apply_default_atb_abi_environment() -> None:
+    atb_home = os.environ.setdefault("ATB_HOME_PATH", _DEFAULT_ATB_HOME_PATH)
+    atb_cxx_abi = os.environ.setdefault("ATB_CXX_ABI", _DEFAULT_ATB_CXX_ABI)
+    atb_lib_dir = str(Path(atb_home) / atb_cxx_abi / "lib")
+    os.environ["LD_LIBRARY_PATH"] = _prepend_env_path(
+        os.environ.get("LD_LIBRARY_PATH"),
+        atb_lib_dir,
+    )
+
+
 def _bootstrap_ascend_toolkit_environment() -> None:
     if not _ascend_environment_bootstrap_enabled():
         _log_bootstrap("Ascend environment bootstrap: disabled")
@@ -158,6 +174,7 @@ def _bootstrap_ascend_toolkit_environment() -> None:
         return
 
     changed_keys = _apply_sourced_environment(sourced_env, base_env)
+    _apply_default_atb_abi_environment()
     os.environ["RAGENT_ASCEND_ENV_BOOTSTRAPPED"] = "1"
     os.environ["RAGENT_ASCEND_ENV_BOOTSTRAPPED_SCRIPTS"] = os.pathsep.join(
         str(path) for path in script_paths

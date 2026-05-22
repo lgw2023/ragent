@@ -26,11 +26,11 @@ bootstrap_runtime_environment()
 
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
-_RAGENT_SNAPSHOT_MARKERS = {
-    "graph_chunk_entity_relation.graphml",
-    "kv_store_text_chunks.json",
-    "vdb_chunks.json",
-}
+_RAGENT_SNAPSHOT_REQUIRED_MARKERS = (
+    ("graph_chunk_entity_relation.graphml",),
+    ("vdb_chunks.json",),
+    ("kv_store_text_chunks.json", "kv_store_text_chunks.sqlite"),
+)
 _SQLITE_KV_NAMESPACES_FROM_JSON = ("full_docs", "text_chunks")
 
 
@@ -563,7 +563,10 @@ def is_ragent_project_snapshot(path: str | os.PathLike[str]) -> bool:
     candidate = Path(path).expanduser().resolve()
     if not candidate.is_dir():
         return False
-    return sum(1 for marker in _RAGENT_SNAPSHOT_MARKERS if (candidate / marker).exists()) >= 2
+    return all(
+        any((candidate / marker).exists() for marker in marker_group)
+        for marker_group in _RAGENT_SNAPSHOT_REQUIRED_MARKERS
+    )
 
 
 def resolve_single_snapshot_from_data_dir(data_dir: str | os.PathLike[str]) -> Path:

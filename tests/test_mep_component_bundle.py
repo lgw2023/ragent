@@ -94,7 +94,10 @@ def test_root_process_ascend_bootstrap_sources_configured_script(
     assert os.environ["RAGENT_TEST_ASCEND_ENV"] == "loaded"
     assert os.environ["PYTHONPATH"].split(os.pathsep)[0] == "/fake/ascend/python"
     assert sys.path[0] == "/fake/ascend/python"
-    assert os.environ["LD_LIBRARY_PATH"].split(os.pathsep)[0] == "/fake/ascend/lib"
+    ld_library_path = os.environ["LD_LIBRARY_PATH"].split(os.pathsep)
+    assert ld_library_path[0] == "/usr/local/Ascend/nnal/atb/latest/atb/cxx_abi_0/lib"
+    assert "/fake/ascend/lib" in ld_library_path
+    assert os.environ["ATB_CXX_ABI"] == "cxx_abi_0"
     assert os.environ["RAGENT_ASCEND_ENV_BOOTSTRAPPED"] == "1"
 
 
@@ -125,6 +128,36 @@ def test_mep_data_dependency_bootstrap_uses_runtime_sibling_data_dir(
         os.environ["RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH"]
         == str(pythonpath_dir.resolve())
     )
+
+
+def test_mep_data_dependency_bootstrap_prefers_component_owned_deps(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    component_pythonpath = component_dir / "deps" / "pythonpath"
+    data_pythonpath = runtime_root / "data" / "deps" / "pythonpath"
+    component_pythonpath.mkdir(parents=True)
+    data_pythonpath.mkdir(parents=True)
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH", raising=False)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert added_paths[:2] == (
+        str(component_pythonpath.resolve()),
+        str(data_pythonpath.resolve()),
+    )
+    assert sys.path[0] == str(component_pythonpath.resolve())
 
 
 def test_mep_data_dependency_bootstrap_configures_keyword_fallback_assets(
@@ -382,6 +415,39 @@ def test_mep_data_dependency_bootstrap_skips_native_wheel_zipimport(
     assert str(native_wheel.resolve()) not in added_paths
 
 
+def test_mep_data_dependency_bootstrap_can_disable_wheelhouse_zipimport(
+    monkeypatch,
+    tmp_path: Path,
+):
+    runtime_root = tmp_path / "runtime"
+    component_dir = runtime_root / "component"
+    component_dir.mkdir(parents=True)
+    (component_dir / "config.json").write_text(
+        '{"main_file": "process", "main_class": "CustomerModel"}\n',
+        encoding="utf-8",
+    )
+    site_packages = (
+        runtime_root / "data" / "deps" / "site-packages" / "linux-arm64-py3.10"
+    )
+    wheelhouse = runtime_root / "data" / "deps" / "wheelhouse" / "linux-arm64-py3.10"
+    site_packages.mkdir(parents=True)
+    wheelhouse.mkdir(parents=True)
+    wheel_path = wheelhouse / "missing_pkg-1.0.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel_path, "w") as wheel:
+        wheel.writestr("missing_pkg/__init__.py", "")
+
+    monkeypatch.delenv("RAGENT_MEP_DATA_DIR", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_EXTRA_PYTHONPATH", raising=False)
+    monkeypatch.setenv("RAGENT_MEP_PLATFORM_TAG", "linux-arm64-py3.10")
+    monkeypatch.setenv("RAGENT_MEP_WHEELHOUSE_ZIPIMPORT", "0")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+
+    added_paths = bootstrap_mep_data_dependencies(component_dir)
+
+    assert str(site_packages.resolve()) in added_paths
+    assert str(wheel_path.resolve()) not in added_paths
+
+
 def test_mep_offline_requirements_install_uses_platform_wheelhouse(
     monkeypatch,
     tmp_path: Path,
@@ -578,35 +644,27 @@ def test_package_json_uses_non_placeholder_scope():
     assert package["name"] == "ragent_inference_mep"
 
 
-def test_qwen3_embedding_4b_properties_match_transformers_runtime():
+def test_qwen3_embedding_4b_uses_component_owned_runtime_profile():
     repo_root = Path(__file__).resolve().parents[1]
-    config_path = (
+    package_root = (
         repo_root
         / "mep"
         / "model_packages"
         / "qwen3-embedding-4b"
         / "modelDir"
-        / "data"
-        / "config"
-        / "embedding.properties"
     )
-    properties = {}
-    for line in config_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, value = line.split("=", 1)
-        properties[key] = value
+    config_path = package_root / "data" / "config" / "embedding.properties"
+    deps_dir = package_root / "data" / "deps"
+    kg_dir = package_root / "data" / "kg" / "sample_kg"
 
-    assert properties["model.name"] == "Qwen/Qwen3-Embedding-4B"
-    assert properties["model.relative_path"] == "."
-    assert properties["embedding.runtime"] == "transformers"
-    assert properties["embedding.dimensions"] == "2560"
-    assert properties["embedding.max_token_size"] == "8192"
-    assert properties["embedding.device"] == "npu:0"
-    assert properties["embedding.pooling"] == "lasttoken"
-    assert properties["embedding.normalize"] == "true"
-    assert properties["embedding.batch_size"] == "4"
+    assert not config_path.exists()
+    assert deps_dir.is_dir()
+    assert not deps_dir.is_symlink()
+    assert not (deps_dir / "wheelhouse").exists()
+    assert (kg_dir / "kv_store_text_chunks.sqlite").is_file()
+    for filename in ("vdb_chunks.json", "vdb_entities.json", "vdb_relationships.json"):
+        with (kg_dir / filename).open("r", encoding="utf-8") as handle:
+            assert '"embedding_dim": 2560' in handle.read(256)
 
 
 def test_bge_m3_embedding_properties_match_validated_transformers_runtime():
@@ -763,12 +821,17 @@ def test_offline_full_chain_validation_script_is_exported():
         / "MEP_platform_rule"
         / "Validated_ragent-mep-test_docker_full_chain.sh"
     )
+    vllm_script_path = (
+        repo_root / "MEP_platform_rule" / "Validated_ragent-mep-test_docker_vllm.sh"
+    )
     export_script = repo_root / "tools" / "export_mep_test_bundle_to_udisk.sh"
     validator_script = repo_root / "tools" / "validate_mep_full_chain_result.py"
     wheelhouse_validator_script = repo_root / "tools" / "validate_mep_wheelhouse.py"
 
     assert script_path.exists()
+    assert vllm_script_path.exists()
     script_text = script_path.read_text(encoding="utf-8")
+    vllm_script_text = vllm_script_path.read_text(encoding="utf-8")
     export_text = export_script.read_text(encoding="utf-8")
     validator_text = validator_script.read_text(encoding="utf-8")
 
@@ -777,12 +840,20 @@ def test_offline_full_chain_validation_script_is_exported():
     assert "validate_mep_wheelhouse.py" in export_text
     assert "preflight_mep_upload_packages.py" in export_text
     assert 'DEST="${DEST:-/Volumes/Udisk2/ragent}"' in export_text
-    assert 'PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.9}"' in export_text
+    assert 'PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.10}"' in export_text
+    assert 'INCLUDE_MODEL_WHEELHOUSE="${INCLUDE_MODEL_WHEELHOUSE:-0}"' in export_text
+    assert 'INCLUDE_VLLM_REPAIR_WHEELS="${INCLUDE_VLLM_REPAIR_WHEELS:-0}"' in export_text
     assert 'MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"' in script_text
-    assert 'IMAGE="${IMAGE:-}"' in script_text
+    assert "vllm-ascend-0.10.2-910b-cann8.2.rc1-torch2.7.1rc1:1.2.9.300" in script_text
     assert 'CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"' in script_text
-    assert 'MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"' in script_text
+    assert 'MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.10}}"' in script_text
+    assert 'MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-0}"' in script_text
     assert 'MEP_STRICT_OFFLINE="${MEP_STRICT_OFFLINE:-1}"' in script_text
+    assert 'RAGENT_MEP_OFFLINE_PIP_INSTALL="${RAGENT_MEP_OFFLINE_PIP_INSTALL:-0}"' in script_text
+    assert 'RAGENT_MEP_WHEELHOUSE_ZIPIMPORT="${RAGENT_MEP_WHEELHOUSE_ZIPIMPORT:-0}"' in script_text
+    assert 'SKIP_VLLM_VALIDATION="${SKIP_VLLM_VALIDATION:-1}"' in script_text
+    assert 'MEP_REUSE_EXISTING_VLLM="${MEP_REUSE_EXISTING_VLLM:-0}"' in script_text
+    assert 'MEP_ALLOW_TEST_EMBEDDING_TRUNCATION="${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-0}"' in script_text
     assert "configure_strict_offline_if_enabled()" in script_text
     assert "HF_HUB_OFFLINE=1" in script_text
     assert "TRANSFORMERS_OFFLINE=1" in script_text
@@ -793,13 +864,23 @@ def test_offline_full_chain_validation_script_is_exported():
     assert "load_ascend_runtime_environment()" in script_text
     assert "sourced Ascend env:" in script_text
     assert "ascend-toolkit/latest/set_env.sh" in script_text
+    assert "nnal/asdsip/set_env.sh" in script_text
+    assert "ATB_CXX_ABI" in script_text
+    assert "RAGENT_MEP_VLLM_LAUNCH_MODE" in script_text
     assert "MEP_REQUIRE_ASCEND_ENV=1" in script_text
     assert "AUTO_START_CONTAINER" in script_text
     assert "start_plain_container()" in script_text
     assert "docker run -d" in script_text
     assert "MEP_REUSE_EXISTING_VLLM=0" in script_text
     assert "requests_require_llm()" in script_text
+    assert "requests_require_keyword_fallback()" in script_text
     assert "validate_mep_full_chain_result.py" in script_text
+    assert "vllm serve \"$MODEL_PATH\"" in vllm_script_text
+    assert "--task embed" in vllm_script_text
+    assert 'SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3-embedding-4b-local}"' in vllm_script_text
+    assert 'EMBEDDING_DIMENSIONS="${EMBEDDING_DIMENSIONS:-2560}"' in vllm_script_text
+    assert 'INSTALL_VLLM_REPAIR_WHEELS="${INSTALL_VLLM_REPAIR_WHEELS:-0}"' in vllm_script_text
+    assert "source_if_exists /usr/local/Ascend/nnal/asdsip/set_env.sh" in vllm_script_text
     assert "retrieval-only payload is missing retrieval_result" in validator_text
     assert "Validate that MEP offline wheelhouse .whl files" in wheelhouse_validator_script.read_text(
         encoding="utf-8"

@@ -37,16 +37,16 @@ def test_qwen3_embedding_4b_model_package_layout_exists():
 
     assert package_root.exists()
     assert (package_root / "meta" / "type.mf").exists()
-    assert (package_root / "data" / "config" / "embedding.properties").exists()
+    assert not (package_root / "data" / "config" / "embedding.properties").exists()
+    kg_dir = package_root / "data" / "kg" / "sample_kg"
+    assert (kg_dir / "graph_chunk_entity_relation.graphml").exists()
+    assert (kg_dir / "kv_store_text_chunks.sqlite").exists()
+    for filename in ("vdb_chunks.json", "vdb_entities.json", "vdb_relationships.json"):
+        with (kg_dir / filename).open("r", encoding="utf-8") as handle:
+            assert '"embedding_dim": 2560' in handle.read(256)
     if not (package_root / "model" / "config.json").exists():
         pytest.skip("Qwen3-Embedding-4B local model is not linked")
     assert (package_root / "model" / "config.json").exists()
     assert (package_root / "model" / "tokenizer.json").exists()
     assert (package_root / "model" / "model.safetensors.index.json").exists()
     assert (package_root / "model" / "1_Pooling" / "config.json").exists()
-    properties = (package_root / "data" / "config" / "embedding.properties").read_text(
-        encoding="utf-8"
-    )
-    assert "model.name=Qwen/Qwen3-Embedding-4B" in properties
-    assert "embedding.pooling=lasttoken" in properties
-    assert "embedding.dimensions=2560" in properties

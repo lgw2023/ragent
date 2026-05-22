@@ -28,17 +28,20 @@ def _iter_wheelhouse_dirs(
     include_keyword: bool,
 ) -> Iterable[Path]:
     deps_dir = model_dir_root / "data" / "deps"
+    if not deps_dir.is_dir():
+        return
     root_names = ["wheelhouse"]
     if include_keyword:
         root_names.append("keyword_wheelhouse")
     for root_name in root_names:
         root = deps_dir / root_name
+        if not root.is_dir():
+            continue
         if platform_tags:
             for platform_tag in platform_tags:
-                yield root / platform_tag
-            continue
-        if not root.is_dir():
-            yield root
+                candidate = root / platform_tag
+                if candidate.is_dir():
+                    yield candidate
             continue
         yielded = False
         for candidate in sorted(root.iterdir()):
@@ -101,7 +104,7 @@ def _validate_model_archive(archive_path: Path) -> None:
         )
     for required in (
         "modelDir/model/config.json",
-        "modelDir/data/config/embedding.properties",
+        "modelDir/data/kg/sample_kg/vdb_chunks.json",
         "modelDir/meta/type.mf",
     ):
         if required not in names:
@@ -122,7 +125,7 @@ def _validate_wheelhouse_payloads(
         )
     )
     if checked == 0 and not invalid:
-        raise FileNotFoundError("no wheel files found in MEP wheelhouse")
+        return 0
     if invalid:
         details = "\n".join(f"- {detail}" for detail in invalid[:50])
         if len(invalid) > 50:

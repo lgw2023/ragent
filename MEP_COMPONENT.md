@@ -107,7 +107,7 @@ modelDir/
     1_Pooling/
   data/
     kg/
-    deps/
+    deps/        # optional, model-specific data dependencies only
     samples/
 ```
 
@@ -117,7 +117,7 @@ modelDir/
 - `<runtime_root>/data`
 - `<runtime_root>/meta`
 
-`model/` 本身就是 Hugging Face 模型目录，应尽量保持标准 Hugging Face 权重目录形态。组件可读取的只读自定义数据放在 `data/`，例如 KG 快照、依赖包、样例请求等。因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念；也不要把镜像适配、vLLM 启动参数等运行时策略放进模型权重目录。
+`model/` 本身就是 Hugging Face 模型目录，应尽量保持标准 Hugging Face 权重目录形态。组件可读取的只读自定义数据放在 `data/`，例如 KG 快照、样例请求，以及确实属于该模型数据的少量依赖提示。组件自身运行所需的通用 Python 依赖应放在组件包 `component/deps/`，不要再让 Qwen3 模型包复用 bge-m3 的依赖树。因此不要再把“模型包根目录”和“组件收到的 `model_root` 参数”默认视为同一个概念；也不要把镜像适配、vLLM 启动参数等运行时策略放进模型权重目录。
 
 当前仓库内的模型包源码放在：
 
@@ -259,41 +259,50 @@ vllm.bind_host=127.0.0.1
 vllm.host=127.0.0.1
 ```
 
-这些默认值应来自组件包代码或组件包随附的 runtime profile，而不是写入标准 Hugging Face 模型目录。Qwen3 使用 embedding/pooling 任务。`embedding.dimensions` 支持 MRL 截断（32–2560）。从旧版 bge-m3（256 维）切换后，需按新维度重建 KG 向量库。
+这些默认值应来自组件包代码或组件包随附的 runtime profile，而不是写入标准 Hugging Face 模型目录。Qwen3 使用 embedding/pooling 任务。当前 MEP 默认使用完整 2560 维输出，不做 MRL 截断；只有当 KG snapshot 明确以更小维度重建时，才允许配置更小维度。从旧版 bge-m3（256 维）切换后，需按 2560 维重建 KG 向量库。
 
-历史包 `bge-m3` 仍保留在 `mep/model_packages/bge-m3/`，使用 CLS pooling、`embedding.dimensions=256`。
+历史包 `bge-m3` 仍保留在 `mep/model_packages/bge-m3/`，使用 CLS pooling、256 维向量。
 
 `ragent.mep_embedding_runtime` 会按组件包内置 runtime profile 和环境变量覆盖启动 vLLM 或 transformers fallback。旧的 `data/config/embedding.properties` / `model/sysconfig.properties` 只作为历史包兼容输入；Qwen3-Embedding-4B 新路径不再依赖模型包内的 embedding runtime 配置。加载本地 Ascend runtime 前会自动尝试加载：
 
 ```text
 /usr/local/Ascend/ascend-toolkit/set_env.sh
-/usr/local/Ascend/nnal/atb/set_env.sh
+/usr/local/Ascend/nnal/asdsip/set_env.sh
 ```
 
-如目标镜像路径不同，可用 `RAGENT_ASCEND_SET_ENV_SH` 指定单个脚本，或用 `RAGENT_ASCEND_ENV_SHS` 指定多个脚本。
+新 vLLM Ascend 镜像里不直接 source `nnal/atb/set_env.sh`，因为它可能默认选择 `cxx_abi_1`；组件包默认设置 `ATB_HOME_PATH=/usr/local/Ascend/nnal/atb/latest/atb` 并把 `ATB_CXX_ABI=cxx_abi_0` 的 lib 目录前置到 `LD_LIBRARY_PATH`。如目标镜像路径不同，可用 `RAGENT_ASCEND_SET_ENV_SH` 指定单个脚本，或用 `RAGENT_ASCEND_ENV_SHS` 指定多个脚本。
 
 ### 5.5 本地推理能力
 
 当前方向依赖组件内 vLLM 子进程作为主运行方式。本地 Qwen3-Embedding-4B 在同一个 MEP 容器内通过 vLLM OpenAI-compatible embedding 服务完成 embedding；transformers 只作为 fallback，用于镜像或 vLLM 栈不可用时保底。
 
-### 5.6 `data/` 自定义依赖
+Qwen3 模型包内置 demo KG 已刷新为 `example/qwen4b_diet_kg` 构建产物，并放在 `data/kg/sample_kg/`。该 snapshot 的 `vdb_chunks.json`、`vdb_entities.json`、`vdb_relationships.json` 都必须声明 `embedding_dim=2560`；构建和 preflight 校验以这些 VDB 文件中的维度为 KG 元数据来源，而不是读取模型包内的 embedding runtime 配置文件。
 
-MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 是生产入口。入口文件会先尽早 source Ascend 环境脚本，默认优先使用 `/usr/local/Ascend/ascend-toolkit/set_env.sh`，并兼容 `latest` 和 ATB 路径；如需覆盖可设置 `RAGENT_ASCEND_SET_ENV_SH` 或 `RAGENT_ASCEND_ENV_SHS`，如需跳过可设置 `RAGENT_ASCEND_ENV_BOOTSTRAP=0`。随后入口文件会默认启用 strict offline 环境，设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1`、`PIP_CONFIG_FILE=/dev/null`，然后再执行离线依赖安装、依赖路径注入和后续 `ragent` 导入。确需排查镜像基础环境时，可显式设置 `MEP_STRICT_OFFLINE=0` 或 `RAGENT_MEP_STRICT_OFFLINE=0`。
+### 5.6 组件依赖与模型 `data/deps`
 
-`data/` 被视为模型包随附的只读自定义数据目录。当前组件在导入 ragent 之前会尝试把以下路径加入 Python import path：
+MEP 平台默认从组件包的 `process.py` 启动组件，所以 `process.py` 是生产入口。入口文件会先尽早 source Ascend 环境脚本，默认优先使用 `/usr/local/Ascend/ascend-toolkit/set_env.sh`，并兼容 `latest` 和 NNAL ASDSIP 路径；如需覆盖可设置 `RAGENT_ASCEND_SET_ENV_SH` 或 `RAGENT_ASCEND_ENV_SHS`，如需跳过可设置 `RAGENT_ASCEND_ENV_BOOTSTRAP=0`。随后入口文件会默认启用 strict offline 环境，设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`、`HF_DATASETS_OFFLINE=1`、`PIP_NO_INDEX=1`、`PIP_CONFIG_FILE=/dev/null`，然后再执行离线依赖安装、依赖路径注入和后续 `ragent` 导入。确需排查镜像基础环境时，可显式设置 `MEP_STRICT_OFFLINE=0` 或 `RAGENT_MEP_STRICT_OFFLINE=0`。
+
+组件运行时依赖分两层：
+
+- `component/deps/`：组件包自带的通用运行依赖，优先级最高。这里用于放 Ragent 自身缺失的轻量 Python 包，例如目标镜像探测确认缺失的 `nano-vectordb` 或 `litellm`。
+- `data/deps/`：模型包随附的可选只读依赖，主要用于旧模型包或模型数据特有的补充资产。Qwen3 模型包不再复用 bge-m3 的 `data/deps`。
+
+当前组件在导入 ragent 之前会按 `component/deps`、再按 `data/deps` 的顺序尝试把以下路径加入 Python import path：
 
 ```text
-data/deps/pythonpath/
-data/deps/pythonpath/<platform-tag>/
-data/deps/site-packages/
-data/deps/site-packages/<platform-tag>/
-data/deps/python/
-data/deps/python/<platform-tag>/
-data/deps/wheelhouse/<platform-tag>/*.whl
-data/deps/wheelhouse/*.whl
+<deps>/pythonpath/
+<deps>/pythonpath/<platform-tag>/
+<deps>/site-packages/
+<deps>/site-packages/<platform-tag>/
+<deps>/python/
+<deps>/python/<platform-tag>/
+<deps>/wheelhouse/<platform-tag>/*.whl
+<deps>/wheelhouse/*.whl
 ```
 
-这用于承载目标镜像中没有的轻量 Python 依赖。`<platform-tag>` 形如 `linux-arm64-py3.9`；目标 Ascend 910B MEP 镜像当前是 `linux-arm64-py3.9`。运行时会先查找 `requirements-<platform-tag>.txt` 和 `constraints-<platform-tag>.txt`，并用匹配的 `wheelhouse/<platform-tag>/` 执行一次 `pip install --no-index`。已安装且版本一致的镜像包会被跳过；缺失的应用依赖和 native wheel 会从本地 wheelhouse 安装。
+这用于承载目标镜像中没有的轻量 Python 依赖。`<platform-tag>` 形如 `linux-arm64-py3.10`；当前 Qwen3 vLLM Ascend 目标镜像使用 `linux-arm64-py3.10`。运行时只有在 `RAGENT_MEP_OFFLINE_PIP_INSTALL` 未关闭、且 `<deps>/requirements-<platform-tag>.txt` 存在时，才会用匹配的 `wheelhouse/<platform-tag>/` 执行 `pip install --no-index`。新 Qwen3 验证脚本默认设置 `RAGENT_MEP_OFFLINE_PIP_INSTALL=0`，不再安装模型包 wheelhouse。
+
+wheelhouse zipimport 也可通过 `RAGENT_MEP_WHEELHOUSE_ZIPIMPORT=0` 关闭。新 Qwen3 验证脚本默认关闭它，避免把旧的大型 wheelhouse overlay 到目标镜像的已验证运行栈上。strict offline 仍然保留，它的目标是阻止联网下载，而不是强制安装离线环境。
 
 transformers fallback 的离线 wheelhouse 由以下脚本解析生成：
 
@@ -301,9 +310,9 @@ transformers fallback 的离线 wheelhouse 由以下脚本解析生成：
 python tools/export_mep_transformers_embedding_wheelhouse.py --clean
 ```
 
-它会生成 `constraints-linux-arm64-py3.9.txt`、`manifest.json` 和 `downloaded-wheels.txt`。`image-baseline-constraints-linux-arm64-py3.9.txt` 固定镜像内已验证的 `torch`、`torch_npu`、`transformers`、`tokenizers`、`numpy` 等版本，防止离线解析替换 Ascend 栈。
+它会生成 `constraints-linux-arm64-py3.10.txt`、`manifest.json` 和 `downloaded-wheels.txt`。`image-baseline-constraints-linux-arm64-py3.10.txt` 固定镜像内已验证的 `torch`、`torch_npu`、`transformers`、`tokenizers`、`numpy` 等版本，防止离线解析替换 Ascend 栈。
 
-这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `data/deps` 中的依赖影响后续导入。
+这段 bootstrap 逻辑位于组件包顶层的 `mep_dependency_bootstrap.py`，`process.py` 在导入 `ragent` 之前调用它。这样入口文件保持轻量，同时仍能让 `component/deps` 或可选 `data/deps` 中的依赖影响后续导入。
 
 如果本轮没有找到任何可加入的依赖路径，bootstrap 会清理 `RAGENT_MEP_BOOTSTRAPPED_PYTHONPATH`，避免平台诊断读到上一轮进程留下的过期路径。
 
@@ -533,12 +542,12 @@ python /Volumes/SSD1/ragent/tools/build_mep_upload_packages.py \
 
 上传包构建脚本会复制真实文件而不是生成软链，并过滤 `__pycache__/`、`.pytest_cache/`、`.DS_Store`、`*.pyc`、`*.pyo`。组件包还会排除 `tests/`、`example/`、`benchmark/`、`vendor/`、`presentation/`、`MEP_platform_rule/`、`.venv/`、`.git/`。脚本会拒绝会覆盖仓库根、组件源码或源模型包的危险输出目录，并强校验 `modelDir/meta/type.mf` 非空以及 `modelDir/model` 本身直接包含 Hugging Face 模型文件。
 
-上传前可运行统一 preflight，检查组件包入口、模型包第一层、KG/vdb 维度和离线 wheelhouse payload：
+上传前可运行统一 preflight，检查组件包入口、模型包第一层、KG/vdb 维度，并在存在 wheelhouse 时校验 wheelhouse payload：
 
 ```bash
 python /Volumes/SSD1/ragent/tools/preflight_mep_upload_packages.py \
   --upload-root /Volumes/SSD1/ragent/.mep_upload/qwen3-embedding-4b \
-  --platform-tag linux-arm64-py3.9 \
+  --platform-tag linux-arm64-py3.10 \
   --component-archive /Volumes/SSD1/ragent/.mep_upload/qwen3-embedding-4b/ragent_inference_mep-component.zip \
   --model-archive /Volumes/SSD1/ragent/.mep_upload/qwen3-embedding-4b/qwen3-embedding-4b-model.zip
 ```

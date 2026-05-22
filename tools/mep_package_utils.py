@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import re
 import shutil
 import tarfile
 import zipfile
@@ -57,10 +58,9 @@ FORBIDDEN_COMPONENT_PACKAGE_TOP_LEVEL = {
 }
 REQUIRED_KG_SNAPSHOT_FILES = (
     "graph_chunk_entity_relation.graphml",
-    "kv_store_text_chunks.json",
-    "vdb_chunks.json",
-    "vdb_entities.json",
-    "vdb_relationships.json",
+)
+REQUIRED_KV_STORE_ALTERNATIVES = (
+    ("kv_store_text_chunks.json", "kv_store_text_chunks.sqlite"),
 )
 REQUIRED_VDB_FILES = (
     "vdb_chunks.json",
@@ -74,6 +74,7 @@ ARCHIVE_FORMATS = {
     "tgz": ("gztar", ".tar.gz"),
     "gztar": ("gztar", ".tar.gz"),
 }
+_EMBEDDING_DIM_RE = re.compile(r'"embedding_dim"\s*:\s*(\d+)')
 
 
 def path_is_relative_to(path: Path, parent: Path) -> bool:
@@ -329,6 +330,12 @@ def read_properties(path: Path) -> dict[str, str]:
 
 
 def _read_vdb_embedding_dim(vdb_path: Path) -> int:
+    with vdb_path.open("r", encoding="utf-8", errors="replace") as handle:
+        prefix = handle.read(1024 * 1024)
+    match = _EMBEDDING_DIM_RE.search(prefix)
+    if match is not None:
+        return int(match.group(1))
+
     try:
         payload = json.loads(vdb_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -353,8 +360,11 @@ def _validate_wheelhouse_root(
     *,
     label: str,
     required_platform_tags: tuple[str, ...],
+    required: bool = True,
 ) -> None:
     if not root.is_dir():
+        if not required:
+            return
         raise FileNotFoundError(f"{label} not found: {root}")
 
     if required_platform_tags:
@@ -381,28 +391,10 @@ def validate_model_data_dir(
     data_dir: Path,
     *,
     required_platform_tags: tuple[str, ...] = (),
+    require_deps: bool = False,
 ) -> None:
     if not data_dir.is_dir():
         raise FileNotFoundError(f"MEP modelDir/data/ not found: {data_dir}")
-
-    embedding_properties = data_dir / "config" / "embedding.properties"
-    if not embedding_properties.is_file():
-        raise FileNotFoundError(
-            f"MEP embedding.properties not found: {embedding_properties}"
-        )
-    properties = read_properties(embedding_properties)
-    raw_dimensions = properties.get("embedding.dimensions")
-    if raw_dimensions is None:
-        raise ValueError(
-            f"MEP embedding.properties is missing embedding.dimensions: "
-            f"{embedding_properties}"
-        )
-    try:
-        embedding_dimensions = int(raw_dimensions)
-    except ValueError as exc:
-        raise ValueError(
-            f"MEP embedding.dimensions must be an integer: {raw_dimensions!r}"
-        ) from exc
 
     kg_dir = data_dir / "kg" / "sample_kg"
     if not kg_dir.is_dir():
@@ -411,28 +403,59 @@ def validate_model_data_dir(
         path = kg_dir / filename
         if not path.is_file():
             raise FileNotFoundError(f"MEP KG snapshot file not found: {path}")
+    for alternatives in REQUIRED_KV_STORE_ALTERNATIVES:
+        if not any((kg_dir / filename).is_file() for filename in alternatives):
+            alternative_text = " or ".join(alternatives)
+            raise FileNotFoundError(
+                f"MEP KG snapshot must contain {alternative_text}: {kg_dir}"
+            )
+
+    embedding_dimensions: int | None = None
     for filename in REQUIRED_VDB_FILES:
         vdb_path = kg_dir / filename
+        if not vdb_path.is_file():
+            raise FileNotFoundError(f"MEP KG vector store not found: {vdb_path}")
         vdb_dimensions = _read_vdb_embedding_dim(vdb_path)
-        if vdb_dimensions != embedding_dimensions:
+        if embedding_dimensions is None:
+            embedding_dimensions = vdb_dimensions
+        elif vdb_dimensions != embedding_dimensions:
             raise ValueError(
-                f"MEP KG vector dimension mismatch: {vdb_path} has "
-                f"embedding_dim={vdb_dimensions}, but embedding.properties has "
-                f"embedding.dimensions={embedding_dimensions}"
+                "MEP KG vector dimension mismatch: "
+                f"{vdb_path} has embedding_dim={vdb_dimensions}, but another "
+                f"vector store has embedding_dim={embedding_dimensions}"
             )
 
     deps_dir = data_dir / "deps"
     if not deps_dir.is_dir():
+        if not require_deps:
+            return
         raise FileNotFoundError(f"MEP data/deps/ not found: {deps_dir}")
+
+    wheelhouse_root = deps_dir / "wheelhouse"
+    keyword_wheelhouse_root = deps_dir / "keyword_wheelhouse"
+    if (
+        not require_deps
+        and not required_platform_tags
+        and not wheelhouse_root.is_dir()
+        and not keyword_wheelhouse_root.is_dir()
+    ):
+        return
+
     _validate_wheelhouse_root(
-        deps_dir / "wheelhouse",
+        wheelhouse_root,
         label="MEP data/deps/wheelhouse",
         required_platform_tags=required_platform_tags,
+        required=require_deps or wheelhouse_root.is_dir(),
     )
     _validate_wheelhouse_root(
-        deps_dir / "keyword_wheelhouse",
+        keyword_wheelhouse_root,
         label="MEP data/deps/keyword_wheelhouse",
         required_platform_tags=required_platform_tags,
+        required=(
+            require_deps
+            or bool(required_platform_tags and keyword_wheelhouse_root.is_dir())
+            or keyword_wheelhouse_root.is_dir()
+        ),
     )
 
 

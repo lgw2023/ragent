@@ -55,6 +55,7 @@ OPTIONAL_COMPONENT_FILES = (
 )
 LOCAL_RUNNER_FILE = "run_mep_local.py"
 COMPONENT_DIRS = ("ragent",)
+COMPONENT_DEPS_SOURCE = Path("mep") / "component_deps"
 COMPONENT_EXCLUDED_NAMES = {
     "tests",
     "example",
@@ -103,6 +104,10 @@ def _validate_safe_output(
         ("source model package directory", source_model_package_dir),
         ("component source directory ragent/", repo_root / "ragent"),
     ]
+    if (repo_root / COMPONENT_DEPS_SOURCE).exists():
+        protected_paths.append(
+            ("component runtime deps directory", repo_root / COMPONENT_DEPS_SOURCE)
+        )
     protected_paths.extend(
         (f"component source file {filename}", repo_root / filename)
         for filename in REQUIRED_COMPONENT_FILES
@@ -139,6 +144,15 @@ def _copy_component_source(
             source,
             component_dir / dirname,
             ignore=_ignore_component,
+            symlinks=False,
+            dirs_exist_ok=True,
+        )
+    component_deps_source = repo_root / COMPONENT_DEPS_SOURCE
+    if component_deps_source.is_dir():
+        shutil.copytree(
+            component_deps_source,
+            component_dir / "deps",
+            ignore=ignore_generated,
             symlinks=False,
             dirs_exist_ok=True,
         )

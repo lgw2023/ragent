@@ -6164,3 +6164,137 @@ client_session: <aiohttp.client.ClientSession object at 0x13a10dd10>
 2026-05-21 14:15:46,622 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:82a5030cb199cced23ed2b7dc3dbbc16
 2026-05-21 14:15:46,626 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
 2026-05-21 14:15:46,626 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 14:25:52,414 | ERROR | ragent:log_exception:244 - litellm.exceptions.Timeout: litellm.Timeout: APITimeoutError - Request timed out. Error_str: Request timed out. - timeout value=600.0, time taken=600.77 seconds
+2026-05-21 14:25:52,414 | ERROR | ragent:log_exception:244 - litellm.exceptions.Timeout: litellm.Timeout: APITimeoutError - Request timed out. Error_str: Request timed out. - timeout value=600.0, time taken=600.77 seconds
+2026-05-21 14:26:29,937 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:441d950e6e1d2fb6f6b78fe92d4ddf81
+2026-05-21 14:26:29,937 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:441d950e6e1d2fb6f6b78fe92d4ddf81
+2026-05-21 14:26:30,074 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 14:26:30,074 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 14:26:54,345 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:137710571099f8039bf600e4093c816e
+2026-05-21 14:26:54,345 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:137710571099f8039bf600e4093c816e
+2026-05-21 14:26:54,383 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 14:26:54,383 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 14:27:53,011 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:45d5a84a9d759a9892aa136928da2425
+2026-05-21 14:27:53,011 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:45d5a84a9d759a9892aa136928da2425
+2026-05-21 14:27:53,038 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 9 Rel
+2026-05-21 14:27:53,038 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 9 Rel
+2026-05-21 14:28:19,730 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0074908fcfaebbe744e1a400a16e1ff5
+2026-05-21 14:28:19,730 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0074908fcfaebbe744e1a400a16e1ff5
+2026-05-21 14:28:19,814 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 14:28:19,814 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 14:29:03,404 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c71e241a28c87700f1474b73fe3b782b
+2026-05-21 14:29:03,404 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c71e241a28c87700f1474b73fe3b782b
+2026-05-21 14:29:04,018 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 8 Rel
+2026-05-21 14:29:04,018 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 8 Rel
+2026-05-21 14:30:17,683 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5ebe16ea361f7d523782ab4f4ab39a28
+2026-05-21 14:30:17,683 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5ebe16ea361f7d523782ab4f4ab39a28
+2026-05-21 14:30:17,926 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 16 Ent + 8 Rel
+2026-05-21 14:30:17,926 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 16 Ent + 8 Rel
+2026-05-21 14:31:50,694 | ERROR | ragent:log_exception:244 - litellm.exceptions.InternalServerError: litellm.InternalServerError: InternalServerError: DashscopeException - Connection error.
+2026-05-21 14:31:50,694 | ERROR | ragent:log_exception:244 - litellm.exceptions.InternalServerError: litellm.InternalServerError: InternalServerError: DashscopeException - Connection error.
+2026-05-21 14:32:08,944 | ERROR | ragent:log_exception:244 - litellm.exceptions.InternalServerError: litellm.InternalServerError: InternalServerError: DashscopeException - Connection error.
+2026-05-21 14:32:08,944 | ERROR | ragent:log_exception:244 - litellm.exceptions.InternalServerError: litellm.InternalServerError: InternalServerError: DashscopeException - Connection error.
+2026-05-21 14:32:16,258 | ERROR | ragent:log_exception:244 - litellm.exceptions.InternalServerError: litellm.InternalServerError: InternalServerError: DashscopeException - Connection error.
+2026-05-21 14:32:16,258 | ERROR | ragent:log_exception:244 - litellm.exceptions.InternalServerError: litellm.InternalServerError: InternalServerError: DashscopeException - Connection error.
+2026-05-21 14:32:16,271 | ERROR | ragent:worker:686 - limit_async[llm]: Error in decorated function: RetryError[<Future at 0x13aacd0d0 state=finished raised InternalServerError>]
+2026-05-21 14:32:16,271 | ERROR | ragent:worker:686 - limit_async[llm]: Error in decorated function: RetryError[<Future at 0x13aacd0d0 state=finished raised InternalServerError>]
+2026-05-21 14:32:16,286 | ERROR | ragent:_process_entity_relation_graph:2255 - Failed to extract entities and relationships: RetryError[<Future at 0x13aacd0d0 state=finished raised InternalServerError>]
+2026-05-21 14:32:16,286 | ERROR | ragent:_process_entity_relation_graph:2255 - Failed to extract entities and relationships: RetryError[<Future at 0x13aacd0d0 state=finished raised InternalServerError>]
+2026-05-21 14:32:16,317 | INFO | ragent:shutdown:784 - limit_async[embedding]: Shutting down priority queue workers
+2026-05-21 14:32:16,317 | INFO | ragent:shutdown:784 - limit_async[embedding]: Shutting down priority queue workers
+2026-05-21 14:32:16,321 | INFO | ragent:shutdown:819 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-05-21 14:32:16,321 | INFO | ragent:shutdown:819 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-05-21 14:32:16,323 | INFO | ragent:shutdown:784 - limit_async[llm]: Shutting down priority queue workers
+2026-05-21 14:32:16,323 | INFO | ragent:shutdown:784 - limit_async[llm]: Shutting down priority queue workers
+2026-05-21 14:32:16,349 | INFO | ragent:shutdown:819 - limit_async[llm]: Priority queue workers shutdown complete
+2026-05-21 14:32:16,349 | INFO | ragent:shutdown:819 - limit_async[llm]: Priority queue workers shutdown complete
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+2026-05-21 14:32:23,479 | ERROR | ragent:log_exception:244 - tenacity.RetryError: RetryError[<Future at 0x13aacd0d0 state=finished raised InternalServerError>]
+2026-05-21 14:32:23,479 | ERROR | ragent:log_exception:244 - tenacity.RetryError: RetryError[<Future at 0x13aacd0d0 state=finished raised InternalServerError>]
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x1390fe510>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x1390fe510>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10c910>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10c910>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a4abb10>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a4abb10>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10efd0>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10efd0>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10da90>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x139efdd10>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10f890>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10da90>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x139efdd10>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a10f890>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a4abc50>
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x13a4abc50>

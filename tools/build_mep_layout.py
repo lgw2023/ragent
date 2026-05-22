@@ -46,6 +46,7 @@ OPTIONAL_COMPONENT_FILES = (
 )
 COMPONENT_FILES = REQUIRED_COMPONENT_FILES + OPTIONAL_COMPONENT_FILES
 COMPONENT_DIRS = ("ragent",)
+COMPONENT_DEPS_SOURCE = Path("mep") / "component_deps"
 
 
 def _validate_component_source(repo_root: Path) -> None:
@@ -73,6 +74,10 @@ def _validate_safe_output(
         ("source model package directory", source_model_package_dir),
         ("component source directory ragent/", repo_root / "ragent"),
     ]
+    if (repo_root / COMPONENT_DEPS_SOURCE).exists():
+        protected_paths.append(
+            ("component runtime deps directory", repo_root / COMPONENT_DEPS_SOURCE)
+        )
     protected_paths.extend(
         (f"component source file {filename}", repo_root / filename)
         for filename in COMPONENT_FILES
@@ -100,6 +105,14 @@ def _copy_component_source(repo_root: Path, component_dir: Path) -> None:
                 ignore=ignore_generated,
                 dirs_exist_ok=True,
             )
+    component_deps_source = repo_root / COMPONENT_DEPS_SOURCE
+    if component_deps_source.is_dir():
+        shutil.copytree(
+            component_deps_source,
+            component_dir / "deps",
+            ignore=ignore_generated,
+            dirs_exist_ok=True,
+        )
 
 
 def _link_or_copy(source: Path, target: Path, *, materialize: bool) -> None:

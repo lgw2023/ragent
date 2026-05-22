@@ -67,6 +67,19 @@ def iter_mep_data_dir_candidates(current_dir: Path) -> Iterator[Path]:
     yield (current_dir / "data").resolve()
 
 
+def iter_mep_dependency_dir_candidates(current_dir: Path) -> Iterator[Path]:
+    component_deps_dir = (current_dir / "deps").resolve()
+    yield component_deps_dir
+
+    seen: set[Path] = {component_deps_dir}
+    for data_dir in iter_mep_data_dir_candidates(current_dir):
+        deps_dir = (data_dir / "deps").resolve()
+        if deps_dir in seen:
+            continue
+        seen.add(deps_dir)
+        yield deps_dir
+
+
 def _normalize_os_name(system: str | None = None) -> str:
     normalized = (system or platform.system()).strip().lower()
     if normalized.startswith("linux"):
@@ -324,12 +337,11 @@ def ensure_mep_offline_requirements(
 
     resolved_current_dir = Path(current_dir).expanduser().resolve()
     installed_from: list[str] = []
-    seen_data_dirs: set[Path] = set()
-    for data_dir in iter_mep_data_dir_candidates(resolved_current_dir):
-        if data_dir in seen_data_dirs:
+    seen_deps_dirs: set[Path] = set()
+    for deps_dir in iter_mep_dependency_dir_candidates(resolved_current_dir):
+        if deps_dir in seen_deps_dirs:
             continue
-        seen_data_dirs.add(data_dir)
-        deps_dir = data_dir / "deps"
+        seen_deps_dirs.add(deps_dir)
         if not deps_dir.is_dir():
             continue
 
@@ -358,8 +370,7 @@ def ensure_mep_offline_requirements(
     return tuple(installed_from)
 
 
-def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
-    deps_dir = data_dir / "deps"
+def iter_mep_dependency_root_paths(deps_dir: Path) -> Iterator[Path]:
     extra_pythonpath = os.getenv("RAGENT_MEP_EXTRA_PYTHONPATH") or ""
     for env_path in extra_pythonpath.split(os.pathsep):
         if env_path.strip():
@@ -375,6 +386,9 @@ def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
             yield platform_dir.resolve()
         yield root.resolve()
 
+    if _env_flag_disabled("RAGENT_MEP_WHEELHOUSE_ZIPIMPORT"):
+        return
+
     for wheelhouse_dir in _iter_wheelhouse_dirs(deps_dir, "keyword_wheelhouse"):
         for wheel_path in sorted(wheelhouse_dir.glob("*.whl")):
             if _wheel_should_be_added(wheel_path):
@@ -384,6 +398,10 @@ def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
         for wheel_path in sorted(wheelhouse_dir.glob("*.whl")):
             if _wheel_should_be_added(wheel_path):
                 yield wheel_path.resolve()
+
+
+def iter_mep_dependency_paths(data_dir: Path) -> Iterator[Path]:
+    yield from iter_mep_dependency_root_paths(data_dir / "deps")
 
 
 def _configure_keyword_fallback_model(data_dir: Path) -> None:
@@ -412,15 +430,22 @@ def bootstrap_mep_data_dependencies(current_dir: str | os.PathLike[str]) -> tupl
     resolved_current_dir = Path(current_dir).expanduser().resolve()
     added_paths: list[str] = []
     seen_data_dirs: set[Path] = set()
-    seen_dependency_paths: set[Path] = set()
     for data_dir in iter_mep_data_dir_candidates(resolved_current_dir):
         if data_dir in seen_data_dirs:
             continue
         seen_data_dirs.add(data_dir)
-        if not data_dir.is_dir():
+        if data_dir.is_dir():
+            _configure_keyword_fallback_model(data_dir)
+
+    seen_dependency_paths: set[Path] = set()
+    seen_deps_dirs: set[Path] = set()
+    for deps_dir in iter_mep_dependency_dir_candidates(resolved_current_dir):
+        if deps_dir in seen_deps_dirs:
             continue
-        _configure_keyword_fallback_model(data_dir)
-        for dependency_path in iter_mep_dependency_paths(data_dir):
+        seen_deps_dirs.add(deps_dir)
+        if not deps_dir.is_dir():
+            continue
+        for dependency_path in iter_mep_dependency_root_paths(deps_dir):
             if dependency_path in seen_dependency_paths:
                 continue
             seen_dependency_paths.add(dependency_path)
@@ -440,6 +465,8 @@ __all__ = [
     "current_platform_tag",
     "ensure_mep_offline_requirements",
     "iter_mep_data_dir_candidates",
+    "iter_mep_dependency_dir_candidates",
     "iter_mep_dependency_paths",
+    "iter_mep_dependency_root_paths",
     "iter_platform_tags",
 ]

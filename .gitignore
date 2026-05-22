@@ -17,6 +17,8 @@ requirements.txt.bak
 .runtime/
 .mep_build/
 .mep_upload/
+*.sqlite-shm
+*.sqlite-wal
 vendor/mineru-models/
 vendor/modelscope/
 vendor/wheelhouse/

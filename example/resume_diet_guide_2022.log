@@ -1,0 +1,749 @@
+2026-05-21 15:33:48,918 | INFO | ragent:_run:114 - Loaded 1132 existing doc_id(s) from /Volumes/SSD1/ragent/example/qwen4b_diet_kg_raw_units/中国居民膳食指南_2022.raw-units.jsonl
+2026-05-21 15:33:56,234 | WARNING | ragent:__post_init__:568 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-05-21 15:33:57,522 | INFO | ragent:__post_init__:76 - Created new empty graph
+2026-05-21 15:33:57,525 | INFO | nano-vectordb:Init {'embedding_dim': 2560, 'metric': 'cosine', 'storage_file': '/var/folders/74/m3grr2ds6d78rxzq4c05_l8h0000gn/T/ragent_raw_resume_s23_7qmr/vdb_entities.json'} 0 data
+2026-05-21 15:33:57,525 | INFO | nano-vectordb:Init {'embedding_dim': 2560, 'metric': 'cosine', 'storage_file': '/var/folders/74/m3grr2ds6d78rxzq4c05_l8h0000gn/T/ragent_raw_resume_s23_7qmr/vdb_relationships.json'} 0 data
+2026-05-21 15:33:57,525 | INFO | nano-vectordb:Init {'embedding_dim': 2560, 'metric': 'cosine', 'storage_file': '/var/folders/74/m3grr2ds6d78rxzq4c05_l8h0000gn/T/ragent_raw_resume_s23_7qmr/vdb_chunks.json'} 0 data
+2026-05-21 15:33:57,536 | INFO | ragent:initialize:63 - Process 83627 doc status load doc_status with 0 records
+2026-05-21 15:33:57,539 | INFO | ragent:<lambda>:743 - Storage Initialization completed!
+2026-05-21 15:34:00,741 | INFO | ragent:_run:137 - Insert plan ready: existing=1132 missing=239 output=/Volumes/SSD1/ragent/example/qwen4b_diet_kg_raw_units/中国居民膳食指南_2022.raw-units.jsonl
+2026-05-21 15:34:00,741 | INFO | ragent:_run:171 - [1/239] exporting missing unit doc_id=doc-fe47a5a8bd2e258097dc6a085865f63b type=text_md_parser chunk_index=928
+2026-05-21 15:34:00,741 | INFO | ragent:ensure_workers:780 - limit_async[embedding]: 8 new workers initialized
+2026-05-21 15:34:02,763 | INFO | ragent:ensure_workers:780 - limit_async[llm]: 32 new workers initialized
+2026-05-21 15:34:26,119 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6a95caa89df3400a9525a9892515f3ad
+2026-05-21 15:34:26,135 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 15:34:26,173 | INFO | ragent:_run:171 - [2/239] exporting missing unit doc_id=doc-53fa4e1c1cafd780cc255f6ba96ba12d type=text_md_parser chunk_index=929
+2026-05-21 15:34:45,438 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:61007b2b9cba170b3767d952c840dfa4
+2026-05-21 15:34:45,439 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-05-21 15:34:45,447 | INFO | ragent:_run:171 - [3/239] exporting missing unit doc_id=doc-a247ccbf9e726de8dffc448710df8256 type=text_md_parser chunk_index=930
+2026-05-21 15:35:03,919 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:91216e4fd2459c8b75e2b6eda1d778dc
+2026-05-21 15:35:03,923 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 15:35:03,929 | INFO | ragent:_run:171 - [4/239] exporting missing unit doc_id=doc-1863dc809e5cbce605448967c0c83e41 type=image_desc chunk_index=204
+2026-05-21 15:35:19,776 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:37de7620bdb3338c18853942430ad6d4
+2026-05-21 15:35:19,778 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 15:35:19,784 | INFO | ragent:_run:171 - [5/239] exporting missing unit doc_id=doc-b896276a1b189a22e8f2852306f5e436 type=text_md_parser chunk_index=931
+2026-05-21 15:35:30,379 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:62b3d0b2115d454d5a91b4588f0a637a
+2026-05-21 15:35:30,380 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 15:35:30,390 | INFO | ragent:_run:171 - [6/239] exporting missing unit doc_id=doc-32c741c0bf329581e7ec6bab64bb89c8 type=text_md_parser chunk_index=932
+2026-05-21 15:35:42,846 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:fabbb4cfe2ec7f135f7b61f62fa64f76
+2026-05-21 15:35:42,847 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 15:35:42,851 | INFO | ragent:_run:171 - [7/239] exporting missing unit doc_id=doc-4f6557cac0efd58a75fb9cc542b6ce1c type=text_md_parser chunk_index=933
+2026-05-21 15:36:15,726 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:f5e259e4225791950f7f8e809fcbf0f1
+2026-05-21 15:36:15,730 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 15 Rel
+2026-05-21 15:36:15,736 | INFO | ragent:_run:171 - [8/239] exporting missing unit doc_id=doc-469cdf56f6ff8cb87e2af9deb15e81a5 type=text_md_parser chunk_index=934
+2026-05-21 15:36:44,012 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:426b44761b32ea00925de1e8c9378d0d
+2026-05-21 15:36:44,021 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 15:36:44,032 | INFO | ragent:_run:171 - [9/239] exporting missing unit doc_id=doc-51ecebda3ad99da53d98ee6466aa4c60 type=text_md_parser chunk_index=935
+2026-05-21 15:37:07,781 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:8ebb845c23788f6abdaffe9ac41dafa5
+2026-05-21 15:37:07,786 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 15:37:07,799 | INFO | ragent:_run:171 - [10/239] exporting missing unit doc_id=doc-e44f28d7bfd72b446e1ebfd9fbc47b7e type=text_md_parser chunk_index=936
+2026-05-21 15:37:22,832 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c901af4fc6a691a2730b3427eef856c3
+2026-05-21 15:37:22,838 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 7 Rel
+2026-05-21 15:37:22,846 | INFO | ragent:_run:171 - [11/239] exporting missing unit doc_id=doc-585ec4a3c4fab30409a736af746c9602 type=text_md_parser chunk_index=937
+2026-05-21 15:38:21,725 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:508923a1c0d182b1d574b642f272a294
+2026-05-21 15:38:21,752 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 37 Ent + 14 Rel
+2026-05-21 15:38:21,810 | INFO | ragent:_run:171 - [12/239] exporting missing unit doc_id=doc-537b7e1fe56dc60f41c3f443e8b9024c type=text_md_parser chunk_index=938
+2026-05-21 15:38:58,483 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c06308a6d052cd5617ff28625533263e
+2026-05-21 15:38:58,485 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 20 Ent + 17 Rel
+2026-05-21 15:38:58,495 | INFO | ragent:_run:171 - [13/239] exporting missing unit doc_id=doc-9f7cd43a96ba9e9ce1c8020ca77cbba4 type=text_md_parser chunk_index=939
+2026-05-21 15:39:27,263 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:8bd7033ba61f3b66415d2934ea7096e0
+2026-05-21 15:39:27,266 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 7 Rel
+2026-05-21 15:39:27,271 | INFO | ragent:_run:171 - [14/239] exporting missing unit doc_id=doc-960667dd29ab55ff73ff5fd110314a24 type=text_md_parser chunk_index=940
+2026-05-21 15:39:58,201 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5fb1a295d15e7690af89c2ffac8a87c8
+2026-05-21 15:39:58,208 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-05-21 15:39:58,254 | INFO | ragent:_run:171 - [15/239] exporting missing unit doc_id=doc-3c1cba61c26eabeaef89564dd5cdc610 type=text_md_parser chunk_index=941
+2026-05-21 15:40:20,777 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:2c3e22fdaa9aa01980af88eec89e17b5
+2026-05-21 15:40:20,781 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 0 Ent + 0 Rel
+2026-05-21 15:40:20,787 | INFO | ragent:_run:171 - [16/239] exporting missing unit doc_id=doc-2ff6a6e4fe75045912c1c54a169a1f94 type=text_md_parser chunk_index=942
+2026-05-21 15:40:38,278 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9af11d949f092644b38a704021efdbf4
+2026-05-21 15:40:38,481 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 7 Rel
+2026-05-21 15:40:38,495 | INFO | ragent:_run:171 - [17/239] exporting missing unit doc_id=doc-23a54b81d32871e7999ec84519d973cd type=text_md_parser chunk_index=943
+2026-05-21 15:40:56,717 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e49566cf0d903c31193a8c0c70d51b40
+2026-05-21 15:40:56,724 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 7 Rel
+2026-05-21 15:40:56,747 | INFO | ragent:_run:171 - [18/239] exporting missing unit doc_id=doc-09175827de9b73ddd5082684c1bc7bf0 type=text_md_parser chunk_index=944
+2026-05-21 15:41:16,974 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c5a9adc559e65f5122efd50959088283
+2026-05-21 15:41:16,977 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 9 Rel
+2026-05-21 15:41:16,983 | INFO | ragent:_run:171 - [19/239] exporting missing unit doc_id=doc-a4bbc5164dbd7a0c32f5f5deee88d14f type=text_md_parser chunk_index=945
+2026-05-21 15:41:49,464 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6612d698324a0cd6f7e1277dd95c2758
+2026-05-21 15:41:49,473 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-05-21 15:41:49,495 | INFO | ragent:_run:171 - [20/239] exporting missing unit doc_id=doc-4be426a961abe6e7073618de74539c60 type=text_md_parser chunk_index=946
+2026-05-21 15:42:26,227 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:4a1fa664dda30d235680b5da482b33e7
+2026-05-21 15:42:26,230 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 12 Rel
+2026-05-21 15:42:26,242 | INFO | ragent:_run:171 - [21/239] exporting missing unit doc_id=doc-42a4c78c417cb13daa872e8cb7deaf82 type=image_desc chunk_index=205
+2026-05-21 15:43:27,916 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0ca12001808ad6eb9a7df993e0bd315c
+2026-05-21 15:43:27,925 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 17 Ent + 13 Rel
+2026-05-21 15:43:27,942 | INFO | ragent:_run:171 - [22/239] exporting missing unit doc_id=doc-d57afff40240d687dfbbd08f8e2b4f6a type=text_md_parser chunk_index=947
+2026-05-21 15:44:02,294 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e8536f9d0e27afc224d6f75c928a9e33
+2026-05-21 15:44:02,297 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 11 Ent + 6 Rel
+2026-05-21 15:44:02,303 | INFO | ragent:_run:171 - [23/239] exporting missing unit doc_id=doc-f0159ae8b0985a40412d996c18bc6d1c type=text_md_parser chunk_index=948
+2026-05-21 15:44:46,928 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d7e2f0da139b6349b7be3b84e39311db
+2026-05-21 15:44:46,932 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 16 Rel
+2026-05-21 15:44:46,954 | INFO | ragent:_run:171 - [24/239] exporting missing unit doc_id=doc-2aba7a43bb16290e26fcb5f1ab55e48d type=text_md_parser chunk_index=949
+2026-05-21 15:45:18,394 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:4beb10d400e2973c29bb4bb2dafa3d89
+2026-05-21 15:45:18,410 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 8 Rel
+2026-05-21 15:45:18,424 | INFO | ragent:_run:171 - [25/239] exporting missing unit doc_id=doc-fbb26a4cc3c480366f236dbcee22e922 type=text_md_parser chunk_index=950
+2026-05-21 15:45:43,585 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7ec2e47bd1fca2bc3ffe7a438b39d540
+2026-05-21 15:45:43,587 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-05-21 15:45:43,593 | INFO | ragent:_run:171 - [26/239] exporting missing unit doc_id=doc-7d7aee6683d349901d68b1601268242a type=text_md_parser chunk_index=951
+2026-05-21 15:45:58,221 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c27e5b92239659bbd713bb332b64b998
+2026-05-21 15:45:58,222 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 15:45:58,228 | INFO | ragent:_run:171 - [27/239] exporting missing unit doc_id=doc-ccd83b745f8e5a077a5613d6505e2ac5 type=text_md_parser chunk_index=952
+2026-05-21 15:46:29,568 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9e40ebe105546e0fcd9d554d7cce8f88
+2026-05-21 15:46:29,570 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 15:46:29,577 | INFO | ragent:_run:171 - [28/239] exporting missing unit doc_id=doc-ffcfd3c5d1c81b089b8563e792bf90a3 type=text_md_parser chunk_index=953
+2026-05-21 15:47:00,536 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:92cf043de39cf5c2d24ddf7425866027
+2026-05-21 15:47:00,544 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 5 Rel
+2026-05-21 15:47:00,559 | INFO | ragent:_run:171 - [29/239] exporting missing unit doc_id=doc-e8fef7cb76191fcdf488c1a64264654b type=text_md_parser chunk_index=954
+2026-05-21 15:47:14,643 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:2e27c657e2d6bd321ceecc4d6cd9ddd3
+2026-05-21 15:47:14,644 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 15:47:14,648 | INFO | ragent:_run:171 - [30/239] exporting missing unit doc_id=doc-528390dadbe31f70c01f624b0df4b5cf type=image_desc chunk_index=206
+2026-05-21 15:47:56,969 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:42d94313d733e42750f95f15e1dfbbda
+2026-05-21 15:47:56,972 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 13 Rel
+2026-05-21 15:47:56,979 | INFO | ragent:_run:171 - [31/239] exporting missing unit doc_id=doc-0b328df4c1c5e8f2412bb730e4cacf48 type=text_md_parser chunk_index=955
+2026-05-21 15:48:39,090 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e8778e2f45027c5b658ad4219a03affa
+2026-05-21 15:48:39,095 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 16 Ent + 11 Rel
+2026-05-21 15:48:39,105 | INFO | ragent:_run:171 - [32/239] exporting missing unit doc_id=doc-45b71277b793a49fd80f0428aa5a01ea type=text_md_parser chunk_index=956
+2026-05-21 15:49:19,592 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e0e99684de4dbeba86bd9826e65feff8
+2026-05-21 15:49:19,594 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 15:49:19,600 | INFO | ragent:_run:171 - [33/239] exporting missing unit doc_id=doc-e2e9021bdae6e152481e43f67a3409c8 type=text_md_parser chunk_index=957
+2026-05-21 15:50:13,067 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:05c21d9bb4a6c9eda01e6256c6323f6c
+2026-05-21 15:50:13,085 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 8 Rel
+2026-05-21 15:50:13,171 | INFO | ragent:_run:171 - [34/239] exporting missing unit doc_id=doc-04c8539f5858a88fef69ce68b8c93a72 type=text_md_parser chunk_index=958
+2026-05-21 15:50:30,647 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9fd92a5f0da5110edf14931348f6241d
+2026-05-21 15:50:30,649 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 15:50:30,656 | INFO | ragent:_run:171 - [35/239] exporting missing unit doc_id=doc-2d456becb82e56b13d61af0d2d755ade type=text_md_parser chunk_index=959
+2026-05-21 15:50:50,702 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:fc9d0af43908056bf25626381d44f501
+2026-05-21 15:50:50,769 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 15:50:51,188 | INFO | ragent:_run:171 - [36/239] exporting missing unit doc_id=doc-b5e6f734af0bc1c63653910d6ae72565 type=text_md_parser chunk_index=960
+2026-05-21 15:51:19,034 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:eb2492e7eb98b09bfd48b6add86c63e4
+2026-05-21 15:51:19,082 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 15:51:19,385 | INFO | ragent:_run:171 - [37/239] exporting missing unit doc_id=doc-8ed407304c259d9fe5d728aa7b117945 type=text_md_parser chunk_index=961
+2026-05-21 15:51:57,053 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:41bd3ec112c121adac35bbd0f67f3ba5
+2026-05-21 15:51:57,091 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 15:51:57,147 | INFO | ragent:_run:171 - [38/239] exporting missing unit doc_id=doc-2a86bdb7219636377dea0bf6d3103bd4 type=image_desc chunk_index=207
+2026-05-21 15:52:37,889 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:78a4f58b58e943b48b3e71e619678028
+2026-05-21 15:52:37,895 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 2 extracted 8 Ent + 8 Rel
+2026-05-21 15:53:18,015 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:07dce23a254fe43f8992c97460407009
+2026-05-21 15:53:18,024 | INFO | ragent:_process_single_content:3320 - Chunk 2 of 2 extracted 27 Ent + 21 Rel
+2026-05-21 15:53:18,108 | INFO | ragent:_run:171 - [39/239] exporting missing unit doc_id=doc-6b89361718c4f63f7c17a33a81d92142 type=text_md_parser chunk_index=962
+2026-05-21 15:53:48,038 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:22a682bbd1b3918d22f8d210837e71f8
+2026-05-21 15:53:48,043 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 15:53:48,051 | INFO | ragent:_run:171 - [40/239] exporting missing unit doc_id=doc-0a14c0fac4d5d376215b3b5c5ef55549 type=text_md_parser chunk_index=963
+2026-05-21 15:54:32,797 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:25496f919f2779c3522b67d3b1097c79
+2026-05-21 15:54:32,799 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 10 Rel
+2026-05-21 15:54:32,804 | INFO | ragent:_run:171 - [41/239] exporting missing unit doc_id=doc-2187a8a73f3c3fa43c9c4d5691d89b78 type=text_md_parser chunk_index=964
+2026-05-21 15:54:57,244 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:971496d3053700193bc6fa00a3de36d4
+2026-05-21 15:54:57,248 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 15:54:57,259 | INFO | ragent:_run:171 - [42/239] exporting missing unit doc_id=doc-dcde41d85f100aa2f5a7a221e1dd3be8 type=text_md_parser chunk_index=965
+2026-05-21 15:55:23,931 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:dc7dbd701b79b0bd57f2a0e03eb92fbf
+2026-05-21 15:55:23,934 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 15:55:23,939 | INFO | ragent:_run:171 - [43/239] exporting missing unit doc_id=doc-f65e46b7951ccfb1505511cc762a6bc9 type=image_desc chunk_index=208
+2026-05-21 15:55:41,391 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:fbc46a8f462897e3778d40b3c824f5a5
+2026-05-21 15:55:41,401 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 2 extracted 1 Ent + 0 Rel
+2026-05-21 15:55:48,016 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:923eb1ea9108b79c03a6e66050ede9a3
+2026-05-21 15:55:48,019 | INFO | ragent:_process_single_content:3320 - Chunk 2 of 2 extracted 8 Ent + 8 Rel
+2026-05-21 15:55:48,028 | INFO | ragent:_run:171 - [44/239] exporting missing unit doc_id=doc-f17565619cd71755aa259e8db98b5531 type=text_md_parser chunk_index=966
+2026-05-21 15:56:07,844 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:448d428cfa07da74d64f10d581f78a19
+2026-05-21 15:56:07,846 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 15:56:07,852 | INFO | ragent:_run:171 - [45/239] exporting missing unit doc_id=doc-a86b60aff6f6de41ed8a93d29eb6d337 type=text_md_parser chunk_index=967
+2026-05-21 15:56:39,688 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:417380320f21916039dd9b8a34c67cc3
+2026-05-21 15:56:39,691 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-05-21 15:56:39,698 | INFO | ragent:_run:171 - [46/239] exporting missing unit doc_id=doc-5b0968501fc748fd664ee145ee18bac3 type=text_md_parser chunk_index=968
+2026-05-21 15:57:11,764 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d8b961361b014fe96c0c28ee5bcd2661
+2026-05-21 15:57:11,768 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 15:57:11,778 | INFO | ragent:_run:171 - [47/239] exporting missing unit doc_id=doc-1be44c40fbaaa32689dd79d796b23aca type=text_md_parser chunk_index=969
+2026-05-21 15:57:35,145 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ad85a6e0ee3e393ed5385a96d89bee4a
+2026-05-21 15:57:35,148 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 15:57:35,157 | INFO | ragent:_run:171 - [48/239] exporting missing unit doc_id=doc-cc5d19c03cc5f6799a2c107002652a4f type=image_desc chunk_index=209
+2026-05-21 15:59:16,347 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d8abf722dc2b89a7d55dad3361431a58
+2026-05-21 15:59:16,350 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 17 Ent + 18 Rel
+2026-05-21 15:59:16,357 | INFO | ragent:_run:171 - [49/239] exporting missing unit doc_id=doc-f1b60abd022d49565f17a72e62d3d1e0 type=text_md_parser chunk_index=970
+2026-05-21 15:59:30,134 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0d697444b0761e3fa1ae4a66157d14fd
+2026-05-21 15:59:30,136 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 15:59:30,140 | INFO | ragent:_run:171 - [50/239] exporting missing unit doc_id=doc-4b6c9c46457aea3a9256d5e091b55090 type=text_md_parser chunk_index=971
+2026-05-21 16:00:10,878 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:787feb985fc7e3e674932d7157c83b4f
+2026-05-21 16:00:10,885 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 11 Rel
+2026-05-21 16:00:10,894 | INFO | ragent:_run:171 - [51/239] exporting missing unit doc_id=doc-a2f0849ea926a7c6f6b27d0e566adac5 type=text_md_parser chunk_index=972
+2026-05-21 16:00:44,704 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c94e415b090fe89c63650762ba255711
+2026-05-21 16:00:44,712 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 16:00:44,742 | INFO | ragent:_run:171 - [52/239] exporting missing unit doc_id=doc-1fa1108bde7829e3572bedd12a07b44f type=text_md_parser chunk_index=973
+2026-05-21 16:01:31,092 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:f8f1450cfa2149ad313605040c5a9c32
+2026-05-21 16:01:31,096 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 15 Rel
+2026-05-21 16:01:31,103 | INFO | ragent:_run:171 - [53/239] exporting missing unit doc_id=doc-eab79906a139684855590850b096cc2a type=text_md_parser chunk_index=974
+2026-05-21 16:02:20,243 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:530c7cf4b3c9dc7ba6f35230e0fc0c92
+2026-05-21 16:02:20,247 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 16 Ent + 17 Rel
+2026-05-21 16:02:20,253 | INFO | ragent:_run:171 - [54/239] exporting missing unit doc_id=doc-3db7509704d5bcaa6e26a8996d2a03ef type=text_md_parser chunk_index=975
+2026-05-21 16:02:55,796 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:69dcbf37fd6b5d42dade47c1b32b3897
+2026-05-21 16:02:55,825 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 8 Rel
+2026-05-21 16:02:55,835 | INFO | ragent:_run:171 - [55/239] exporting missing unit doc_id=doc-e6f9e220a24ae364c83df1441f1ff365 type=text_md_parser chunk_index=976
+2026-05-21 16:03:31,510 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7805a39d1bebd3813d7deff9f86a3f56
+2026-05-21 16:03:31,512 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 7 Rel
+2026-05-21 16:03:31,516 | INFO | ragent:_run:171 - [56/239] exporting missing unit doc_id=doc-110d4b3889d11479b9d5ccb83a20d179 type=text_md_parser chunk_index=977
+2026-05-21 16:03:52,715 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d91145e528c2c10cf9330da22dbcc4f6
+2026-05-21 16:03:52,717 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:03:52,722 | INFO | ragent:_run:171 - [57/239] exporting missing unit doc_id=doc-34d4612fe344d02db5f0676542fcd9e8 type=image_desc chunk_index=210
+2026-05-21 16:04:43,753 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5ec82551818a84fcb020d1286bcaee0f
+2026-05-21 16:04:43,786 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 8 Rel
+2026-05-21 16:04:43,794 | INFO | ragent:_run:171 - [58/239] exporting missing unit doc_id=doc-b2b9e565f7ac242340547348b13bdaf2 type=text_md_parser chunk_index=978
+2026-05-21 16:05:36,620 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:1e26833630b41a9eb1dcae91e2a368ec
+2026-05-21 16:05:36,626 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 12 Ent + 11 Rel
+2026-05-21 16:05:36,636 | INFO | ragent:_run:171 - [59/239] exporting missing unit doc_id=doc-4f0a9e590514623416f6b547502d5a28 type=text_md_parser chunk_index=979
+2026-05-21 16:06:19,252 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0c2f42541e3dd47b075e3f5ec548f610
+2026-05-21 16:06:19,256 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 13 Rel
+2026-05-21 16:06:19,263 | INFO | ragent:_run:171 - [60/239] exporting missing unit doc_id=doc-e9e69ba8bd9aee5e04e04865d8acf58c type=image_desc chunk_index=211
+2026-05-21 16:07:03,822 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d861f42651668956227d0c5b0422c27b
+2026-05-21 16:07:03,833 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 10 Ent + 10 Rel
+2026-05-21 16:07:03,844 | INFO | ragent:_run:171 - [61/239] exporting missing unit doc_id=doc-3f559881f6ad8a9e3f34f58c21271f6f type=text_md_parser chunk_index=980
+2026-05-21 16:07:25,877 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e8acc956949b57de2e43188d9b810d3a
+2026-05-21 16:07:25,887 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:07:25,891 | INFO | ragent:_run:171 - [62/239] exporting missing unit doc_id=doc-b6c6702c25da0082f60aa080a9ae526b type=text_md_parser chunk_index=981
+2026-05-21 16:07:51,844 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b7214b061a74351e76e38de8c72521e4
+2026-05-21 16:07:51,859 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:07:51,865 | INFO | ragent:_run:171 - [63/239] exporting missing unit doc_id=doc-d252209a8faf9c0e7df84132ac412fb2 type=text_md_parser chunk_index=982
+2026-05-21 16:08:16,889 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:18aa6837a31fc777189d523efb07da5b
+2026-05-21 16:08:16,893 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:08:16,902 | INFO | ragent:_run:171 - [64/239] exporting missing unit doc_id=doc-69784573d1be2ad7497b5ca95a3308dd type=text_md_parser chunk_index=983
+2026-05-21 16:08:49,733 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:3016104961ac11c022494058455ec82d
+2026-05-21 16:08:49,743 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 16:08:49,768 | INFO | ragent:_run:171 - [65/239] exporting missing unit doc_id=doc-338bbc0a0d234578aab734a5bb8ad3e4 type=text_md_parser chunk_index=984
+2026-05-21 16:09:28,580 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:623895db46c5e1072a93280db465d6ae
+2026-05-21 16:09:28,583 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 7 Rel
+2026-05-21 16:09:28,588 | INFO | ragent:_run:171 - [66/239] exporting missing unit doc_id=doc-c4690cfd33ecfdd4cbd68aec3b89860b type=text_md_parser chunk_index=985
+2026-05-21 16:10:09,557 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ff688f2da1764bf62b75d3a1adabae42
+2026-05-21 16:10:09,560 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 12 Rel
+2026-05-21 16:10:09,566 | INFO | ragent:_run:171 - [67/239] exporting missing unit doc_id=doc-865ba5587bcb78bc817516c887f37379 type=text_md_parser chunk_index=986
+2026-05-21 16:10:39,744 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e244beb04a392b17d637fc6b43114d6b
+2026-05-21 16:10:39,746 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 7 Rel
+2026-05-21 16:10:39,755 | INFO | ragent:_run:171 - [68/239] exporting missing unit doc_id=doc-901080d7be95391917db75255f3b6935 type=text_md_parser chunk_index=987
+2026-05-21 16:10:57,163 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:59b14c30b9eb3537c3413080b5095d30
+2026-05-21 16:10:57,164 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 16:10:57,170 | INFO | ragent:_run:171 - [69/239] exporting missing unit doc_id=doc-eb4c09ece4735acddba0fc9e4e4b347b type=text_md_parser chunk_index=988
+2026-05-21 16:11:29,758 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:af5f6af18fc27162abd60104e6b5ea6a
+2026-05-21 16:11:29,761 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 16:11:29,767 | INFO | ragent:_run:171 - [70/239] exporting missing unit doc_id=doc-06e1a13cac01660fe2f26abce16885b4 type=image_desc chunk_index=212
+2026-05-21 16:11:59,264 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:790b2b6044ea3e0c95bc111c0634cb69
+2026-05-21 16:11:59,266 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:11:59,271 | INFO | ragent:_run:171 - [71/239] exporting missing unit doc_id=doc-1695b0308886e9f29483512b256c12f6 type=text_md_parser chunk_index=989
+2026-05-21 16:12:25,856 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:df2ba87939eb7bd14a8771612900252f
+2026-05-21 16:12:25,860 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 11 Rel
+2026-05-21 16:12:25,866 | INFO | ragent:_run:171 - [72/239] exporting missing unit doc_id=doc-4eec3ad4b5b4cf1673c18c9238c4fdd1 type=image_desc chunk_index=213
+2026-05-21 16:12:55,074 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:bf1a90737a758299de0c457e04bb8aa6
+2026-05-21 16:12:55,076 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 16:12:55,081 | INFO | ragent:_run:171 - [73/239] exporting missing unit doc_id=doc-8a157b47e11a8b632a91d02f5e5dc601 type=text_md_parser chunk_index=990
+2026-05-21 16:13:13,749 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:a91235c41fe829cf05579e20857b5149
+2026-05-21 16:13:13,750 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 16:13:13,756 | INFO | ragent:_run:171 - [74/239] exporting missing unit doc_id=doc-8515d0f831582cacab70fb918b0cef22 type=image_desc chunk_index=214
+2026-05-21 16:14:14,060 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:859e1caf0749c68bb29a5fc44eab3f1b
+2026-05-21 16:14:14,090 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 10 Ent + 9 Rel
+2026-05-21 16:14:14,098 | INFO | ragent:_run:171 - [75/239] exporting missing unit doc_id=doc-63a1fa576aa7403d1873c96d224cb2ad type=text_md_parser chunk_index=991
+2026-05-21 16:14:34,113 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:52f63de297d75c0afd9f4261622eab39
+2026-05-21 16:14:34,116 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 16:14:34,121 | INFO | ragent:_run:171 - [76/239] exporting missing unit doc_id=doc-6163001dde83653c98195978d2baccef type=text_md_parser chunk_index=992
+2026-05-21 16:15:43,460 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:cce2a221d8ff7249e46ec7fd84441ed3
+2026-05-21 16:15:43,462 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 20 Ent + 21 Rel
+2026-05-21 16:15:43,473 | INFO | ragent:_run:171 - [77/239] exporting missing unit doc_id=doc-1240405303836670222ee81007cad769 type=text_md_parser chunk_index=993
+2026-05-21 16:16:33,903 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9aba66e7bfe3190c518d107a4cc4b18d
+2026-05-21 16:16:33,910 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 8 Rel
+2026-05-21 16:16:33,996 | INFO | ragent:_run:171 - [78/239] exporting missing unit doc_id=doc-527287524c0016dbd29149cf20b896f3 type=text_md_parser chunk_index=994
+2026-05-21 16:17:09,837 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:62e7b8026df53c3d8a8892b2e695f643
+2026-05-21 16:17:09,847 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 16:17:09,877 | INFO | ragent:_run:171 - [79/239] exporting missing unit doc_id=doc-e59c48cb5dd0653631d4551b100668a4 type=text_md_parser chunk_index=995
+2026-05-21 16:17:56,186 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:986f9ff2083469c41ceb870fe4632a7d
+2026-05-21 16:17:56,194 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 16:17:56,219 | INFO | ragent:_run:171 - [80/239] exporting missing unit doc_id=doc-97a3be623cde00775dde83cb8ae83387 type=text_md_parser chunk_index=996
+2026-05-21 16:18:24,508 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d882a03058cafe6f05c9281af1e32ef0
+2026-05-21 16:18:24,514 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 11 Rel
+2026-05-21 16:18:24,582 | INFO | ragent:_run:171 - [81/239] exporting missing unit doc_id=doc-5fb2369f3e0fbc8744af08613e100f15 type=text_md_parser chunk_index=997
+2026-05-21 16:19:21,533 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:91e99b457db44da1e4d1a12233f2f833
+2026-05-21 16:19:21,537 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 12 Ent + 14 Rel
+2026-05-21 16:19:21,544 | INFO | ragent:_run:171 - [82/239] exporting missing unit doc_id=doc-9d70e64f174c98fd4f1a6239bae8da02 type=text_md_parser chunk_index=998
+2026-05-21 16:19:39,403 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d073ad51c5252ee08243c1d41a831013
+2026-05-21 16:19:39,408 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:19:39,414 | INFO | ragent:_run:171 - [83/239] exporting missing unit doc_id=doc-d51c68016c184fea64ff945e8130503c type=text_md_parser chunk_index=999
+2026-05-21 16:20:00,203 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:a17bb8776563a8304aac978d130ec5dc
+2026-05-21 16:20:00,207 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:20:00,221 | INFO | ragent:_run:171 - [84/239] exporting missing unit doc_id=doc-1292a3f0a30cd24a3ce61678b3e6fa7d type=text_md_parser chunk_index=1000
+2026-05-21 16:20:22,045 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:bce60a85819dd861c98a04eaf3e1deab
+2026-05-21 16:20:22,048 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 16:20:22,062 | INFO | ragent:_run:171 - [85/239] exporting missing unit doc_id=doc-4f433fd6264cc156b0c2c517c4b5d2ea type=text_md_parser chunk_index=1001
+2026-05-21 16:20:45,722 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:87d2ac6b8c0662452424a0bbc9e4deb5
+2026-05-21 16:20:45,729 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 5 Rel
+2026-05-21 16:20:45,740 | INFO | ragent:_run:171 - [86/239] exporting missing unit doc_id=doc-0621eb428ed41ceff96ddc0fc43fc6f6 type=text_md_parser chunk_index=1002
+2026-05-21 16:21:04,445 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e1baf0c1b26ed34194a8535e1944cf59
+2026-05-21 16:21:04,449 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-05-21 16:21:04,456 | INFO | ragent:_run:171 - [87/239] exporting missing unit doc_id=doc-82de5befd1db88cfd2633984d3f9de3e type=text_md_parser chunk_index=1003
+2026-05-21 16:23:02,690 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:85c0ff195decc3bf113cc9b408fe3ea4
+2026-05-21 16:23:02,756 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 12 Ent + 11 Rel
+2026-05-21 16:23:02,875 | INFO | ragent:_run:171 - [88/239] exporting missing unit doc_id=doc-7c9fbb13461869f3efd6922e0fae019e type=text_md_parser chunk_index=1004
+2026-05-21 16:23:32,557 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6a9543e9b12d4d27dd6be057b0a40f8e
+2026-05-21 16:23:32,604 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 16:23:32,704 | INFO | ragent:_run:171 - [89/239] exporting missing unit doc_id=doc-e9ecbf994e5cbe774782a3e513268480 type=text_md_parser chunk_index=1005
+2026-05-21 16:24:43,744 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:18f926fad522d2dc98993123a5fb9157
+2026-05-21 16:24:44,029 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 11 Ent + 6 Rel
+2026-05-21 16:24:44,073 | INFO | ragent:_run:171 - [90/239] exporting missing unit doc_id=doc-ee62b4eecf0771c2aa125cc8015dd7a6 type=image_desc chunk_index=215
+2026-05-21 16:25:11,557 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:2d13a9af7f8df959a81fd2f797150275
+2026-05-21 16:25:11,606 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 7 Rel
+2026-05-21 16:25:11,641 | INFO | ragent:_run:171 - [91/239] exporting missing unit doc_id=doc-706f4c2560772fe3b71ce8ea6c08b5c8 type=text_md_parser chunk_index=1006
+2026-05-21 16:25:56,839 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:dc3a99716c4ef5b5de81328393d76043
+2026-05-21 16:25:56,850 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 11 Rel
+2026-05-21 16:25:56,864 | INFO | ragent:_run:171 - [92/239] exporting missing unit doc_id=doc-4e3e58033e31c31d12590300200e3c6c type=image_desc chunk_index=216
+2026-05-21 16:26:39,279 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:d04fa9aa78e94d027b6682196e2fc345
+2026-05-21 16:26:39,312 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 8 Rel
+2026-05-21 16:26:39,502 | INFO | ragent:_run:171 - [93/239] exporting missing unit doc_id=doc-52dc83669e18bcdd83a025963bac60fb type=text_md_parser chunk_index=1007
+2026-05-21 16:26:57,163 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5ed6eea7638550b2414442d515b6c06b
+2026-05-21 16:26:57,174 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:26:57,188 | INFO | ragent:_run:171 - [94/239] exporting missing unit doc_id=doc-e01169a86e77b1d8bec069e0a340a306 type=image_desc chunk_index=217
+2026-05-21 16:27:44,827 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:44cdd0e21099da3a342f012004018482
+2026-05-21 16:27:44,843 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 10 Ent + 12 Rel
+2026-05-21 16:27:44,893 | INFO | ragent:_run:171 - [95/239] exporting missing unit doc_id=doc-ce385fef54b19d2273384417010b5bb4 type=image_desc chunk_index=218
+2026-05-21 16:28:33,609 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:237addc43164fb0d11e2f8e4ccdb51f9
+2026-05-21 16:28:33,653 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 8 Rel
+2026-05-21 16:28:33,755 | INFO | ragent:_run:171 - [96/239] exporting missing unit doc_id=doc-01d5ae05a8b7b98f23a02f8b46d4de62 type=text_md_parser chunk_index=1008
+2026-05-21 16:28:59,374 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:fcc2836b54c851178500b6a46c0c3af7
+2026-05-21 16:28:59,405 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:28:59,524 | INFO | ragent:_run:171 - [97/239] exporting missing unit doc_id=doc-e66beba6d2197e91a624a0b39f010150 type=image_desc chunk_index=219
+2026-05-21 16:29:21,228 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:8d91a2f4ab69308c9dc1367aa8f56e3c
+2026-05-21 16:29:21,237 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 16:29:21,495 | INFO | ragent:_run:171 - [98/239] exporting missing unit doc_id=doc-d770d71d5252e3ed6b2c58024349547a type=text_md_parser chunk_index=1009
+2026-05-21 16:30:11,120 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:dc8a0f7a5c4d14e877e14a9aeb27952c
+2026-05-21 16:30:11,135 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 13 Rel
+2026-05-21 16:30:11,494 | INFO | ragent:_run:171 - [99/239] exporting missing unit doc_id=doc-a1f2ffb470315437d4e0e29e5408132c type=text_md_parser chunk_index=1010
+2026-05-21 16:30:40,195 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:caa2b877911b5b0a726fdebb75137c95
+2026-05-21 16:30:40,207 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 16:30:40,441 | INFO | ragent:_run:171 - [100/239] exporting missing unit doc_id=doc-75c39820013b42cdf24629c2fadc6534 type=text_md_parser chunk_index=1011
+2026-05-21 16:31:05,200 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:af671f84f056cf0193f6f342c92e6e59
+2026-05-21 16:31:05,207 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 16:31:05,221 | INFO | ragent:_run:171 - [101/239] exporting missing unit doc_id=doc-139d7e25029665a959182f6a56b14fef type=image_desc chunk_index=220
+2026-05-21 16:31:38,032 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:3622e55b5eeb9e0b5fd37e963bbd7a57
+2026-05-21 16:31:38,047 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 12 Ent + 16 Rel
+2026-05-21 16:31:38,068 | INFO | ragent:_run:171 - [102/239] exporting missing unit doc_id=doc-2e8892e3ac69efab44d693c3dd3f9837 type=text_md_parser chunk_index=1012
+2026-05-21 16:32:12,955 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:41a8370f69c554b83b2d9ab62e5745c9
+2026-05-21 16:32:12,962 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 8 Rel
+2026-05-21 16:32:12,971 | INFO | ragent:_run:171 - [103/239] exporting missing unit doc_id=doc-73a46a71ba1e638c6a4b1830239cb5e1 type=text_md_parser chunk_index=1013
+2026-05-21 16:32:26,014 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c79c6f74b2d8d190b5db0408ef90bd37
+2026-05-21 16:32:26,017 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:32:26,034 | INFO | ragent:_run:171 - [104/239] exporting missing unit doc_id=doc-dac2ac1617b9cdb160b513e08c41014f type=text_md_parser chunk_index=1014
+2026-05-21 16:32:47,966 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e4f2359944e4a6595cf6bf3d76973b34
+2026-05-21 16:32:47,972 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:32:47,980 | INFO | ragent:_run:171 - [105/239] exporting missing unit doc_id=doc-f56ee427cd846ab51f74b0754e1b0fe9 type=text_md_parser chunk_index=1015
+2026-05-21 16:33:15,744 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7866264bcef86f0c946cc2e04dd63f59
+2026-05-21 16:33:15,749 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 16:33:15,764 | INFO | ragent:_run:171 - [106/239] exporting missing unit doc_id=doc-355851a94e187be056cff93574541b92 type=text_md_parser chunk_index=1016
+2026-05-21 16:33:32,044 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e19c5823253dbccb0c82fefbb5b53813
+2026-05-21 16:33:32,051 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 16:33:32,060 | INFO | ragent:_run:171 - [107/239] exporting missing unit doc_id=doc-21058e7efee6a5b0707d7cd2028a1f6c type=text_md_parser chunk_index=1017
+2026-05-21 16:34:48,191 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:83e8660cc1d420a768544959b586d743
+2026-05-21 16:34:48,200 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 15 Ent + 15 Rel
+2026-05-21 16:34:48,224 | INFO | ragent:_run:171 - [108/239] exporting missing unit doc_id=doc-90a2e427d23f4384d9c00808b36e04e3 type=text_md_parser chunk_index=1018
+2026-05-21 16:35:24,924 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:834e9a22c98fd5ee70f33e0fff3777f4
+2026-05-21 16:35:29,644 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 10 Ent + 9 Rel
+2026-05-21 16:35:29,696 | INFO | ragent:_run:171 - [109/239] exporting missing unit doc_id=doc-4dcb3212a1fb3b1117a474c8579741ae type=text_md_parser chunk_index=1019
+2026-05-21 16:35:46,353 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:1fca94e84a40fff925a5f75b4d9386c5
+2026-05-21 16:35:46,495 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:35:46,759 | INFO | ragent:_run:171 - [110/239] exporting missing unit doc_id=doc-7a2b5f3208dd8c4bf753ff5b46043b92 type=text_md_parser chunk_index=1020
+2026-05-21 16:36:16,551 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:14b70fa0d15461f491ce4fde06db595d
+2026-05-21 16:36:16,571 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:36:16,649 | INFO | ragent:_run:171 - [111/239] exporting missing unit doc_id=doc-4355ff38eb3155bedd377f8cda101a30 type=text_md_parser chunk_index=1021
+2026-05-21 16:36:29,044 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:f90b8ad907e7f48959ba14debc8bcc93
+2026-05-21 16:36:29,049 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:36:29,057 | INFO | ragent:_run:171 - [112/239] exporting missing unit doc_id=doc-4420c542eff5baffebf47f0147e62db2 type=text_md_parser chunk_index=1022
+2026-05-21 16:36:53,012 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:50c07bdbcf150a6c34b63f57e4bb5335
+2026-05-21 16:36:53,034 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 10 Ent + 9 Rel
+2026-05-21 16:36:53,045 | INFO | ragent:_run:171 - [113/239] exporting missing unit doc_id=doc-de8a463e72ad00584c3ef9b0907d8069 type=text_md_parser chunk_index=1023
+2026-05-21 16:37:28,781 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:de2b70c9e6b7ea9e15cbd24cd9566a8c
+2026-05-21 16:37:28,799 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:37:28,810 | INFO | ragent:_run:171 - [114/239] exporting missing unit doc_id=doc-98822951b2e4ee4118b107c5f2a53a44 type=text_md_parser chunk_index=1024
+2026-05-21 16:37:51,007 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:49f8c312a92c607aa5cb569a2658cbdf
+2026-05-21 16:37:51,013 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:37:51,020 | INFO | ragent:_run:171 - [115/239] exporting missing unit doc_id=doc-9e6af3d98471f914d684bd86243f5577 type=image_desc chunk_index=221
+2026-05-21 16:38:16,605 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ea4846e7aca7f43fc5a7950a72b82f57
+2026-05-21 16:38:16,618 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 16:38:16,625 | INFO | ragent:_run:171 - [116/239] exporting missing unit doc_id=doc-afce794f24d6c691bb26d641b7440ccb type=image_desc chunk_index=222
+2026-05-21 16:38:57,998 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:43c597c47ef7ca8132c59e220ea082f5
+2026-05-21 16:38:58,023 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 16:38:58,038 | INFO | ragent:_run:171 - [117/239] exporting missing unit doc_id=doc-2c7b584afb61f3d253db9d752e42f79b type=image_desc chunk_index=223
+2026-05-21 16:39:54,777 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:39c46675c8992ebd597d99df29f91aac
+2026-05-21 16:39:59,444 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 9 Rel
+2026-05-21 16:39:59,506 | INFO | ragent:_run:171 - [118/239] exporting missing unit doc_id=doc-33e4eccf20325fe1e72c702a72019cf7 type=image_desc chunk_index=224
+2026-05-21 16:40:43,397 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:4cedc9ee3d6931bc52f54fcdfba6ca3d
+2026-05-21 16:40:49,341 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 16:40:49,405 | INFO | ragent:_run:171 - [119/239] exporting missing unit doc_id=doc-457412774cb8a16e2439341baf60a876 type=text_md_parser chunk_index=1025
+2026-05-21 16:41:09,581 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:a78545e68e7559efa8a2b873c43637a4
+2026-05-21 16:41:09,592 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:41:09,626 | INFO | ragent:_run:171 - [120/239] exporting missing unit doc_id=doc-8e659987b9d93cd6b9a9f54f73fca237 type=text_md_parser chunk_index=1026
+2026-05-21 16:41:44,613 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9fd1a31c8f0c62843f7a1fb73d32f494
+2026-05-21 16:41:44,647 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 13 Rel
+2026-05-21 16:41:44,728 | INFO | ragent:_run:171 - [121/239] exporting missing unit doc_id=doc-0c16be876749f43c8c13a11f45ce9a76 type=text_md_parser chunk_index=1027
+2026-05-21 16:42:19,004 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5023ef6a92d47e795850cb5552b7f6bf
+2026-05-21 16:42:19,115 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 16:42:19,242 | INFO | ragent:_run:171 - [122/239] exporting missing unit doc_id=doc-057d8d816ceebaf92aece1681924de7b type=text_md_parser chunk_index=1028
+2026-05-21 16:43:16,728 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b22b9ac10791f7ca212e14b38bc312d0
+2026-05-21 16:43:16,742 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 11 Ent + 8 Rel
+2026-05-21 16:43:16,772 | INFO | ragent:_run:171 - [123/239] exporting missing unit doc_id=doc-1291b8fb00a40233c489346c8d90cbd7 type=text_md_parser chunk_index=1029
+2026-05-21 16:44:14,719 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6663136a7fe2e9685874986e66377884
+2026-05-21 16:44:14,803 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 19 Ent + 24 Rel
+2026-05-21 16:44:15,098 | INFO | ragent:_run:171 - [124/239] exporting missing unit doc_id=doc-5f2a43dc931355a324be7168b9c21fac type=text_md_parser chunk_index=1030
+2026-05-21 16:44:52,481 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:472671e5149164453ab0a9dc047c520e
+2026-05-21 16:44:52,499 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 20 Rel
+2026-05-21 16:44:52,611 | INFO | ragent:_run:171 - [125/239] exporting missing unit doc_id=doc-b6b2a574aec5df4962c7841d73d5ee08 type=text_md_parser chunk_index=1031
+2026-05-21 16:45:16,846 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:48d82b810f09cdc59a81d9322547c37e
+2026-05-21 16:45:16,865 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:45:16,956 | INFO | ragent:_run:171 - [126/239] exporting missing unit doc_id=doc-7603411953fa2558d13286851655101e type=image_desc chunk_index=225
+2026-05-21 16:45:40,152 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e22bb76090aa3739fbe7d2f85a8b8d96
+2026-05-21 16:45:40,160 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:45:40,177 | INFO | ragent:_run:171 - [127/239] exporting missing unit doc_id=doc-2ed6196d7c2b0d8aa5f529b38ca97363 type=image_desc chunk_index=226
+2026-05-21 16:46:11,004 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:18b15dc9826ff781da7bf6e1a2614580
+2026-05-21 16:46:11,012 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 16:46:11,021 | INFO | ragent:_run:171 - [128/239] exporting missing unit doc_id=doc-699474a6c64310c0147c3b310eb1773f type=text_md_parser chunk_index=1032
+2026-05-21 16:46:40,609 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:3191eb2ea9955cf75f65e326a2627eab
+2026-05-21 16:46:40,616 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:46:40,628 | INFO | ragent:_run:171 - [129/239] exporting missing unit doc_id=doc-6ddd144b4bd4e23a27d4619656b12e17 type=image_desc chunk_index=227
+2026-05-21 16:47:11,315 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:cd5665781ee18b06826893390d9b5be8
+2026-05-21 16:47:11,341 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 6 Rel
+2026-05-21 16:47:11,351 | INFO | ragent:_run:171 - [130/239] exporting missing unit doc_id=doc-7e72a49a7d0bc5e3b2193d412aa246fa type=image_desc chunk_index=228
+2026-05-21 16:47:36,182 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:753d8ffb370af1dd5ce7b4c336a3ae25
+2026-05-21 16:47:36,199 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:47:36,225 | INFO | ragent:_run:171 - [131/239] exporting missing unit doc_id=doc-031227ea658beaac4fa8a2c97eb2701a type=image_desc chunk_index=229
+2026-05-21 16:47:58,333 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:4322173a7287643e7489528ddb9a53c3
+2026-05-21 16:47:58,338 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 0 Ent + 0 Rel
+2026-05-21 16:47:58,350 | INFO | ragent:_run:171 - [132/239] exporting missing unit doc_id=doc-efb44f8f52a8512ac2fe86797f49cf56 type=image_desc chunk_index=230
+2026-05-21 16:48:13,735 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c6634a897cab2a888a2cb0c0ec647c54
+2026-05-21 16:48:13,742 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 16:48:13,750 | INFO | ragent:_run:171 - [133/239] exporting missing unit doc_id=doc-5df7e140da86f434378702e967722d19 type=image_desc chunk_index=231
+2026-05-21 16:48:38,330 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:f8dd3762c14cab7268f4badc921a8c92
+2026-05-21 16:48:38,336 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 5 Rel
+2026-05-21 16:48:38,343 | INFO | ragent:_run:171 - [134/239] exporting missing unit doc_id=doc-8c3cfe6dc30558f1ea73020822ab05cc type=image_desc chunk_index=232
+2026-05-21 16:48:59,298 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:f12f437dab4b16b5a2a6562c6e8026e8
+2026-05-21 16:49:01,731 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 16:49:01,812 | INFO | ragent:_run:171 - [135/239] exporting missing unit doc_id=doc-a9e5a0d5b1b1b812fecb75600b1f3674 type=text_md_parser chunk_index=1033
+2026-05-21 16:49:13,123 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:23b0ba5b6c17ae6f1501e6a864d95151
+2026-05-21 16:49:13,131 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 16:49:13,400 | INFO | ragent:_run:171 - [136/239] exporting missing unit doc_id=doc-4b53a76a25f1b3dcf37e7132c605fffd type=text_md_parser chunk_index=1034
+2026-05-21 16:49:40,205 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9bcb4e2201c94d44f850b8f67c6f85fc
+2026-05-21 16:49:40,213 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 15 Rel
+2026-05-21 16:49:40,294 | INFO | ragent:_run:171 - [137/239] exporting missing unit doc_id=doc-5b3a98ab55cb4fa0d3f2088e5ad8cf18 type=image_desc chunk_index=233
+2026-05-21 16:50:08,599 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7c4e2b0d6d58494c5cbbfc3196f5e197
+2026-05-21 16:50:10,035 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 9 Rel
+2026-05-21 16:50:10,056 | INFO | ragent:_run:171 - [138/239] exporting missing unit doc_id=doc-e9022349535393f5a4dbc92dede0a841 type=image_desc chunk_index=234
+2026-05-21 16:50:28,007 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:26903f114771313cab01c1a777586139
+2026-05-21 16:50:28,040 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 16:50:28,066 | INFO | ragent:_run:171 - [139/239] exporting missing unit doc_id=doc-a8365340d703d4f9c8c739dab7b95c7d type=image_desc chunk_index=235
+2026-05-21 16:51:14,673 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:85a785ca9936c3af131ac2c94650032a
+2026-05-21 16:51:14,693 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-05-21 16:51:14,771 | INFO | ragent:_run:171 - [140/239] exporting missing unit doc_id=doc-16f9903f6acc2aa6dc1d8f0623bb419d type=image_desc chunk_index=236
+2026-05-21 16:51:39,737 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ef64b999ba8674ac0115166e248d74b0
+2026-05-21 16:51:39,751 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 16:51:39,759 | INFO | ragent:_run:171 - [141/239] exporting missing unit doc_id=doc-0f489f0fe639cac74597601557d0376e type=image_desc chunk_index=237
+2026-05-21 16:52:12,598 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7271ef24b226f9e2f2ab46bd58c696d2
+2026-05-21 16:52:12,610 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 16:52:12,704 | INFO | ragent:_run:171 - [142/239] exporting missing unit doc_id=doc-cf00d6cd30b04e910af67515b269bdea type=image_desc chunk_index=238
+2026-05-21 16:53:00,287 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0ba6c5a9f6012dae27d134e29d25aed0
+2026-05-21 16:53:00,316 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 5 Rel
+2026-05-21 16:53:00,349 | INFO | ragent:_run:171 - [143/239] exporting missing unit doc_id=doc-d2b8b0bcaeb764ae053b702c3f3bce97 type=image_desc chunk_index=239
+2026-05-21 16:54:01,893 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0f6d0d22698a3bb093860d45b4692bfc
+2026-05-21 16:54:01,921 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 10 Rel
+2026-05-21 16:54:01,931 | INFO | ragent:_run:171 - [144/239] exporting missing unit doc_id=doc-99df3fb1360376ae5279693acdbc8e6c type=image_desc chunk_index=240
+2026-05-21 16:54:22,408 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:febdd282d4a80d87b90aaa54ec4b5a66
+2026-05-21 16:54:22,450 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 16:54:22,477 | INFO | ragent:_run:171 - [145/239] exporting missing unit doc_id=doc-94b1f16012b0866616ddcdc6a317a3c7 type=image_desc chunk_index=241
+2026-05-21 16:55:25,225 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5b61b3677287db6e4f8d3765eda98c3c
+2026-05-21 16:55:27,739 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 13 Ent + 13 Rel
+2026-05-21 16:55:27,849 | INFO | ragent:_run:171 - [146/239] exporting missing unit doc_id=doc-643df848fefab62e1493c577d0674ac2 type=image_desc chunk_index=242
+2026-05-21 16:55:52,206 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b44dcbe053f985ca1948558f256ba67d
+2026-05-21 16:55:53,051 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:55:53,088 | INFO | ragent:_run:171 - [147/239] exporting missing unit doc_id=doc-a36166b19524214ee61fc51dedc36f22 type=image_desc chunk_index=243
+2026-05-21 16:56:23,805 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:58c5d76d929e3d3ba8685507ab7e65ac
+2026-05-21 16:56:23,821 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 16:56:23,942 | INFO | ragent:_run:171 - [148/239] exporting missing unit doc_id=doc-d9de89134309f112a43cb7f50e7c0a6b type=image_desc chunk_index=244
+2026-05-21 16:57:17,130 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:8023f57f2dbcdded7ab2343a41e3d38d
+2026-05-21 16:57:17,224 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 16:57:17,250 | INFO | ragent:_run:171 - [149/239] exporting missing unit doc_id=doc-29417572b327704c1fd8ba982c40f15f type=image_desc chunk_index=245
+2026-05-21 16:57:57,331 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7e0861687afd82e215f0ac8203b3200b
+2026-05-21 16:57:57,350 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 8 Rel
+2026-05-21 16:57:57,403 | INFO | ragent:_run:171 - [150/239] exporting missing unit doc_id=doc-abd61964b0ad4324b10610bcfbf652dd type=image_desc chunk_index=246
+2026-05-21 16:58:22,813 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e2e94ffc588ad40a43db8505dce81e73
+2026-05-21 16:58:22,824 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 16:58:22,829 | INFO | ragent:_run:171 - [151/239] exporting missing unit doc_id=doc-70c6c0266e90fa012a806718931cba0f type=image_desc chunk_index=247
+2026-05-21 16:59:06,499 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b553a3649204e711e6d9315f8981e6e9
+2026-05-21 16:59:06,527 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 12 Rel
+2026-05-21 16:59:06,557 | INFO | ragent:_run:171 - [152/239] exporting missing unit doc_id=doc-3132712b5609e128d5ad410cf992c759 type=image_desc chunk_index=248
+2026-05-21 16:59:46,585 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:422e2d161e29d105a0c1ab8b6caf4fae
+2026-05-21 16:59:46,611 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 16:59:46,756 | INFO | ragent:_run:171 - [153/239] exporting missing unit doc_id=doc-2b304a7061824368fa80e4494c7b4c07 type=image_desc chunk_index=249
+2026-05-21 17:00:15,428 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e31ebbb4fc61826994483d94e80b7afe
+2026-05-21 17:00:15,432 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:00:15,437 | INFO | ragent:_run:171 - [154/239] exporting missing unit doc_id=doc-6e3d645804ae85728e7a5af8ab55bf18 type=image_desc chunk_index=250
+2026-05-21 17:00:58,834 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0ad8b1b0735b9322d0c7fb241a50b0e5
+2026-05-21 17:00:58,842 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:00:58,912 | INFO | ragent:_run:171 - [155/239] exporting missing unit doc_id=doc-7d3ff2c23d6bda82dfa948c1226f9723 type=image_desc chunk_index=251
+2026-05-21 17:01:16,324 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c49642a39967cef4a9bb1e817076601e
+2026-05-21 17:01:16,331 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 17:01:16,342 | INFO | ragent:_run:171 - [156/239] exporting missing unit doc_id=doc-3c2905fba6ea3f8170f132e14ec1a3d8 type=image_desc chunk_index=252
+2026-05-21 17:01:37,557 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:1c6c7d25cd94958678840e96b1ff4d1e
+2026-05-21 17:01:37,567 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 17:01:37,573 | INFO | ragent:_run:171 - [157/239] exporting missing unit doc_id=doc-6513635581f55725d9cdad40310e22ff type=image_desc chunk_index=253
+2026-05-21 17:02:05,756 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:da6df939000d74cc88b45c9629033a12
+2026-05-21 17:02:05,772 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 6 Rel
+2026-05-21 17:02:05,781 | INFO | ragent:_run:171 - [158/239] exporting missing unit doc_id=doc-127ac1ef85cf168a8d91fefe13b9bc85 type=image_desc chunk_index=254
+2026-05-21 17:02:45,076 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:1e712532a62c57f4a909d1a13f90e0ea
+2026-05-21 17:02:45,083 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 5 Rel
+2026-05-21 17:02:45,094 | INFO | ragent:_run:171 - [159/239] exporting missing unit doc_id=doc-2787126f161ff4ad23fbe892de545ed4 type=image_desc chunk_index=255
+2026-05-21 17:03:18,633 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:3a7694f5ec7850a414b43da920cbf476
+2026-05-21 17:03:18,637 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 8 Rel
+2026-05-21 17:03:18,649 | INFO | ragent:_run:171 - [160/239] exporting missing unit doc_id=doc-a2ba75c00647629dd5a6017da1c77232 type=image_desc chunk_index=256
+2026-05-21 17:04:03,464 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:1f5240b20410525d9519edcdee3b298e
+2026-05-21 17:04:03,480 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:04:03,505 | INFO | ragent:_run:171 - [161/239] exporting missing unit doc_id=doc-95418c3bd01d37d293d3c3faf933142b type=image_desc chunk_index=257
+2026-05-21 17:05:02,517 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:615169ff1d53b6092ed727acc9a84472
+2026-05-21 17:05:02,527 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 9 Rel
+2026-05-21 17:05:02,544 | INFO | ragent:_run:171 - [162/239] exporting missing unit doc_id=doc-b6c6c5d228fce48633dc0679bd70f17f type=image_desc chunk_index=258
+2026-05-21 17:05:30,872 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e637bad13614e68706b2cbc5e84e5558
+2026-05-21 17:05:31,027 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 0 Rel
+2026-05-21 17:05:31,041 | INFO | ragent:_run:171 - [163/239] exporting missing unit doc_id=doc-6af15c4767dae88bfe7974a09f9e6ecc type=image_desc chunk_index=259
+2026-05-21 17:05:45,134 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:8c8b02985066751a18eb5504af304cb4
+2026-05-21 17:05:45,147 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 17:05:45,156 | INFO | ragent:_run:171 - [164/239] exporting missing unit doc_id=doc-d98cdc429976fc28ddad83d5ac4f57e6 type=image_desc chunk_index=260
+2026-05-21 17:06:09,632 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:562d31a5e14efe7166e9a8a782e3535f
+2026-05-21 17:06:09,641 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 5 Rel
+2026-05-21 17:06:09,651 | INFO | ragent:_run:171 - [165/239] exporting missing unit doc_id=doc-1fedc9d5b925a6ed477ca9ade424579a type=image_desc chunk_index=261
+2026-05-21 17:06:31,416 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7edf94807c06cc5316e91bf42217d3ba
+2026-05-21 17:06:31,423 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:06:31,441 | INFO | ragent:_run:171 - [166/239] exporting missing unit doc_id=doc-c2fefce0e29d94f28c0b03b7b9aaee90 type=image_desc chunk_index=262
+2026-05-21 17:06:42,163 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9eb71594e24b5c16170bad5bdc7e2b96
+2026-05-21 17:06:42,169 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 1 Ent + 0 Rel
+2026-05-21 17:06:42,175 | INFO | ragent:_run:171 - [167/239] exporting missing unit doc_id=doc-1186ba79fbd871dc5be006cb581260c0 type=image_desc chunk_index=263
+2026-05-21 17:07:09,169 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:15da12bea72df100cf51576c2b650c52
+2026-05-21 17:07:09,173 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 17:07:09,180 | INFO | ragent:_run:171 - [168/239] exporting missing unit doc_id=doc-d0a1b5c8ba85d1a9c493401b2898ae6f type=text_md_parser chunk_index=1035
+2026-05-21 17:07:26,403 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:29f133f702a662f78dbb147510bcba92
+2026-05-21 17:07:26,419 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 5 Rel
+2026-05-21 17:07:26,428 | INFO | ragent:_run:171 - [169/239] exporting missing unit doc_id=doc-3213f07c19f2eec0f866cd81dc60c8b4 type=text_md_parser chunk_index=1036
+2026-05-21 17:07:51,797 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6ee5d1169d5b4709301fde62689cf124
+2026-05-21 17:07:51,807 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 17:07:51,814 | INFO | ragent:_run:171 - [170/239] exporting missing unit doc_id=doc-a62eaaaea3cc29554d7fb4967dcf32bc type=text_md_parser chunk_index=1037
+2026-05-21 17:08:42,227 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:62b500e5d097181f5667cbdb8287596b
+2026-05-21 17:08:42,248 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 6 Rel
+2026-05-21 17:08:42,258 | INFO | ragent:_run:171 - [171/239] exporting missing unit doc_id=doc-e63e49d1121d2a1da7e9622f0088bd06 type=text_md_parser chunk_index=1038
+2026-05-21 17:09:05,866 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:325a4ab5f28a813a8299d7ce85817626
+2026-05-21 17:09:05,887 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 10 Rel
+2026-05-21 17:09:05,896 | INFO | ragent:_run:171 - [172/239] exporting missing unit doc_id=doc-e7aa0caf2271e97744d933cc560517af type=text_md_parser chunk_index=1039
+2026-05-21 17:09:36,311 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b5d226178b47e766665e84003f2e1047
+2026-05-21 17:09:36,333 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 18 Rel
+2026-05-21 17:09:36,358 | INFO | ragent:_run:171 - [173/239] exporting missing unit doc_id=doc-5085d01227d2b6b3c6fa4222c1cfbc99 type=text_md_parser chunk_index=1040
+2026-05-21 17:10:05,058 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0061cf75fa587305da46429d850482e5
+2026-05-21 17:10:05,076 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 10 Ent + 9 Rel
+2026-05-21 17:10:05,085 | INFO | ragent:_run:171 - [174/239] exporting missing unit doc_id=doc-c6edbedd2258e85dd61c512dd5b6eda8 type=text_md_parser chunk_index=1041
+2026-05-21 17:10:33,362 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7a1f6dccb6f6aede4aa37ecc0762a3f7
+2026-05-21 17:10:33,378 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 14 Rel
+2026-05-21 17:10:33,395 | INFO | ragent:_run:171 - [175/239] exporting missing unit doc_id=doc-6f17b6c7a2b32ca7e993711ff902072a type=text_md_parser chunk_index=1042
+2026-05-21 17:10:54,254 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:70cf0cced3048ed1a90153cb5f8529b8
+2026-05-21 17:10:54,266 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:10:54,298 | INFO | ragent:_run:171 - [176/239] exporting missing unit doc_id=doc-9b8ead7fa01864a9a830848cebe49d45 type=text_md_parser chunk_index=1043
+2026-05-21 17:11:52,424 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:8d6ba54d265a8ef5a0c4e8d038a7a61d
+2026-05-21 17:11:52,495 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 19 Ent + 18 Rel
+2026-05-21 17:11:54,968 | INFO | ragent:_run:171 - [177/239] exporting missing unit doc_id=doc-85594035218d307cf4046b4103bf9cef type=text_md_parser chunk_index=1044
+2026-05-21 17:12:09,239 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:521ddea515704f0f60a6c8b579b25b0a
+2026-05-21 17:12:09,244 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 17:12:09,253 | INFO | ragent:_run:171 - [178/239] exporting missing unit doc_id=doc-a568218bfeca4c67224b2a1bb579becf type=text_md_parser chunk_index=1045
+2026-05-21 17:12:26,836 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:13e49904d9a3596f84c0de48827f7901
+2026-05-21 17:12:26,849 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:12:26,866 | INFO | ragent:_run:171 - [179/239] exporting missing unit doc_id=doc-aa6f4c95bd74a370256e9f56156a3365 type=text_md_parser chunk_index=1046
+2026-05-21 17:12:41,620 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ece033fda2b60ebc974821348f583d48
+2026-05-21 17:12:41,625 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:12:41,630 | INFO | ragent:_run:171 - [180/239] exporting missing unit doc_id=doc-65e583df23d0ab9fb864953daa10062e type=text_md_parser chunk_index=1047
+2026-05-21 17:12:56,988 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:048ebdf4ac08e4c1aefe73de33391c12
+2026-05-21 17:12:57,002 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 17:12:57,025 | INFO | ragent:_run:171 - [181/239] exporting missing unit doc_id=doc-c4c4299055a166470810754de8044e9c type=text_md_parser chunk_index=1048
+2026-05-21 17:13:21,074 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:10c7ea1f71fcf10d41edd91262b2727c
+2026-05-21 17:13:21,261 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 6 Rel
+2026-05-21 17:13:21,272 | INFO | ragent:_run:171 - [182/239] exporting missing unit doc_id=doc-77906792c599655559b2fe1b0d60d885 type=text_md_parser chunk_index=1049
+2026-05-21 17:13:50,717 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:2a009230238ba83914dcd36b14066b5f
+2026-05-21 17:13:50,725 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:13:50,731 | INFO | ragent:_run:171 - [183/239] exporting missing unit doc_id=doc-76ba591afdc1213a240e9aa7d4b38b2b type=text_md_parser chunk_index=1050
+2026-05-21 17:14:09,916 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ba92f8d0660516f341c3cd29821843ca
+2026-05-21 17:14:09,927 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 4 Rel
+2026-05-21 17:14:09,943 | INFO | ragent:_run:171 - [184/239] exporting missing unit doc_id=doc-022da673f3e696d856564309cf7fd4ad type=text_md_parser chunk_index=1051
+2026-05-21 17:14:36,643 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:63934ff7842c96b09b76c526f3f58fb1
+2026-05-21 17:14:36,654 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:14:36,664 | INFO | ragent:_run:171 - [185/239] exporting missing unit doc_id=doc-4d48e950a0c58ac1fd63e148590ca460 type=text_md_parser chunk_index=1052
+2026-05-21 17:16:14,250 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b25795fc88baf2e5eea3defad7179029
+2026-05-21 17:16:14,270 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 19 Ent + 19 Rel
+2026-05-21 17:16:14,318 | INFO | ragent:_run:171 - [186/239] exporting missing unit doc_id=doc-c458d734e70c659edb8e64fcf29fff21 type=text_md_parser chunk_index=1053
+2026-05-21 17:16:50,179 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:beb71df0469f6384d1b65efc20b67daa
+2026-05-21 17:16:50,185 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 5 Rel
+2026-05-21 17:16:50,192 | INFO | ragent:_run:171 - [187/239] exporting missing unit doc_id=doc-64ca3db3a0c5a4c899586cf5d4fa0e18 type=text_md_parser chunk_index=1054
+2026-05-21 17:17:18,892 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:2cd0c0ffde8f1eeaef2caba7ed9e9870
+2026-05-21 17:17:18,898 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 8 Rel
+2026-05-21 17:17:18,908 | INFO | ragent:_run:171 - [188/239] exporting missing unit doc_id=doc-c4a726f9428fdda40fb5cc5a0c3306ce type=text_md_parser chunk_index=1055
+2026-05-21 17:18:16,496 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:80734d60996a13b0ff99b640152ede60
+2026-05-21 17:18:16,519 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 8 Ent + 11 Rel
+2026-05-21 17:18:16,584 | INFO | ragent:_run:171 - [189/239] exporting missing unit doc_id=doc-044adad284ae0c7535a23568bebd1196 type=text_md_parser chunk_index=1056
+2026-05-21 17:19:31,852 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e074e2c3ce9cdc949500d1ea9dad699d
+2026-05-21 17:19:31,918 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 20 Ent + 47 Rel
+2026-05-21 17:19:32,133 | INFO | ragent:_run:171 - [190/239] exporting missing unit doc_id=doc-e4b2b249542e2ee9d34dbf5fb1b89afc type=text_md_parser chunk_index=1057
+2026-05-21 17:20:01,275 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:3d421a36d2feb673cc22a7c51cf3dbdb
+2026-05-21 17:20:01,372 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:20:01,466 | INFO | ragent:_run:171 - [191/239] exporting missing unit doc_id=doc-3347e312200de2b88de6dece6c9e3cce type=text_md_parser chunk_index=1058
+2026-05-21 17:20:31,367 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:c5ce5988340acfa2acba9ff28f8b0240
+2026-05-21 17:20:32,005 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 17:20:34,730 | INFO | ragent:_run:171 - [192/239] exporting missing unit doc_id=doc-06ee0bffab73a084892f63a1993b39db type=text_md_parser chunk_index=1059
+2026-05-21 17:22:13,744 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5a9fc01beba9bd8e170b65c9c84178ee
+2026-05-21 17:22:13,834 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 10 Rel
+2026-05-21 17:22:13,948 | INFO | ragent:_run:171 - [193/239] exporting missing unit doc_id=doc-8c50fdf70e090e2286fe4c10eda2039e type=text_md_parser chunk_index=1060
+2026-05-21 17:23:06,283 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:774f65e33570dd05505af9c791c43a49
+2026-05-21 17:23:06,307 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:23:06,642 | INFO | ragent:_run:171 - [194/239] exporting missing unit doc_id=doc-a2a315dc7cd5491c6b7275053085b93d type=text_md_parser chunk_index=1061
+2026-05-21 17:23:34,420 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0468e0b63c9e1f68edf6e118ca72458a
+2026-05-21 17:23:34,441 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 8 Rel
+2026-05-21 17:23:34,514 | INFO | ragent:_run:171 - [195/239] exporting missing unit doc_id=doc-ea56b0bda3cc9f44bf2353ad033255c9 type=text_md_parser chunk_index=1062
+2026-05-21 17:24:19,553 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:29391b45b085cdf98c771a62affe2476
+2026-05-21 17:24:19,572 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 17 Ent + 9 Rel
+2026-05-21 17:24:19,622 | INFO | ragent:_run:171 - [196/239] exporting missing unit doc_id=doc-29227bc4fad558f0f81694f5afa76d9d type=text_md_parser chunk_index=1063
+2026-05-21 17:25:08,691 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5e3c8cdf8000c882c09bbf7d112d3474
+2026-05-21 17:25:08,707 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 17:25:08,745 | INFO | ragent:_run:171 - [197/239] exporting missing unit doc_id=doc-3827a7b415968977f5b875381352fe40 type=text_md_parser chunk_index=1064
+2026-05-21 17:26:08,193 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:bc81102a1d3cbecf3c3b3eaf5ee84d38
+2026-05-21 17:26:08,210 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 8 Rel
+2026-05-21 17:26:08,293 | INFO | ragent:_run:171 - [198/239] exporting missing unit doc_id=doc-4a3db0232b46991d17952ba5179b35e5 type=text_md_parser chunk_index=1065
+2026-05-21 17:26:52,756 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:57cb9ce3972b6b12780cc6dba32d307f
+2026-05-21 17:26:52,772 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 17:26:52,789 | INFO | ragent:_run:171 - [199/239] exporting missing unit doc_id=doc-6ddbaf241856fcb7138534994e52af9e type=text_md_parser chunk_index=1066
+2026-05-21 17:28:17,040 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5e4e5185488b1edd00c36ba1c14fe0af
+2026-05-21 17:28:17,076 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 23 Ent + 22 Rel
+2026-05-21 17:28:17,133 | INFO | ragent:_run:171 - [200/239] exporting missing unit doc_id=doc-033c0780abbc8188641197a2c41566cc type=text_md_parser chunk_index=1067
+2026-05-21 17:28:46,487 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ceb3339cdabb3bb6512b2435f647a6d9
+2026-05-21 17:28:47,016 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 8 Rel
+2026-05-21 17:28:47,069 | INFO | ragent:_run:171 - [201/239] exporting missing unit doc_id=doc-1a5a3cdb317bea3f583a546720598f98 type=text_md_parser chunk_index=1068
+2026-05-21 17:29:02,824 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6ee401d9506f71a09cce4b56f13ec7c4
+2026-05-21 17:29:02,834 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:29:02,839 | INFO | ragent:_run:171 - [202/239] exporting missing unit doc_id=doc-4d1b5834a6b0ee21a52abc9e3cd01b1e type=image_desc chunk_index=264
+2026-05-21 17:29:23,159 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:40e30fb164d91785ef647be02f06065b
+2026-05-21 17:29:23,169 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 17:29:23,188 | INFO | ragent:_run:171 - [203/239] exporting missing unit doc_id=doc-9321f9f3f17888fde2c2d7b5e067d3da type=image_desc chunk_index=265
+2026-05-21 17:29:42,960 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:46d355738235572e3be2717732e12a2b
+2026-05-21 17:29:42,973 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:29:42,993 | INFO | ragent:_run:171 - [204/239] exporting missing unit doc_id=doc-deb73a98fb2ab665f6ca4a799daa49d4 type=text_md_parser chunk_index=1069
+2026-05-21 17:30:12,228 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:1e2593800ee1d63f1bcbec5d59ac72f0
+2026-05-21 17:30:12,233 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 17:30:12,240 | INFO | ragent:_run:171 - [205/239] exporting missing unit doc_id=doc-716b698fb83956baf59280d9359cbb12 type=text_md_parser chunk_index=1070
+2026-05-21 17:30:52,300 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:3cf34ee0039a062665089f03c4bc9dd7
+2026-05-21 17:30:52,307 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 6 Rel
+2026-05-21 17:30:52,322 | INFO | ragent:_run:171 - [206/239] exporting missing unit doc_id=doc-7a30b045411385a4f6e866feb3006544 type=text_md_parser chunk_index=1071
+2026-05-21 17:31:22,998 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:423d355ff73bcccda0d80ca60a3a2fd9
+2026-05-21 17:31:23,013 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 7 Rel
+2026-05-21 17:31:23,032 | INFO | ragent:_run:171 - [207/239] exporting missing unit doc_id=doc-5fd31028a4347a91c98784916aea30e4 type=text_md_parser chunk_index=1072
+2026-05-21 17:31:34,317 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:05320244ceccf4aa36108d1ddc6a604e
+2026-05-21 17:31:34,325 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 2 Rel
+2026-05-21 17:31:34,332 | INFO | ragent:_run:171 - [208/239] exporting missing unit doc_id=doc-bf3f88a2a5f8519fe0878b712232a7c9 type=text_md_parser chunk_index=1073
+2026-05-21 17:31:55,235 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0eac51c8ce29579ee00f587f83961bab
+2026-05-21 17:31:55,251 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-05-21 17:31:55,304 | INFO | ragent:_run:171 - [209/239] exporting missing unit doc_id=doc-e6efa23d96545c654953a6c6f9761a92 type=text_md_parser chunk_index=1074
+2026-05-21 17:32:20,945 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:50a95127a1171d83ddcb3b5e75f714c1
+2026-05-21 17:32:20,964 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 9 Rel
+2026-05-21 17:32:20,976 | INFO | ragent:_run:171 - [210/239] exporting missing unit doc_id=doc-7a30b045411385a4f6e866feb3006544 type=text_md_parser chunk_index=1075
+2026-05-21 17:32:33,853 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 7 Rel
+2026-05-21 17:32:33,880 | INFO | ragent:_run:171 - [211/239] exporting missing unit doc_id=doc-0ac9362c8f72187ee2f6a4d76da27b29 type=text_md_parser chunk_index=1076
+2026-05-21 17:33:14,637 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:0a5f706888bb65cdc76ea40d99db2964
+2026-05-21 17:33:14,652 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 11 Ent + 11 Rel
+2026-05-21 17:33:14,682 | INFO | ragent:_run:171 - [212/239] exporting missing unit doc_id=doc-c305fa20fc5a4326e5284860bef1520c type=text_md_parser chunk_index=1077
+2026-05-21 17:33:55,704 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:afa9612f7bdf07e5129a5dcbf90e147a
+2026-05-21 17:33:55,766 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:33:55,921 | INFO | ragent:_run:171 - [213/239] exporting missing unit doc_id=doc-d878990eaca53709a540f4063b668fc0 type=text_md_parser chunk_index=1078
+2026-05-21 17:34:12,406 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:7f7883a473ec9b51e7860948ae09f933
+2026-05-21 17:34:12,430 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:34:12,443 | INFO | ragent:_run:171 - [214/239] exporting missing unit doc_id=doc-a6f77dcaf3d83675b4446a777b46c36b type=text_md_parser chunk_index=1079
+2026-05-21 17:34:38,489 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:8471e79b209161577480c8f0fc0593b0
+2026-05-21 17:34:41,466 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 17:34:41,517 | INFO | ragent:_run:171 - [215/239] exporting missing unit doc_id=doc-44882e0bdb2290d9205936b681fe983e type=text_md_parser chunk_index=1080
+2026-05-21 17:35:04,077 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6556aea421e82730e41f545f931474ca
+2026-05-21 17:35:04,140 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 17:35:04,237 | INFO | ragent:_run:171 - [216/239] exporting missing unit doc_id=doc-253a0bfe0c17a7d0e01c0737e18a5642 type=text_md_parser chunk_index=1081
+2026-05-21 17:35:28,730 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b293fef925fba6f414b1e422c56cd5de
+2026-05-21 17:35:31,071 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 5 Rel
+2026-05-21 17:35:31,174 | INFO | ragent:_run:171 - [217/239] exporting missing unit doc_id=doc-c83f5aa989774b150602ddc77f1eaf9b type=text_md_parser chunk_index=1082
+2026-05-21 17:35:57,514 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:14924b8341b376d038eeb2820e5a3fd9
+2026-05-21 17:35:57,533 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 7 Rel
+2026-05-21 17:35:57,552 | INFO | ragent:_run:171 - [218/239] exporting missing unit doc_id=doc-b9d0a7dff7c1f237126e99931aa4a9b6 type=text_md_parser chunk_index=1083
+2026-05-21 17:36:17,364 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:756d10f5aab21233e08311ee79e8730e
+2026-05-21 17:36:17,372 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 4 Rel
+2026-05-21 17:36:17,382 | INFO | ragent:_run:171 - [219/239] exporting missing unit doc_id=doc-88469c9d389687d55dcecdc8305b59ab type=text_md_parser chunk_index=1084
+2026-05-21 17:36:31,391 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9fc1b5cd932cfc5bb6704b2b8c8f9836
+2026-05-21 17:36:31,409 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 17:36:31,416 | INFO | ragent:_run:171 - [220/239] exporting missing unit doc_id=doc-244fb69b1adcb796f1e280937e6b18ad type=text_md_parser chunk_index=1085
+2026-05-21 17:36:49,340 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:9d673c4b580af2cf374b6caf4aff951e
+2026-05-21 17:36:49,345 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 3 Ent + 3 Rel
+2026-05-21 17:36:49,352 | INFO | ragent:_run:171 - [221/239] exporting missing unit doc_id=doc-8c3c9b2b5e99c45feb8595990b8aafc4 type=text_md_parser chunk_index=1086
+2026-05-21 17:37:10,548 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:35e72f5e7c00085facd076748f267c75
+2026-05-21 17:37:10,553 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 17:37:10,563 | INFO | ragent:_run:171 - [222/239] exporting missing unit doc_id=doc-9fd5514e525860150c46860c6e8cdc97 type=text_md_parser chunk_index=1087
+2026-05-21 17:37:38,411 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:eab82437b70a8e8d2e84a5bbb1024ad2
+2026-05-21 17:37:38,432 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 7 Ent + 6 Rel
+2026-05-21 17:37:38,487 | INFO | ragent:_run:171 - [223/239] exporting missing unit doc_id=doc-7a8ffad6c2243e1e65c347cccbd739ac type=text_md_parser chunk_index=1088
+2026-05-21 17:38:08,078 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:76e211df24969abb94dfd0cd1eefeddf
+2026-05-21 17:38:08,083 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 8 Rel
+2026-05-21 17:38:08,088 | INFO | ragent:_run:171 - [224/239] exporting missing unit doc_id=doc-60b9e56cad8ed8e82ed8f8612dcc1af3 type=text_md_parser chunk_index=1089
+2026-05-21 17:38:30,310 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:ceec810ad3068647f1a9c2669d6dab35
+2026-05-21 17:38:30,325 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 6 Rel
+2026-05-21 17:38:30,333 | INFO | ragent:_run:171 - [225/239] exporting missing unit doc_id=doc-0270220ec2fc0d5cb8c89dd6de0edf2c type=text_md_parser chunk_index=1090
+2026-05-21 17:39:00,062 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:dd8ae8c05523f7b47767e6fd710b29d5
+2026-05-21 17:39:00,074 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 6 Ent + 9 Rel
+2026-05-21 17:39:00,110 | INFO | ragent:_run:171 - [226/239] exporting missing unit doc_id=doc-cec6522d4ec3ddad3902a3be663f7e0a type=text_md_parser chunk_index=1091
+2026-05-21 17:39:39,648 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:336d8ef561da6a1de0f9b8e3b19d660d
+2026-05-21 17:39:39,656 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 17:39:39,672 | INFO | ragent:_run:171 - [227/239] exporting missing unit doc_id=doc-1eac27a5737d18cfd120d6b22c1389fb type=text_md_parser chunk_index=1092
+2026-05-21 17:40:36,159 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5d735ed71e9b197212c04db1335aee45
+2026-05-21 17:40:36,544 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 56 Ent + 17 Rel
+2026-05-21 17:40:36,600 | INFO | ragent:_run:171 - [228/239] exporting missing unit doc_id=doc-c90070f648bc655619ed5bf3b2cd74e1 type=text_md_parser chunk_index=1093
+2026-05-21 17:42:11,397 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:24f155a2660f89ceeae106e3a97394d8
+2026-05-21 17:42:11,434 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 48 Ent + 96 Rel
+2026-05-21 17:42:11,451 | INFO | ragent:_run:171 - [229/239] exporting missing unit doc_id=doc-45440bf452d6ec9de5d7117cb189f74a type=text_md_parser chunk_index=1094
+2026-05-21 17:43:20,729 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:5678bd0c34f8e6d16c4f41c2354fa66a
+2026-05-21 17:43:20,746 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 37 Ent + 23 Rel
+2026-05-21 17:43:20,765 | INFO | ragent:_run:171 - [230/239] exporting missing unit doc_id=doc-4b52742168052e39a6d19e994f55d6a7 type=text_md_parser chunk_index=1095
+2026-05-21 17:45:56,261 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:3913371e27cf99ad8f456c80d2d34014
+2026-05-21 17:45:56,340 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 55 Ent + 42 Rel
+2026-05-21 17:45:56,457 | INFO | ragent:_run:171 - [231/239] exporting missing unit doc_id=doc-500b3127c380adbb123d49e10eba215f type=text_md_parser chunk_index=1096
+2026-05-21 17:47:02,099 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:6748a98351a91d8cbb2df2376ec17766
+2026-05-21 17:47:02,142 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 64 Ent + 30 Rel
+2026-05-21 17:47:02,170 | INFO | ragent:_run:171 - [232/239] exporting missing unit doc_id=doc-f561c7ad63dab126416723a6965c6bf4 type=text_md_parser chunk_index=1097
+2026-05-21 17:48:51,361 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:b6c15d2834256017c762a4880acfcd78
+2026-05-21 17:48:51,446 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 33 Ent + 51 Rel
+2026-05-21 17:48:51,532 | INFO | ragent:_run:171 - [233/239] exporting missing unit doc_id=doc-b5ef9a054532ff3de4ec7be7b66dc05f type=text_md_parser chunk_index=1098
+2026-05-21 17:50:21,229 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:4200aba8de2124b3dab7a9291224510b
+2026-05-21 17:50:21,305 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 33 Ent + 26 Rel
+2026-05-21 17:50:22,073 | INFO | ragent:_run:171 - [234/239] exporting missing unit doc_id=doc-c72510cfab022a070182ce8bc89ef159 type=text_md_parser chunk_index=1099
+2026-05-21 17:52:04,568 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:65f9f15d2286de22173b417ce6be8e11
+2026-05-21 17:52:04,618 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 38 Ent + 28 Rel
+2026-05-21 17:52:04,746 | INFO | ragent:_run:171 - [235/239] exporting missing unit doc_id=doc-fae01f77fd25c1f509a0364ff86bfe33 type=text_md_parser chunk_index=1100
+2026-05-21 17:54:45,082 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:f6ab07d4564a6bbf1fe5a818962f4337
+2026-05-21 17:54:45,206 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 53 Ent + 43 Rel
+2026-05-21 17:54:45,306 | INFO | ragent:_run:171 - [236/239] exporting missing unit doc_id=doc-8900e8a6ff4e809c891bacc501f7c5e8 type=text_md_parser chunk_index=1101
+2026-05-21 17:55:18,642 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:107258d35d9f536900cec5a3521c2d42
+2026-05-21 17:55:18,669 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 9 Ent + 7 Rel
+2026-05-21 17:55:18,689 | INFO | ragent:_run:171 - [237/239] exporting missing unit doc_id=doc-242249aae96cdc599c4dea3d100233ba type=image_desc chunk_index=266
+2026-05-21 17:55:49,394 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:98e8455294a41e2b55780ecccdfce79a
+2026-05-21 17:55:52,130 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 4 Ent + 3 Rel
+2026-05-21 17:55:52,140 | INFO | ragent:_run:171 - [238/239] exporting missing unit doc_id=doc-b2f57f137aa945d40d5289a52386a3c7 type=text_md_parser chunk_index=1102
+2026-05-21 17:56:11,748 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:e6008629b3c8eee6f0e9511a89b0cbc8
+2026-05-21 17:56:11,755 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 5 Ent + 5 Rel
+2026-05-21 17:56:11,760 | INFO | ragent:_run:171 - [239/239] exporting missing unit doc_id=doc-ff3ffb532215f41eee68fdec5989f334 type=image_desc chunk_index=267
+2026-05-21 17:56:27,207 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: default:extract:41059a8d4bae27483210f19067c417cc
+2026-05-21 17:56:27,232 | INFO | ragent:_process_single_content:3320 - Chunk 1 of 1 extracted 2 Ent + 1 Rel
+2026-05-21 17:56:29,652 | ERROR | asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x12c845590>
+2026-05-21 17:56:30,119 | INFO | ragent:_run:227 - Resume finished: exported=239 failed=0 final_jsonl_units=1370 failures=none
+2026-05-21 17:56:30,119 | INFO | ragent:shutdown:784 - limit_async[embedding]: Shutting down priority queue workers
+2026-05-21 17:56:30,122 | INFO | ragent:health_check:718 - limit_async[embedding]: Creating 8 new workers
+2026-05-21 17:56:30,122 | INFO | ragent:shutdown:819 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-05-21 17:56:30,123 | INFO | ragent:shutdown:784 - limit_async[llm]: Shutting down priority queue workers
+2026-05-21 17:56:30,126 | INFO | ragent:shutdown:819 - limit_async[llm]: Priority queue workers shutdown complete
+2026-05-21 17:56:31,531 | INFO | ragent:<lambda>:743 - Storage Finalization completed!
+{
+  "existing_units": 1132,
+  "missing_units": 239,
+  "exported_units": 239,
+  "failed_units": 0,
+  "final_units": 1370
+}
+2026-05-21 17:56:35,610 | ERROR | asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x128ff2270>

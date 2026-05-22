@@ -13,18 +13,19 @@ For a server that cannot download models or Python packages, ship three things:
 2. Project-local MinerU models under `vendor/mineru-models/`.
 3. Offline Python wheels under `vendor/wheelhouse/<platform>/`.
 
-For MEP upload packages, dependencies needed by the component should also be
-inside the model package `data/` payload so they are available when the MEP
-server has no network access:
+For MEP upload packages, dependencies needed by the component should be owned
+by the component package. Put small missing application dependencies under
+`mep/component_deps/` so upload/build scripts copy them to `component/deps/`:
 
 ```text
-mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.9/
-mep/model_packages/bge-m3/modelDir/data/deps/site-packages/linux-arm64-py3.9/
+mep/component_deps/site-packages/linux-arm64-py3.10/
+mep/component_deps/pythonpath/
 ```
 
-Use `wheelhouse/<platform>/` for universal pure-Python wheels and for native
-wheels that are installed by a configured offline repair step. Use
-`site-packages/<platform>/` for native packages preinstalled or unpacked in an
+Legacy model-specific dependencies may still live under
+`modelDir/data/deps/`, but Qwen3 no longer reuses the BGE-M3 dependency tree.
+Use `wheelhouse/<platform>/` only when a configured offline repair step really
+needs it. Use `site-packages/<platform>/` for packages unpacked in an
 environment compatible with the target image.
 
 ## Prepare On This Machine
@@ -65,8 +66,9 @@ vendor/wheelhouse/linux-amd64-py3.12/
 vendor/wheelhouse/linux-arm64-py3.12/
 ```
 
-For the current MEP Ascend 910B target, build or copy target-compatible
-dependencies into the model package data directory:
+For the legacy MEP Ascend 910B target, build or copy target-compatible
+dependencies into a model package data directory only when that model still
+needs them:
 
 ```bash
 mkdir -p mep/model_packages/bge-m3/modelDir/data/deps/wheelhouse/linux-arm64-py3.9
@@ -103,10 +105,11 @@ recorded in `source-archives.txt` and included in `downloaded-artifacts.txt`;
 they are only useful when a configured offline `pip install` requirement needs
 them and the target image has the build tooling required by that sdist.
 
-The validated image setup also needs the vLLM stack repaired before starting
-the embedding server. The bge-m3 MEP model package now encodes this repair in
-`data/config/embedding.properties` and runs it from the offline wheelhouse before
-launching vLLM. The equivalent manual command sequence is:
+Legacy validated image setup also repaired the vLLM stack before starting the
+embedding server. The new Qwen3 target image already owns the validated
+vLLM/Ascend stack, so Qwen3 MEP work should keep image/runtime adaptation in
+the component package, not in model-package `data/config/embedding.properties`.
+The equivalent manual command sequence is:
 
 ```bash
 pip uninstall vllm vllm-ascend -y
@@ -118,18 +121,21 @@ The service command that was validated is:
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-source /usr/local/Ascend/nnal/atb/set_env.sh
+[ -f /usr/local/Ascend/nnal/asdsip/set_env.sh ] && source /usr/local/Ascend/nnal/asdsip/set_env.sh
+export ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+export ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
+export LD_LIBRARY_PATH="${ATB_HOME_PATH}/${ATB_CXX_ABI}/lib:${LD_LIBRARY_PATH:-}"
 export ASCEND_RT_VISIBLE_DEVICES=0
 export VLLM_LOGGING_LEVEL=DEBUG
-export VLLM_PLUGINS=ascend
-python3 -m vllm.entrypoints.openai.api_server \
-  --model /tmp/ragent-mep-runtime/model \
+export VLLM_USE_V1=1
+vllm serve /tmp/ragent-mep-runtime/model \
   --runner pooling \
-  --served-model-name BAAI-bge-m3 \
+  --task embed \
+  --served-model-name qwen3-embedding-4b-local \
   --host 0.0.0.0 \
   --port 8000 \
   --max-model-len 8192 \
-  --dtype auto
+  --dtype float16
 ```
 
 If PyTorch/CUDA wheels are needed, make sure the build host can download the

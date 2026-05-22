@@ -40,12 +40,35 @@ _MANAGED_ENV_VARS = (
     "EMBEDDING_DIMENSIONS",
 )
 _LOCAL_PROVIDER = "custom_openai"
-_DEFAULT_MODEL_NAME = "Qwen/Qwen3-Embedding-4B"
+_DEFAULT_SERVED_MODEL_NAME = "qwen3-embedding-4b-local"
 _DEFAULT_API_KEY = "EMPTY"
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_BIND_HOST = _DEFAULT_HOST
 _DEFAULT_RUNNER = "pooling"
 _DEFAULT_STARTUP_TIMEOUT_SECONDS = 300.0
+_DEFAULT_EMBEDDING_DIMENSIONS = 2560
+_DEFAULT_MAX_TOKEN_SIZE = 8192
+_DEFAULT_MAX_MODEL_LEN = 8192
+_DEFAULT_ATB_HOME_PATH = "/usr/local/Ascend/nnal/atb/latest/atb"
+_DEFAULT_ATB_CXX_ABI = "cxx_abi_0"
+_DEFAULT_VLLM_EXTRA_ARGS = (
+    "--task",
+    "embed",
+    "--trust-remote-code",
+    "--dtype",
+    "float16",
+    "--gpu-memory-utilization",
+    "0.90",
+    "--max-num-seqs",
+    "64",
+    "--max-num-batched-tokens",
+    "32768",
+    "--block-size",
+    "128",
+    "--disable-log-requests",
+    "--uvicorn-log-level",
+    "warning",
+)
 _MODEL_DIR_MARKERS = ("config.json", "tokenizer.json")
 _DATA_CONFIG_FILENAMES = (
     "embedding.properties",
@@ -54,11 +77,17 @@ _DATA_CONFIG_FILENAMES = (
 _DEFAULT_ASCEND_ENV_SCRIPTS = (
     "/usr/local/Ascend/ascend-toolkit/set_env.sh",
     "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh",
-    "/usr/local/Ascend/nnal/atb/set_env.sh",
-    "/usr/local/Ascend/nnal/atb/latest/atb/set_env.sh",
+    "/usr/local/Ascend/nnal/asdsip/set_env.sh",
 )
 _VLLM_SUBPROCESS_DEFAULT_ENV = {
     "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+    "VLLM_USE_V1": "1",
+    "ASCEND_RT_VISIBLE_DEVICES": "0",
+    "PYTORCH_NPU_ALLOC_CONF": "max_split_size_mb:256",
+    "HCCL_OP_EXPANSION_MODE": "AIV",
+    "TOKENIZERS_PARALLELISM": "true",
+    "OMP_NUM_THREADS": "16",
+    "ATB_CXX_ABI": _DEFAULT_ATB_CXX_ABI,
 }
 _VLLM_ENV_PROPERTY_PREFIX = "vllm.env."
 _EXACT_REQUIREMENT_RE = re.compile(r"^([A-Za-z0-9_.-]+)==([^;\s]+)$")
@@ -725,7 +754,7 @@ def resolve_embedding_launch_config(
         "vllm.served_model_name",
         "embedding.served_model_name",
         "model.name",
-    ) or _DEFAULT_MODEL_NAME
+    ) or _DEFAULT_SERVED_MODEL_NAME
     api_key = _resolve_property(
         properties,
         "RAGENT_MEP_EMBEDDING_API_KEY",
@@ -752,16 +781,15 @@ def resolve_embedding_launch_config(
         )
         or "vllm"
     ).lower()
-    extra_args = tuple(
-        shlex.split(
-            _resolve_property(
-                properties,
-                "RAGENT_MEP_VLLM_EXTRA_ARGS",
-                "vllm.extra_args",
-            )
-            or ""
+    configured_extra_args = shlex.split(
+        _resolve_property(
+            properties,
+            "RAGENT_MEP_VLLM_EXTRA_ARGS",
+            "vllm.extra_args",
         )
+        or ""
     )
+    extra_args = (*_DEFAULT_VLLM_EXTRA_ARGS, *configured_extra_args)
     install_no_deps_value = _resolve_property(
         properties,
         "RAGENT_MEP_VLLM_INSTALL_NO_DEPS",
@@ -807,15 +835,36 @@ def resolve_embedding_launch_config(
         startup_timeout_seconds=(
             startup_timeout_seconds or _DEFAULT_STARTUP_TIMEOUT_SECONDS
         ),
-        dimensions=_parse_optional_int(properties.get("embedding.dimensions")),
-        max_token_size=_parse_optional_int(properties.get("embedding.max_token_size")),
-        max_model_len=_parse_optional_int(
-            _resolve_property(
-                properties,
-                "RAGENT_MEP_VLLM_MAX_MODEL_LEN",
-                "vllm.max_model_len",
-                "embedding.max_model_len",
+        dimensions=(
+            _parse_optional_int(
+                _resolve_property(
+                    properties,
+                    "RAGENT_MEP_EMBEDDING_DIMENSIONS",
+                    "embedding.dimensions",
+                )
             )
+            or _DEFAULT_EMBEDDING_DIMENSIONS
+        ),
+        max_token_size=(
+            _parse_optional_int(
+                _resolve_property(
+                    properties,
+                    "RAGENT_MEP_EMBEDDING_MAX_TOKEN_SIZE",
+                    "embedding.max_token_size",
+                )
+            )
+            or _DEFAULT_MAX_TOKEN_SIZE
+        ),
+        max_model_len=(
+            _parse_optional_int(
+                _resolve_property(
+                    properties,
+                    "RAGENT_MEP_VLLM_MAX_MODEL_LEN",
+                    "vllm.max_model_len",
+                    "embedding.max_model_len",
+                )
+            )
+            or _DEFAULT_MAX_MODEL_LEN
         ),
         extra_args=extra_args,
         subprocess_env=_resolve_subprocess_env(properties),
@@ -1058,6 +1107,16 @@ def _prepend_env_path(env: dict[str, str], key: str, raw_prefix: str | None) -> 
     env[key] = os.pathsep.join(merged)
 
 
+def _apply_default_atb_abi_environment(env: dict[str, str]) -> None:
+    atb_home = env.setdefault("ATB_HOME_PATH", _DEFAULT_ATB_HOME_PATH)
+    atb_cxx_abi = env.setdefault("ATB_CXX_ABI", _DEFAULT_ATB_CXX_ABI)
+    _prepend_env_path(
+        env,
+        "LD_LIBRARY_PATH",
+        str(Path(atb_home) / atb_cxx_abi / "lib"),
+    )
+
+
 def _prepend_bootstrapped_pythonpath(env: dict[str, str]) -> None:
     _prepend_env_path(
         env,
@@ -1073,6 +1132,7 @@ def build_vllm_subprocess_env(
     for key, value in _VLLM_SUBPROCESS_DEFAULT_ENV.items():
         env.setdefault(key, value)
     _prepend_bootstrapped_pythonpath(env)
+    _apply_default_atb_abi_environment(env)
 
     ascend_env_scripts = _resolve_ascend_env_scripts()
     if ascend_env_scripts:
@@ -1094,9 +1154,11 @@ def build_vllm_subprocess_env(
     for key, value in _VLLM_SUBPROCESS_DEFAULT_ENV.items():
         env.setdefault(key, value)
     _prepend_bootstrapped_pythonpath(env)
+    _apply_default_atb_abi_environment(env)
     if config is not None:
         for key, value in config.subprocess_env:
             env[key] = value
+        _apply_default_atb_abi_environment(env)
     return env
 
 
@@ -1489,7 +1551,7 @@ class _LocalTransformersEmbeddingModel:
 
     @property
     def output_dimensions(self) -> int:
-        return self.config.dimensions or 1024
+        return self.config.dimensions or _DEFAULT_EMBEDDING_DIMENSIONS
 
     def _load(self) -> None:
         if self._loaded:

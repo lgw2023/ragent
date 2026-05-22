@@ -5,14 +5,19 @@ set -euo pipefail
 # MEP_platform_rule/Validated_ragent-mep-test_docker_vllm.sh.
 #
 # The target host/container is assumed to have no working pip index access.
-# Do not export source files alone: the full platform wheelhouse and the
-# root-level vLLM repair wheels are part of the test contract.
+# The new Qwen3 Ascend image should use its built-in vLLM runtime by default.
+# Model wheelhouses, keyword fallback assets, and root-level vLLM repair wheels
+# are copied only when the matching INCLUDE_* switch is enabled.
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 DEST="${DEST:-/Volumes/Udisk2/ragent}"
 MODEL_PACKAGE="${MODEL_PACKAGE:-qwen3-embedding-4b}"
-PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.9}"
+PLATFORM_TAG="${PLATFORM_TAG:-linux-arm64-py3.10}"
+INCLUDE_MODEL_WHEELHOUSE="${INCLUDE_MODEL_WHEELHOUSE:-0}"
+INCLUDE_KEYWORD_FALLBACK="${INCLUDE_KEYWORD_FALLBACK:-0}"
+INCLUDE_VLLM_REPAIR_WHEELS="${INCLUDE_VLLM_REPAIR_WHEELS:-0}"
+export INCLUDE_MODEL_WHEELHOUSE INCLUDE_KEYWORD_FALLBACK INCLUDE_VLLM_REPAIR_WHEELS
 
 RSYNC_EXCLUDES=(
   --exclude "__pycache__/"
@@ -117,15 +122,22 @@ safe_prepare_dest
 
 require_dir "$PROJECT_ROOT/ragent"
 require_dir "$MODEL_PACKAGE_SRC"
-require_dir "$WHEELHOUSE_SRC"
-require_dir "$KEYWORD_MODEL_SRC"
-require_dir "$KEYWORD_WHEELHOUSE_SRC"
+if [ "$INCLUDE_MODEL_WHEELHOUSE" = "1" ] || [ "$INCLUDE_VLLM_REPAIR_WHEELS" = "1" ]; then
+  require_dir "$WHEELHOUSE_SRC"
+fi
+if [ "$INCLUDE_KEYWORD_FALLBACK" = "1" ]; then
+  require_dir "$KEYWORD_MODEL_SRC"
+  require_dir "$KEYWORD_WHEELHOUSE_SRC"
+fi
 
 echo "Exporting offline MEP test bundle"
 echo "  source: $PROJECT_ROOT"
 echo "  dest:   $DEST"
 echo "  model:  $MODEL_PACKAGE"
 echo "  tag:    $PLATFORM_TAG"
+echo "  include model wheelhouse: $INCLUDE_MODEL_WHEELHOUSE"
+echo "  include keyword fallback: $INCLUDE_KEYWORD_FALLBACK"
+echo "  include vLLM repair wheels: $INCLUDE_VLLM_REPAIR_WHEELS"
 
 for path in \
   config.json \
@@ -143,6 +155,10 @@ do
 done
 
 rsync_dir "$PROJECT_ROOT/ragent" "$DEST/ragent"
+
+if [ -d "$PROJECT_ROOT/mep/component_deps" ]; then
+  rsync_dir "$PROJECT_ROOT/mep/component_deps" "$DEST/mep/component_deps"
+fi
 
 mkdir -p "$DEST/tools"
 for path in \
@@ -178,48 +194,61 @@ do
 done
 
 # Ensure zip-unsafe startup wheels such as LiteLLM are available as real
-# site-packages directories before copying the model package.
-python "$PROJECT_ROOT/tools/mep_site_packages.py" \
-  --model-dir-root "$MODEL_PACKAGE_SRC/modelDir" \
-  --platform-tag "$PLATFORM_TAG"
+# site-packages directories before copying legacy model wheelhouses.
+if [ -d "$WHEELHOUSE_SRC" ]; then
+  python "$PROJECT_ROOT/tools/mep_site_packages.py" \
+    --model-dir-root "$MODEL_PACKAGE_SRC/modelDir" \
+    --platform-tag "$PLATFORM_TAG"
+fi
 
-# This intentionally includes the HF model files, KG snapshot, dependency
-# wheelhouse, source archives, and any pre-expanded site-packages.
+# This intentionally includes the HF model files, KG snapshot, and any
+# model-local lightweight metadata/deps that are present.
 rsync_dir "$MODEL_PACKAGE_SRC" "$MODEL_PACKAGE_DEST"
 
-# The validation script installs these from the mounted repository/test bundle.
-REPAIR_WHEEL_PATHS=()
-REPAIR_WHEEL_NAMES=()
-for pattern in "${REPAIR_WHEEL_PATTERNS[@]}"; do
-  wheel_path="$(single_match_for_pattern "$pattern")"
-  REPAIR_WHEEL_PATHS+=("$wheel_path")
-  REPAIR_WHEEL_NAMES+=("$(basename "$wheel_path")")
-done
-
-while IFS= read -r existing_wheel; do
-  existing_name="$(basename "$existing_wheel")"
-  keep=0
-  for desired_name in "${REPAIR_WHEEL_NAMES[@]}"; do
-    if [ "$existing_name" = "$desired_name" ]; then
-      keep=1
-      break
-    fi
+if [ "$INCLUDE_VLLM_REPAIR_WHEELS" = "1" ]; then
+  # The validation script installs these from the mounted repository/test bundle.
+  REPAIR_WHEEL_PATHS=()
+  REPAIR_WHEEL_NAMES=()
+  for pattern in "${REPAIR_WHEEL_PATTERNS[@]}"; do
+    wheel_path="$(single_match_for_pattern "$pattern")"
+    REPAIR_WHEEL_PATHS+=("$wheel_path")
+    REPAIR_WHEEL_NAMES+=("$(basename "$wheel_path")")
   done
-  if [ "$keep" -eq 0 ]; then
-    rm -f "$existing_wheel"
-  fi
-done < <(find "$DEST" -maxdepth 1 -type f \( \
-  -name 'triton_ascend-3.2.0*.whl' -o \
-  -name 'vllm-0.13.0*.whl' -o \
-  -name 'vllm_ascend-0.13.0*.whl' -o \
-  -name '._triton_ascend-3.2.0*.whl' -o \
-  -name '._vllm-0.13.0*.whl' -o \
-  -name '._vllm_ascend-0.13.0*.whl' \
-\) -print)
 
-for wheel_path in "${REPAIR_WHEEL_PATHS[@]}"; do
-  COPYFILE_DISABLE=1 rsync -a --size-only "$wheel_path" "$DEST/"
-done
+  while IFS= read -r existing_wheel; do
+    existing_name="$(basename "$existing_wheel")"
+    keep=0
+    for desired_name in "${REPAIR_WHEEL_NAMES[@]}"; do
+      if [ "$existing_name" = "$desired_name" ]; then
+        keep=1
+        break
+      fi
+    done
+    if [ "$keep" -eq 0 ]; then
+      rm -f "$existing_wheel"
+    fi
+  done < <(find "$DEST" -maxdepth 1 -type f \( \
+    -name 'triton_ascend-3.2.0*.whl' -o \
+    -name 'vllm-0.13.0*.whl' -o \
+    -name 'vllm_ascend-0.13.0*.whl' -o \
+    -name '._triton_ascend-3.2.0*.whl' -o \
+    -name '._vllm-0.13.0*.whl' -o \
+    -name '._vllm_ascend-0.13.0*.whl' \
+  \) -print)
+
+  for wheel_path in "${REPAIR_WHEEL_PATHS[@]}"; do
+    COPYFILE_DISABLE=1 rsync -a --size-only "$wheel_path" "$DEST/"
+  done
+else
+  find "$DEST" -maxdepth 1 -type f \( \
+    -name 'triton_ascend-3.2.0*.whl' -o \
+    -name 'vllm-0.13.0*.whl' -o \
+    -name 'vllm_ascend-0.13.0*.whl' -o \
+    -name '._triton_ascend-3.2.0*.whl' -o \
+    -name '._vllm-0.13.0*.whl' -o \
+    -name '._vllm_ascend-0.13.0*.whl' \
+  \) -delete
+fi
 
 find "$DEST" -name '._*' -delete
 
@@ -233,6 +262,7 @@ find "$DEST" -name '._*' -delete
   "$KEYWORD_WHEELHOUSE_DEST" <<'PY'
 from pathlib import Path
 import hashlib
+import os
 import sys
 import zipfile
 
@@ -243,6 +273,9 @@ keyword_model_src = Path(sys.argv[4])
 keyword_model_dest = Path(sys.argv[5])
 keyword_wheelhouse_src = Path(sys.argv[6])
 keyword_wheelhouse_dest = Path(sys.argv[7])
+include_model_wheelhouse = os.getenv("INCLUDE_MODEL_WHEELHOUSE") == "1"
+include_keyword_fallback = os.getenv("INCLUDE_KEYWORD_FALLBACK") == "1"
+include_vllm_repair_wheels = os.getenv("INCLUDE_VLLM_REPAIR_WHEELS") == "1"
 
 
 def file_sha256(path: Path) -> str:
@@ -284,30 +317,32 @@ def validate_wheels(root: Path, label: str) -> None:
         )
 
 
-src_files = visible_files(wheelhouse_src)
-dest_files = visible_files(wheelhouse_dest)
-missing = sorted(set(src_files) - set(dest_files))
-extra = sorted(set(dest_files) - set(src_files))
-size_mismatch = sorted(
-    name
-    for name in set(src_files) & set(dest_files)
-    if src_files[name]["size"] != dest_files[name]["size"]
-)
-hash_mismatch = sorted(
-    name
-    for name in set(src_files) & set(dest_files)
-    if src_files[name]["sha256"] != dest_files[name]["sha256"]
-)
-if missing or extra or size_mismatch or hash_mismatch:
-    raise SystemExit(
-        "wheelhouse verification failed\n"
-        f"missing={missing[:20]}\n"
-        f"extra={extra[:20]}\n"
-        f"size_mismatch={size_mismatch[:20]}\n"
-        f"hash_mismatch={hash_mismatch[:20]}"
+src_files = {}
+if include_model_wheelhouse or include_vllm_repair_wheels:
+    src_files = visible_files(wheelhouse_src)
+    dest_files = visible_files(wheelhouse_dest)
+    missing = sorted(set(src_files) - set(dest_files))
+    extra = sorted(set(dest_files) - set(src_files))
+    size_mismatch = sorted(
+        name
+        for name in set(src_files) & set(dest_files)
+        if src_files[name]["size"] != dest_files[name]["size"]
     )
-validate_wheels(wheelhouse_src, "source wheelhouse")
-validate_wheels(wheelhouse_dest, "exported wheelhouse")
+    hash_mismatch = sorted(
+        name
+        for name in set(src_files) & set(dest_files)
+        if src_files[name]["sha256"] != dest_files[name]["sha256"]
+    )
+    if missing or extra or size_mismatch or hash_mismatch:
+        raise SystemExit(
+            "wheelhouse verification failed\n"
+            f"missing={missing[:20]}\n"
+            f"extra={extra[:20]}\n"
+            f"size_mismatch={size_mismatch[:20]}\n"
+            f"hash_mismatch={hash_mismatch[:20]}"
+        )
+    validate_wheels(wheelhouse_src, "source wheelhouse")
+    validate_wheels(wheelhouse_dest, "exported wheelhouse")
 
 required_root_wheels = [
     "triton_ascend-3.2.0",
@@ -315,77 +350,83 @@ required_root_wheels = [
     "vllm_ascend-0.13.0",
 ]
 root_files = visible_files(dest)
-for prefix in required_root_wheels:
-    matches = [name for name in root_files if name.startswith(prefix) and name.endswith(".whl")]
-    if len(matches) != 1:
-        raise SystemExit(f"expected one root repair wheel for {prefix}, found {matches}")
-    name = matches[0]
-    source_size = src_files.get(name)
-    if source_size is None:
-        raise SystemExit(f"root repair wheel is not present in wheelhouse: {name}")
-    if root_files[name]["size"] != source_size["size"]:
-        raise SystemExit(f"root repair wheel size mismatch: {name}")
-    if root_files[name]["sha256"] != source_size["sha256"]:
-        raise SystemExit(f"root repair wheel hash mismatch: {name}")
-validate_wheels(dest, "root repair wheel directory")
+if include_vllm_repair_wheels:
+    for prefix in required_root_wheels:
+        matches = [name for name in root_files if name.startswith(prefix) and name.endswith(".whl")]
+        if len(matches) != 1:
+            raise SystemExit(f"expected one root repair wheel for {prefix}, found {matches}")
+        name = matches[0]
+        source_size = src_files.get(name)
+        if source_size is None:
+            raise SystemExit(f"root repair wheel is not present in wheelhouse: {name}")
+        if root_files[name]["size"] != source_size["size"]:
+            raise SystemExit(f"root repair wheel size mismatch: {name}")
+        if root_files[name]["sha256"] != source_size["sha256"]:
+            raise SystemExit(f"root repair wheel hash mismatch: {name}")
+    validate_wheels(dest, "root repair wheel directory")
 
-for required_name in ("gliner_config.json", "tokenizer_config.json"):
-    source_file = keyword_model_src / required_name
-    dest_file = keyword_model_dest / required_name
-    if not source_file.is_file():
-        raise SystemExit(f"keyword model source missing required file: {source_file}")
-    if not dest_file.is_file():
-        raise SystemExit(f"keyword model dest missing required file: {dest_file}")
-if not (
-    (keyword_model_dest / "model.safetensors").is_file()
-    or (keyword_model_dest / "pytorch_model.bin").is_file()
-):
-    raise SystemExit(f"keyword model missing weights under {keyword_model_dest}")
+if include_keyword_fallback:
+    for required_name in ("gliner_config.json", "tokenizer_config.json"):
+        source_file = keyword_model_src / required_name
+        dest_file = keyword_model_dest / required_name
+        if not source_file.is_file():
+            raise SystemExit(f"keyword model source missing required file: {source_file}")
+        if not dest_file.is_file():
+            raise SystemExit(f"keyword model dest missing required file: {dest_file}")
+    if not (
+        (keyword_model_dest / "model.safetensors").is_file()
+        or (keyword_model_dest / "pytorch_model.bin").is_file()
+    ):
+        raise SystemExit(f"keyword model missing weights under {keyword_model_dest}")
 
-keyword_src_files = visible_files(keyword_wheelhouse_src)
-keyword_dest_files = visible_files(keyword_wheelhouse_dest)
-keyword_missing = sorted(set(keyword_src_files) - set(keyword_dest_files))
-keyword_extra = sorted(set(keyword_dest_files) - set(keyword_src_files))
-keyword_size_mismatch = sorted(
-    name
-    for name in set(keyword_src_files) & set(keyword_dest_files)
-    if keyword_src_files[name]["size"] != keyword_dest_files[name]["size"]
-)
-keyword_hash_mismatch = sorted(
-    name
-    for name in set(keyword_src_files) & set(keyword_dest_files)
-    if keyword_src_files[name]["sha256"] != keyword_dest_files[name]["sha256"]
-)
-if keyword_missing or keyword_extra or keyword_size_mismatch or keyword_hash_mismatch:
-    raise SystemExit(
-        "keyword wheelhouse verification failed\n"
-        f"missing={keyword_missing[:20]}\n"
-        f"extra={keyword_extra[:20]}\n"
-        f"size_mismatch={keyword_size_mismatch[:20]}\n"
-        f"hash_mismatch={keyword_hash_mismatch[:20]}"
-    )
-validate_wheels(keyword_wheelhouse_src, "source keyword wheelhouse")
-validate_wheels(keyword_wheelhouse_dest, "exported keyword wheelhouse")
-for prefix in ("gliner-", "stanza-", "onnxruntime-", "langdetect-"):
-    matches = [
+    keyword_src_files = visible_files(keyword_wheelhouse_src)
+    keyword_dest_files = visible_files(keyword_wheelhouse_dest)
+    keyword_missing = sorted(set(keyword_src_files) - set(keyword_dest_files))
+    keyword_extra = sorted(set(keyword_dest_files) - set(keyword_src_files))
+    keyword_size_mismatch = sorted(
         name
-        for name in keyword_dest_files
-        if name.startswith(prefix) and name.endswith(".whl")
-    ]
-    if not matches:
-        raise SystemExit(f"keyword wheelhouse missing required wheel prefix: {prefix}")
+        for name in set(keyword_src_files) & set(keyword_dest_files)
+        if keyword_src_files[name]["size"] != keyword_dest_files[name]["size"]
+    )
+    keyword_hash_mismatch = sorted(
+        name
+        for name in set(keyword_src_files) & set(keyword_dest_files)
+        if keyword_src_files[name]["sha256"] != keyword_dest_files[name]["sha256"]
+    )
+    if keyword_missing or keyword_extra or keyword_size_mismatch or keyword_hash_mismatch:
+        raise SystemExit(
+            "keyword wheelhouse verification failed\n"
+            f"missing={keyword_missing[:20]}\n"
+            f"extra={keyword_extra[:20]}\n"
+            f"size_mismatch={keyword_size_mismatch[:20]}\n"
+            f"hash_mismatch={keyword_hash_mismatch[:20]}"
+        )
+    validate_wheels(keyword_wheelhouse_src, "source keyword wheelhouse")
+    validate_wheels(keyword_wheelhouse_dest, "exported keyword wheelhouse")
+    for prefix in ("gliner-", "stanza-", "onnxruntime-", "langdetect-"):
+        matches = [
+            name
+            for name in keyword_dest_files
+            if name.startswith(prefix) and name.endswith(".whl")
+        ]
+        if not matches:
+            raise SystemExit(f"keyword wheelhouse missing required wheel prefix: {prefix}")
+else:
+    keyword_src_files = {}
 
 print(f"verified wheelhouse files: {len(src_files)}")
 print(f"verified keyword wheelhouse files: {len(keyword_src_files)}")
-print(f"verified keyword model: {keyword_model_dest}")
-print("verified root repair wheels:")
-for prefix in required_root_wheels:
-    name = next(
-        name
-        for name in root_files
-        if name.startswith(prefix) and name.endswith(".whl")
-    )
-    print(f"  {name} ({root_files[name]} bytes)")
+if include_keyword_fallback:
+    print(f"verified keyword model: {keyword_model_dest}")
+if include_vllm_repair_wheels:
+    print("verified root repair wheels:")
+    for prefix in required_root_wheels:
+        name = next(
+            name
+            for name in root_files
+            if name.startswith(prefix) and name.endswith(".whl")
+        )
+        print(f"  {name} ({root_files[name]} bytes)")
 PY
 
 FAILED_REQUIREMENTS="$WHEELHOUSE_DEST/failed-requirements.txt"
@@ -395,5 +436,9 @@ if [ -s "$FAILED_REQUIREMENTS" ]; then
   sed -n '1,80p' "$FAILED_REQUIREMENTS"
 fi
 
-du -sh "$DEST" "$WHEELHOUSE_DEST"
+if [ -d "$WHEELHOUSE_DEST" ]; then
+  du -sh "$DEST" "$WHEELHOUSE_DEST"
+else
+  du -sh "$DEST"
+fi
 echo "offline MEP test bundle exported to $DEST"

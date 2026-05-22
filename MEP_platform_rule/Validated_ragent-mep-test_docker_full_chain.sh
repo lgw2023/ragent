@@ -4,9 +4,10 @@ set -euo pipefail
 # Run this script on the Ascend host from either a full repository checkout or
 # an exported offline test bundle.
 #
-# It can either run the legacy validated vLLM Ascend embedding check first, or
-# start a plain Ascend container and let the MEP component autostart the local
-# transformers embedding runtime.
+# By default this starts the target Ascend image and lets the MEP component
+# autostart the local vLLM embedding service. Set SKIP_VLLM_VALIDATION=0 and
+# MEP_REUSE_EXISTING_VLLM=1 when you want to validate a standalone vLLM service
+# first and then reuse it for the component request.
 #
 # Typical usage:
 #   cd /data/disk1/ragent
@@ -19,12 +20,15 @@ set -euo pipefail
 # Useful overrides:
 #   HOST_REPO_DIR=/data/disk1/ragent        full repository root; alias of HOST_TEST_DIR
 #   CONTAINER_TEST_DIR=/tmp/ragent          mount point inside the container
-#   IMAGE=example/image:tag                 start this image when vLLM validation is skipped
-#   SKIP_VLLM_VALIDATION=1                  skip legacy vLLM validation
-#   MEP_REUSE_EXISTING_VLLM=0               use component-local transformers embedding
+#   IMAGE=example/image:tag                 target Ascend vLLM image
+#   SKIP_VLLM_VALIDATION=1                  skip standalone vLLM service validation
+#   MEP_REUSE_EXISTING_VLLM=0               use component-autostarted vLLM embedding
 #   AUTO_START_CONTAINER=1                  docker rm/run CONTAINER_NAME before validation
 #   MEP_REQUEST_NAME=sfs_create_request.json run a normal generation request sample
-#   MEP_WHEELHOUSE_PLATFORM_TAG=linux-arm64-py3.9 host-side wheelhouse preflight tag
+#   MEP_WHEELHOUSE_PLATFORM_TAG=linux-arm64-py3.10 host-side wheelhouse preflight tag
+#   MEP_VALIDATE_HOST_WHEELHOUSE=0          default for the new image; set 1 for legacy bundles
+#   RAGENT_MEP_OFFLINE_PIP_INSTALL=0        do not pip-install model wheelhouse at component startup
+#   RAGENT_MEP_WHEELHOUSE_ZIPIMPORT=0       do not overlay model wheelhouse on sys.path
 #   MEP_REQUIRE_RERANK=1                    fail if RERANK_* is incomplete
 #   MEP_ENABLE_RERANK=false                 force rerank off for this validation
 #   MEP_STRICT_OFFLINE=1                    force HF/Transformers/pip offline behavior in the container
@@ -40,15 +44,21 @@ HOST_TEST_DIR="${HOST_TEST_DIR:-${HOST_REPO_DIR:-$DEFAULT_HOST_TEST_DIR}}"
 CONTAINER_TEST_DIR="${CONTAINER_TEST_DIR:-/tmp/ragent}"
 RUNTIME_DIR="${RUNTIME_DIR:-/tmp/ragent-mep-runtime}"
 MODEL_PACKAGE="${MODEL_PACKAGE:-qwen3-embedding-4b}"
-CONTAINER_NAME="${CONTAINER_NAME:-vllm_ascend_910b_8cards}"
-IMAGE="${IMAGE:-}"
+CONTAINER_NAME="${CONTAINER_NAME:-qwen3_embedding_4b_mep_full_chain}"
+IMAGE="${IMAGE:-swr.cn-southwest-2.myhuaweicloud.com/huaweiccs-hivoice-product-ga/vllm-ascend-0.10.2-910b-cann8.2.rc1-torch2.7.1rc1:1.2.9.300}"
 AUTO_START_CONTAINER="${AUTO_START_CONTAINER:-}"
 RECREATE_CONTAINER="${RECREATE_CONTAINER:-1}"
 CHMOD_TEST_DIR="${CHMOD_TEST_DIR:-1}"
-ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0-7}"
+ASCEND_VISIBLE_DEVICES="${ASCEND_VISIBLE_DEVICES:-0}"
 ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0}"
+NPU_HOST_ID="${NPU_HOST_ID:-0}"
+NPU_CONTAINER_ID="${NPU_CONTAINER_ID:-0}"
+MAP_NPU_DEVICES="${MAP_NPU_DEVICES:-1}"
+VLLM_USE_V1="${VLLM_USE_V1:-1}"
+ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
 VLLM_PORT="${VLLM_PORT:-8000}"
-SKIP_VLLM_VALIDATION="${SKIP_VLLM_VALIDATION:-0}"
+SKIP_VLLM_VALIDATION="${SKIP_VLLM_VALIDATION:-1}"
 MEP_ENV_FILE="${MEP_ENV_FILE:-}"
 MEP_REQUEST_NAME="${MEP_REQUEST_NAME:-retrieval_only_request.json}"
 MEP_REQUESTS="${MEP_REQUESTS:-$MEP_REQUEST_NAME}"
@@ -58,13 +68,15 @@ MEP_REQUIRE_RERANK="${MEP_REQUIRE_RERANK:-0}"
 MEP_ENABLE_RERANK="${MEP_ENABLE_RERANK:-}"
 MEP_KEEP_REQUEST_GENERATE_PATH="${MEP_KEEP_REQUEST_GENERATE_PATH:-0}"
 MEP_KEEP_REQUEST_RERANK="${MEP_KEEP_REQUEST_RERANK:-0}"
-MEP_REUSE_EXISTING_VLLM="${MEP_REUSE_EXISTING_VLLM:-1}"
+MEP_REUSE_EXISTING_VLLM="${MEP_REUSE_EXISTING_VLLM:-0}"
 MEP_CLEAR_PATH_ENV="${MEP_CLEAR_PATH_ENV:-1}"
-MEP_ALLOW_TEST_EMBEDDING_TRUNCATION="${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-1}"
-MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-1}"
-MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.9}}"
+MEP_ALLOW_TEST_EMBEDDING_TRUNCATION="${MEP_ALLOW_TEST_EMBEDDING_TRUNCATION:-0}"
+MEP_VALIDATE_HOST_WHEELHOUSE="${MEP_VALIDATE_HOST_WHEELHOUSE:-0}"
+MEP_WHEELHOUSE_PLATFORM_TAG="${MEP_WHEELHOUSE_PLATFORM_TAG:-${RAGENT_MEP_PLATFORM_TAG:-linux-arm64-py3.10}}"
 MEP_REQUIRE_ASCEND_ENV="${MEP_REQUIRE_ASCEND_ENV:-}"
 MEP_STRICT_OFFLINE="${MEP_STRICT_OFFLINE:-1}"
+RAGENT_MEP_OFFLINE_PIP_INSTALL="${RAGENT_MEP_OFFLINE_PIP_INSTALL:-0}"
+RAGENT_MEP_WHEELHOUSE_ZIPIMPORT="${RAGENT_MEP_WHEELHOUSE_ZIPIMPORT:-0}"
 
 NO_PROXY_DEFAULT="localhost,127.0.0.1,::1,*.huawei.com,*.huaweicloud.com"
 http_proxy="${http_proxy:-}"
@@ -128,9 +140,42 @@ chmod_test_dir() {
   fi
 }
 
+DEVICE_ARGS=()
+MOUNT_ARGS=()
+
+build_device_args() {
+  DEVICE_ARGS=()
+  [ "$MAP_NPU_DEVICES" = "1" ] || return 0
+
+  if [ ! -e "/dev/davinci${NPU_HOST_ID}" ]; then
+    die "missing host NPU device: /dev/davinci${NPU_HOST_ID}; set NPU_HOST_ID or MAP_NPU_DEVICES=0"
+  fi
+
+  DEVICE_ARGS+=(--device "/dev/davinci${NPU_HOST_ID}:/dev/davinci${NPU_CONTAINER_ID}")
+  for dev in /dev/davinci_manager /dev/devmm_svm /dev/hisi_hdc; do
+    [ -e "$dev" ] && DEVICE_ARGS+=(--device "$dev")
+  done
+}
+
+build_mount_args() {
+  MOUNT_ARGS=(
+    -v /dev/shm:/dev/shm
+    -v /root/.cache:/root/.cache
+    -v "$HOST_TEST_DIR:$CONTAINER_TEST_DIR:rw"
+  )
+
+  [ -d /usr/local/dcmi ] && MOUNT_ARGS+=(-v /usr/local/dcmi:/usr/local/dcmi)
+  [ -f /usr/local/bin/npu-smi ] && MOUNT_ARGS+=(-v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi)
+  [ -d /usr/local/Ascend/driver/lib64 ] && MOUNT_ARGS+=(-v /usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64)
+  [ -f /usr/local/Ascend/driver/version.info ] && MOUNT_ARGS+=(-v /usr/local/Ascend/driver/version.info:/usr/local/Ascend/driver/version.info)
+  [ -f /etc/ascend_install.info ] && MOUNT_ARGS+=(-v /etc/ascend_install.info:/etc/ascend_install.info)
+}
+
 start_plain_container() {
   [ -n "$IMAGE" ] || die "IMAGE is required when AUTO_START_CONTAINER=1"
   chmod_test_dir
+  build_device_args
+  build_mount_args
 
   step "Start Ascend MEP test container"
   if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
@@ -147,6 +192,7 @@ start_plain_container() {
   echo "image:               $IMAGE"
   echo "container:           $CONTAINER_NAME"
   echo "container mount:     $CONTAINER_TEST_DIR"
+  echo "host NPU:            $NPU_HOST_ID -> container $NPU_CONTAINER_ID"
 
   docker run -d \
     --name "$CONTAINER_NAME" \
@@ -154,7 +200,14 @@ start_plain_container() {
     --ipc=host \
     --pids-limit 409600 \
     -e ASCEND_VISIBLE_DEVICES="$ASCEND_VISIBLE_DEVICES" \
-    -e ASCEND_RT_VISIBLE_DEVICES="$ASCEND_RT_VISIBLE_DEVICES" \
+    -e ASCEND_RT_VISIBLE_DEVICES="$NPU_CONTAINER_ID" \
+    -e VLLM_USE_V1="$VLLM_USE_V1" \
+    -e PYTORCH_NPU_ALLOC_CONF=max_split_size_mb:256 \
+    -e HCCL_OP_EXPANSION_MODE=AIV \
+    -e TOKENIZERS_PARALLELISM=true \
+    -e OMP_NUM_THREADS=16 \
+    -e ATB_HOME_PATH="$ATB_HOME_PATH" \
+    -e ATB_CXX_ABI="$ATB_CXX_ABI" \
     -e http_proxy="$http_proxy" \
     -e https_proxy="$https_proxy" \
     -e ftp_proxy="$ftp_proxy" \
@@ -163,9 +216,8 @@ start_plain_container() {
     -e FTP_PROXY="$ftp_proxy" \
     -e no_proxy="$no_proxy" \
     -e NO_PROXY="$NO_PROXY" \
-    -v /dev/shm:/dev/shm \
-    -v /root/.cache:/root/.cache \
-    -v "$HOST_TEST_DIR:$CONTAINER_TEST_DIR:rw" \
+    "${DEVICE_ARGS[@]}" \
+    "${MOUNT_ARGS[@]}" \
     "$IMAGE" \
     /bin/bash -lc "while true; do sleep 3600; done" >/dev/null
 }
@@ -255,7 +307,13 @@ if [ "$SKIP_VLLM_VALIDATION" != "1" ]; then
     "CONTAINER_NAME=$CONTAINER_NAME"
     "VLLM_PORT=$VLLM_PORT"
     "ASCEND_VISIBLE_DEVICES=$ASCEND_VISIBLE_DEVICES"
-    "ASCEND_RT_VISIBLE_DEVICES=$ASCEND_RT_VISIBLE_DEVICES"
+    "ASCEND_RT_VISIBLE_DEVICES=$NPU_CONTAINER_ID"
+    "NPU_HOST_ID=$NPU_HOST_ID"
+    "NPU_CONTAINER_ID=$NPU_CONTAINER_ID"
+    "MAP_NPU_DEVICES=$MAP_NPU_DEVICES"
+    "VLLM_USE_V1=$VLLM_USE_V1"
+    "ATB_HOME_PATH=$ATB_HOME_PATH"
+    "ATB_CXX_ABI=$ATB_CXX_ABI"
     "RECREATE_CONTAINER=$RECREATE_CONTAINER"
     "CHMOD_TEST_DIR=$CHMOD_TEST_DIR"
     "ENTER_AFTER_TEST=0"
@@ -282,7 +340,15 @@ EXEC_ENV_ARGS=(
   "-e" "RUNTIME_DIR=$RUNTIME_DIR"
   "-e" "MODEL_PACKAGE=$MODEL_PACKAGE"
   "-e" "ASCEND_VISIBLE_DEVICES=$ASCEND_VISIBLE_DEVICES"
-  "-e" "ASCEND_RT_VISIBLE_DEVICES=$ASCEND_RT_VISIBLE_DEVICES"
+  "-e" "ASCEND_RT_VISIBLE_DEVICES=$NPU_CONTAINER_ID"
+  "-e" "VLLM_USE_V1=$VLLM_USE_V1"
+  "-e" "PYTORCH_NPU_ALLOC_CONF=max_split_size_mb:256"
+  "-e" "HCCL_OP_EXPANSION_MODE=AIV"
+  "-e" "TOKENIZERS_PARALLELISM=true"
+  "-e" "OMP_NUM_THREADS=16"
+  "-e" "ATB_HOME_PATH=$ATB_HOME_PATH"
+  "-e" "ATB_CXX_ABI=$ATB_CXX_ABI"
+  "-e" "RAGENT_MEP_VLLM_LAUNCH_MODE=${RAGENT_MEP_VLLM_LAUNCH_MODE:-cli}"
   "-e" "VLLM_PORT=$VLLM_PORT"
   "-e" "MEP_REQUESTS=$MEP_REQUESTS"
   "-e" "MEP_OUTPUT_DIR=$MEP_OUTPUT_DIR"
@@ -295,6 +361,8 @@ EXEC_ENV_ARGS=(
   "-e" "MEP_CLEAR_PATH_ENV=$MEP_CLEAR_PATH_ENV"
   "-e" "MEP_ALLOW_TEST_EMBEDDING_TRUNCATION=$MEP_ALLOW_TEST_EMBEDDING_TRUNCATION"
   "-e" "MEP_STRICT_OFFLINE=$MEP_STRICT_OFFLINE"
+  "-e" "RAGENT_MEP_OFFLINE_PIP_INSTALL=$RAGENT_MEP_OFFLINE_PIP_INSTALL"
+  "-e" "RAGENT_MEP_WHEELHOUSE_ZIPIMPORT=$RAGENT_MEP_WHEELHOUSE_ZIPIMPORT"
   "-e" "MEP_EMBEDDING_MODEL=${MEP_EMBEDDING_MODEL:-}"
   "-e" "MEP_EMBEDDING_MODEL_KEY=${MEP_EMBEDDING_MODEL_KEY:-}"
   "-e" "MEP_EMBEDDING_MODEL_URL=${MEP_EMBEDDING_MODEL_URL:-}"
@@ -348,7 +416,8 @@ for name in \
   RAGENT_ASCEND_SET_ENV_SH \
   RAGENT_ASCEND_ENV_SHS \
   ASCEND_ENV_SCRIPTS \
-  MEP_REQUIRE_ASCEND_ENV
+  MEP_REQUIRE_ASCEND_ENV \
+  RAGENT_MEP_PLATFORM_TAG
 do
   add_exec_env_if_set "$name"
 done
@@ -443,7 +512,7 @@ load_ascend_runtime_environment() {
   elif [ -n "${ASCEND_ENV_SCRIPTS:-}" ]; then
     raw_scripts="$ASCEND_ENV_SCRIPTS"
   else
-    raw_scripts="/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/set_env.sh /usr/local/Ascend/nnal/atb/set_env.sh /usr/local/Ascend/nnal/atb/latest/atb/set_env.sh"
+    raw_scripts="/usr/local/Ascend/ascend-toolkit/set_env.sh /usr/local/Ascend/ascend-toolkit/latest/set_env.sh /usr/local/Ascend/nnal/asdsip/set_env.sh"
   fi
 
   local loaded=0
@@ -463,7 +532,23 @@ load_ascend_runtime_environment() {
     fi
     echo "warning: no Ascend runtime env script was sourced; checked: $raw_scripts"
   fi
+  export ATB_HOME_PATH="${ATB_HOME_PATH:-/usr/local/Ascend/nnal/atb/latest/atb}"
+  export ATB_CXX_ABI="${ATB_CXX_ABI:-cxx_abi_0}"
+  local atb_lib_path="${ATB_HOME_PATH}/${ATB_CXX_ABI}/lib"
+  case ":${LD_LIBRARY_PATH:-}:" in
+    *":${atb_lib_path}:"*) ;;
+    *) export LD_LIBRARY_PATH="${atb_lib_path}:${LD_LIBRARY_PATH:-}" ;;
+  esac
   export ASCEND_RT_VISIBLE_DEVICES
+  export VLLM_USE_V1="${VLLM_USE_V1:-1}"
+  export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:256}"
+  export HCCL_OP_EXPANSION_MODE="${HCCL_OP_EXPANSION_MODE:-AIV}"
+  export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
+  export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
+
+  echo "ATB_HOME_PATH=$ATB_HOME_PATH"
+  echo "ATB_CXX_ABI=$ATB_CXX_ABI"
+  echo "ATB lib path: $atb_lib_path"
 }
 
 complete_rerank_config() {
@@ -480,6 +565,13 @@ requests_require_llm() {
 requests_have_retrieval_only() {
   python3 "$CONTAINER_TEST_DIR/tools/validate_mep_full_chain_result.py" \
     request-has-retrieval-only \
+    "$CONTAINER_TEST_DIR" \
+    "$MEP_REQUESTS"
+}
+
+requests_require_keyword_fallback() {
+  python3 "$CONTAINER_TEST_DIR/tools/validate_mep_full_chain_result.py" \
+    request-requires-keyword-fallback \
     "$CONTAINER_TEST_DIR" \
     "$MEP_REQUESTS"
 }
@@ -769,6 +861,7 @@ fi
 
 REQUESTS_REQUIRE_LLM="$(requests_require_llm)"
 REQUESTS_HAVE_RETRIEVAL_ONLY="$(requests_have_retrieval_only)"
+REQUESTS_REQUIRE_KEYWORD_FALLBACK="$(requests_require_keyword_fallback)"
 if [ "$REQUESTS_REQUIRE_LLM" = "true" ]; then
   require_env LLM_MODEL_KEY LLM_MODEL_URL LLM_MODEL
 else
@@ -807,10 +900,10 @@ if [ "$rerank_config_complete" != "true" ]; then
   echo "warning: rerank env is incomplete; validation will run with rerank disabled"
 fi
 
-install_keyword_fallback_dependencies "$REQUESTS_HAVE_RETRIEVAL_ONLY"
+install_keyword_fallback_dependencies "$REQUESTS_REQUIRE_KEYWORD_FALLBACK"
 
 if [ "$MEP_REUSE_EXISTING_VLLM" = "1" ]; then
-  export EMBEDDING_MODEL="${MEP_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-4B}"
+  export EMBEDDING_MODEL="${MEP_EMBEDDING_MODEL:-qwen3-embedding-4b-local}"
   export EMBEDDING_MODEL_KEY="${MEP_EMBEDDING_MODEL_KEY:-EMPTY}"
   export EMBEDDING_MODEL_URL="${MEP_EMBEDDING_MODEL_URL:-http://127.0.0.1:${VLLM_PORT}/v1}"
   export EMBEDDING_PROVIDER="${MEP_EMBEDDING_PROVIDER:-custom_openai}"
