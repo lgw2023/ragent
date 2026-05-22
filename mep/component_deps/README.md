@@ -26,10 +26,11 @@ model packages because they belong to the component runtime, not to a specific
 embedding model.
 
 The wheelhouse currently carries small component runtime requirements that the
-target images do not provide, including `fastuuid` for LiteLLM and `tenacity`
-for `ragent.llm.openai`. Native wheels such as `fastuuid` must be installed by
-`process.py` inside the Linux ARM64 container instead of being imported from the
-unpacked `site-packages` tree.
+target images do not provide, including `fastuuid` for LiteLLM,
+`nano-vectordb` for `NanoVectorDBStorage`, and `tenacity` for
+`ragent.llm.openai`. Native wheels such as `fastuuid` must be installed by
+`process.py` inside the Linux ARM64 container instead of being imported from
+the unpacked `site-packages` tree.
 
 The no-LLM keyword fallback is also component-owned. Its GLiNER Python wheels
 live under `keyword_wheelhouse/`, and the local `knowledgator-gliner-x-small`
