@@ -38,6 +38,8 @@ _MANAGED_ENV_VARS = (
     "EMBEDDING_MODEL_URL",
     "EMBEDDING_PROVIDER",
     "EMBEDDING_DIMENSIONS",
+    "EMBEDDING_SEND_DIMENSIONS",
+    "EMBEDDING_REQUEST_DIMENSIONS",
 )
 _LOCAL_PROVIDER = "custom_openai"
 _DEFAULT_SERVED_MODEL_NAME = "qwen3-embedding-4b-local"
@@ -148,6 +150,8 @@ class LocalEmbeddingRuntime:
             os.environ["EMBEDDING_MODEL_KEY"] = self.config.api_key
             os.environ["EMBEDDING_MODEL_URL"] = self.config.base_url
             os.environ["EMBEDDING_PROVIDER"] = _LOCAL_PROVIDER
+            os.environ["EMBEDDING_SEND_DIMENSIONS"] = "0"
+            os.environ["EMBEDDING_REQUEST_DIMENSIONS"] = "0"
         if self.config.dimensions is not None:
             os.environ["EMBEDDING_DIMENSIONS"] = str(self.config.dimensions)
 

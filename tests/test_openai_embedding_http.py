@@ -84,3 +84,19 @@ def test_openai_embed_can_force_dimensions_for_custom_openai_bge_m3(monkeypatch)
     asyncio.run(openai_module.openai_embed(["hello"]))
 
     assert captured_requests[0]["json"]["dimensions"] == 1024
+
+
+def test_openai_embed_skips_dimensions_when_request_override_is_disabled(
+    monkeypatch,
+):
+    captured_requests: list[dict] = []
+    _install_fake_async_client(monkeypatch, captured_requests)
+    _set_custom_openai_embedding_env(monkeypatch)
+    monkeypatch.setenv("EMBEDDING_MODEL", "qwen3-embedding-4b-local")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "2560")
+    monkeypatch.setenv("EMBEDDING_SEND_DIMENSIONS", "0")
+
+    asyncio.run(openai_module.openai_embed(["hello"]))
+
+    assert captured_requests[0]["json"]["model"] == "qwen3-embedding-4b-local"
+    assert "dimensions" not in captured_requests[0]["json"]

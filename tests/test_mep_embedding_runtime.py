@@ -26,6 +26,8 @@ def _clear_external_embedding_env(monkeypatch) -> None:
         "EMBEDDING_MODEL_URL",
         "EMBEDDING_PROVIDER",
         "EMBEDDING_DIMENSIONS",
+        "EMBEDDING_SEND_DIMENSIONS",
+        "EMBEDDING_REQUEST_DIMENSIONS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -941,6 +943,9 @@ def test_bootstrap_local_embedding_runtime_sets_env_and_shuts_down(
         "EMBEDDING_MODEL_KEY",
         "EMBEDDING_MODEL_URL",
         "EMBEDDING_PROVIDER",
+        "EMBEDDING_DIMENSIONS",
+        "EMBEDDING_SEND_DIMENSIONS",
+        "EMBEDDING_REQUEST_DIMENSIONS",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("RAGENT_ASCEND_SET_ENV_SH", str(tmp_path / "missing_set_env.sh"))
@@ -1003,6 +1008,9 @@ def test_bootstrap_local_embedding_runtime_sets_env_and_shuts_down(
     assert os.getenv("EMBEDDING_MODEL_KEY") == "EMPTY"
     assert os.getenv("EMBEDDING_MODEL_URL") == runtime.config.base_url
     assert os.getenv("EMBEDDING_PROVIDER") == "custom_openai"
+    assert os.getenv("EMBEDDING_DIMENSIONS") == "1024"
+    assert os.getenv("EMBEDDING_SEND_DIMENSIONS") == "0"
+    assert os.getenv("EMBEDDING_REQUEST_DIMENSIONS") == "0"
 
     runtime.shutdown()
 
@@ -1013,3 +1021,46 @@ def test_bootstrap_local_embedding_runtime_sets_env_and_shuts_down(
     assert "EMBEDDING_MODEL_KEY" not in os.environ
     assert "EMBEDDING_MODEL_URL" not in os.environ
     assert "EMBEDDING_PROVIDER" not in os.environ
+    assert "EMBEDDING_DIMENSIONS" not in os.environ
+    assert "EMBEDDING_SEND_DIMENSIONS" not in os.environ
+    assert "EMBEDDING_REQUEST_DIMENSIONS" not in os.environ
+
+
+def test_local_vllm_embedding_runtime_forces_dimensions_request_off(
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.setenv("EMBEDDING_SEND_DIMENSIONS", "1")
+    monkeypatch.setenv("EMBEDDING_REQUEST_DIMENSIONS", "1")
+
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    config = mep_embedding_runtime.MepEmbeddingLaunchConfig(
+        model_dir=model_dir,
+        model_path=model_dir,
+        served_model_name="qwen3-embedding-4b-local",
+        host="127.0.0.1",
+        bind_host="127.0.0.1",
+        port=8000,
+        api_key="EMPTY",
+        runner="pooling",
+        startup_timeout_seconds=5.0,
+        dimensions=2560,
+        runtime="vllm",
+    )
+    runtime = mep_embedding_runtime.LocalEmbeddingRuntime(
+        config=config,
+        process=None,
+        launch_command=("vllm", "serve"),
+        log_path=tmp_path / "vllm.log",
+    )
+
+    runtime.apply_environment()
+
+    assert os.getenv("EMBEDDING_SEND_DIMENSIONS") == "0"
+    assert os.getenv("EMBEDDING_REQUEST_DIMENSIONS") == "0"
+
+    runtime.shutdown()
+
+    assert os.getenv("EMBEDDING_SEND_DIMENSIONS") == "1"
+    assert os.getenv("EMBEDDING_REQUEST_DIMENSIONS") == "1"

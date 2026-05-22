@@ -261,6 +261,8 @@ vllm.host=127.0.0.1
 
 这些默认值应来自组件包代码或组件包随附的 runtime profile，而不是写入标准 Hugging Face 模型目录。Qwen3 使用 embedding/pooling 任务。当前 MEP 默认使用完整 2560 维输出，不做 MRL 截断；只有当 KG snapshot 明确以更小维度重建时，才允许配置更小维度。从旧版 bge-m3（256 维）切换后，需按 2560 维重建 KG 向量库。
 
+`embedding.dimensions` 是组件侧向量库维度和 embedding callable 的元数据；MEP 本地 vLLM OpenAI-compatible 请求强制设置 `EMBEDDING_SEND_DIMENSIONS=0` 和 `EMBEDDING_REQUEST_DIMENSIONS=0`，不会把它作为 `/v1/embeddings` 的 `dimensions` 参数发送。目标 Qwen3-Embedding-4B vLLM 服务不支持 matryoshka representation，发送 `dimensions` 会触发 400；在 MEP 本地 vLLM 路径下不允许通过环境变量打开该参数。
+
 历史包 `bge-m3` 仍保留在 `mep/model_packages/bge-m3/`，使用 CLS pooling、256 维向量。
 
 `ragent.mep_embedding_runtime` 会按组件包内置 runtime profile 和环境变量覆盖启动 vLLM 或 transformers fallback。旧的 `data/config/embedding.properties` / `model/sysconfig.properties` 只作为历史包兼容输入；Qwen3-Embedding-4B 新路径不再依赖模型包内的 embedding runtime 配置。加载本地 Ascend runtime 前会自动尝试加载：
