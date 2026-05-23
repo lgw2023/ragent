@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from ragent.inference_runtime import (
     _close_rag,
+    _request_should_require_llm,
     _run_one_hop_with_rag,
     ensure_startup_model_check_once,
     initialize_rag,
@@ -275,10 +276,12 @@ def create_app() -> FastAPI:
     @app.post("/v1/benchmark/query")
     async def benchmark_query(request: BenchmarkQueryRequest) -> dict[str, Any]:
         project_dir = _normalize_and_validate_project_dir(request.project_dir)
-        context_only = request.retrieval_only or request.only_need_context
         session, initialized_before_request, init_stage_timings = await state.get_or_create_session(
             project_dir,
-            require_llm=not context_only,
+            require_llm=_request_should_require_llm(
+                retrieval_only=request.retrieval_only,
+                only_need_context=request.only_need_context,
+            ),
             enable_rerank=request.enable_rerank,
         )
         project_first_request = session.query_count == 0

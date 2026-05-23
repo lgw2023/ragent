@@ -29,6 +29,11 @@ def _patch_startup_model_calls(monkeypatch, calls: dict[str, int]) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
+def _clear_llm_env(monkeypatch) -> None:
+    for key in ("LLM_MODEL", "LLM_MODEL_KEY", "LLM_MODEL_URL"):
+        monkeypatch.delenv(key, raising=False)
+
+
 def test_startup_model_check_skips_rerank_when_config_is_incomplete(monkeypatch):
     calls = {"llm": 0, "embed": 0, "rerank": 0}
     _patch_startup_model_calls(monkeypatch, calls)
@@ -207,6 +212,7 @@ def test_execute_retrieval_only_skips_llm_check_and_returns_retrieval_payload(
     monkeypatch,
 ):
     calls: dict[str, object] = {}
+    _clear_llm_env(monkeypatch)
 
     async def fake_ensure_startup_model_check_once(*, require_llm, enable_rerank):
         calls["require_llm"] = require_llm
@@ -262,6 +268,58 @@ def test_execute_retrieval_only_skips_llm_check_and_returns_retrieval_payload(
     assert result["answer"] == "上下文"
     assert result["retrieval_only"] is True
     assert result["only_need_context"] is True
+    assert result["retrieval_result"]["final_context_text"] == "上下文"
+
+
+def test_execute_retrieval_only_requires_llm_when_config_is_complete(monkeypatch):
+    calls: dict[str, object] = {}
+    monkeypatch.setenv("LLM_MODEL", "qwen")
+    monkeypatch.setenv("LLM_MODEL_KEY", "key")
+    monkeypatch.setenv("LLM_MODEL_URL", "http://127.0.0.1:8000/v1")
+
+    async def fake_ensure_startup_model_check_once(*, require_llm, enable_rerank):
+        calls["require_llm"] = require_llm
+        calls["enable_rerank"] = enable_rerank
+
+    async def fake_run_one_hop_with_rag(
+        _rag,
+        _query,
+        _mode,
+        **_kwargs,
+    ):
+        return {
+            "answer": "上下文",
+            "referenced_file_paths": [],
+            "image_list": [],
+            "retrieval_result": {"final_context_text": "上下文"},
+            "trace": {"final_context_text": "上下文"},
+        }
+
+    monkeypatch.setattr(
+        inference_runtime,
+        "ensure_startup_model_check_once",
+        fake_ensure_startup_model_check_once,
+    )
+    monkeypatch.setattr(
+        inference_runtime,
+        "_run_one_hop_with_rag",
+        fake_run_one_hop_with_rag,
+    )
+
+    request = inference_runtime.InferenceRequest(
+        query_type="onehop",
+        query="只返回检索上下文",
+        retrieval_only=True,
+        enable_rerank=False,
+    )
+
+    result = asyncio.run(
+        inference_runtime.execute_inference_request(object(), request)
+    )
+
+    assert calls["require_llm"] is True
+    assert calls["enable_rerank"] is False
+    assert result["retrieval_only"] is True
     assert result["retrieval_result"]["final_context_text"] == "上下文"
 
 

@@ -55,6 +55,11 @@ def _global_config(model):
     }
 
 
+def _clear_llm_env(monkeypatch):
+    for key in ("LLM_MODEL", "LLM_MODEL_KEY", "LLM_MODEL_URL"):
+        monkeypatch.delenv(key, raising=False)
+
+
 def test_only_need_context_uses_gliner_fallback_without_llm(monkeypatch):
     llm = _FailingLLM()
 
@@ -76,7 +81,11 @@ def test_only_need_context_uses_gliner_fallback_without_llm(monkeypatch):
         fake_gliner,
     )
 
-    param = QueryParam(mode="hybrid", only_need_context=True)
+    param = QueryParam(
+        mode="hybrid",
+        only_need_context=True,
+        allow_llm_keyword_extraction=False,
+    )
     hl_keywords, ll_keywords = asyncio.run(
         operate.get_keywords_from_query(
             "糖尿病患者如何控制餐后血糖？",
@@ -111,7 +120,11 @@ def test_gliner_unavailable_does_not_fall_back_to_llm(monkeypatch):
         fake_gliner,
     )
 
-    param = QueryParam(mode="graph", only_need_context=True)
+    param = QueryParam(
+        mode="graph",
+        only_need_context=True,
+        allow_llm_keyword_extraction=False,
+    )
     hl_keywords, ll_keywords = asyncio.run(
         operate.get_keywords_from_query("总结主要主题", param, _global_config(llm))
     )
@@ -187,7 +200,11 @@ def test_retrieval_only_uses_real_gliner_loader_without_llm(monkeypatch, tmp_pat
     keyword_extraction._MODEL_CACHE.clear()
 
     llm = _FailingLLM()
-    param = QueryParam(mode="hybrid", only_need_context=True)
+    param = QueryParam(
+        mode="hybrid",
+        only_need_context=True,
+        allow_llm_keyword_extraction=False,
+    )
     hl_keywords, ll_keywords = asyncio.run(
         operate.get_keywords_from_query(
             "糖尿病患者如何控制餐后血糖？",
@@ -546,7 +563,12 @@ def test_hybrid_retrieval_debug_includes_keyword_metadata(monkeypatch):
     monkeypatch.setattr(operate, "_get_node_data", fake_node_data)
     monkeypatch.setattr(operate, "_get_edge_data", fake_edge_data)
 
-    param = QueryParam(mode="hybrid", only_need_context=True, enable_rerank=False)
+    param = QueryParam(
+        mode="hybrid",
+        only_need_context=True,
+        enable_rerank=False,
+        allow_llm_keyword_extraction=False,
+    )
     result = asyncio.run(
         operate._build_hybrid_retrieval_debug_data(
             query="如何制定低糖饮食？",
@@ -653,6 +675,7 @@ def test_retrieval_cache_fingerprint_changes_with_keyword_source():
 
 def test_run_one_hop_no_longer_prefills_raw_query(monkeypatch):
     captured = {}
+    _clear_llm_env(monkeypatch)
 
     class FakeRag:
         chunks_vdb = object()
@@ -729,3 +752,81 @@ def test_run_one_hop_no_longer_prefills_raw_query(monkeypatch):
     assert captured["allow_llm_keyword_extraction"] is False
     assert result["answer"] == "检索上下文"
     assert result["retrieval_result"]["keyword_source"] == "gliner_fallback"
+
+
+def test_run_one_hop_retrieval_only_allows_llm_keywords_with_complete_llm_config(
+    monkeypatch,
+):
+    captured = {}
+    monkeypatch.setenv("LLM_MODEL", "unit-test-llm")
+    monkeypatch.setenv("LLM_MODEL_KEY", "key")
+    monkeypatch.setenv("LLM_MODEL_URL", "http://127.0.0.1:8000/v1")
+
+    class FakeRag:
+        chunks_vdb = object()
+        chunk_entity_relation_graph = object()
+        relationships_vdb = object()
+        entities_vdb = object()
+        text_chunks = object()
+        llm_response_cache = None
+
+        async def _build_runtime_global_config(self):
+            return _global_config(_FailingLLM())
+
+        async def _query_done(self):
+            return None
+
+    async def fake_hybrid_query(
+        _query,
+        _chunks_vdb,
+        _knowledge_graph_inst,
+        _relationships_vdb,
+        _entities_vdb,
+        _text_chunks_db,
+        query_param,
+        *_args,
+        **_kwargs,
+    ):
+        captured["allow_llm_keyword_extraction"] = (
+            query_param.allow_llm_keyword_extraction
+        )
+        return "检索上下文", [], {
+            "high_level_keywords": [],
+            "low_level_keywords": [],
+            "keyword_source": "llm",
+            "keyword_strategy": "llm_keyword_extraction",
+            "graph_entities": [],
+            "graph_relations": [],
+            "vector_weights": {},
+            "vector_texts": {},
+            "vector_file_paths": {},
+            "graph_weights": {},
+            "graph_texts": {},
+            "graph_file_paths": {},
+            "merged_candidates": [],
+            "rerank_results": [],
+            "results_text": [],
+            "results_file_paths": [],
+            "results_chunk_ids": [],
+            "results_source_labels": [],
+            "selected_candidate_indexes": [],
+            "final_context_document_chunks": [],
+            "final_context_text": "",
+            "stage_timings": [],
+        }
+
+    monkeypatch.setattr(inference_runtime, "hybrid_query", fake_hybrid_query)
+
+    result = asyncio.run(
+        inference_runtime._run_one_hop_with_rag(
+            FakeRag(),
+            TEST_QUERY,
+            "hybrid",
+            retrieval_only=True,
+            only_need_context=True,
+        )
+    )
+
+    assert captured["allow_llm_keyword_extraction"] is True
+    assert result["answer"] == "检索上下文"
+    assert result["retrieval_result"]["keyword_source"] == "llm"

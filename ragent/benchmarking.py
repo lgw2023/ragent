@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,10 @@ from ragent.runtime_env import should_skip_dotenv
 
 MANAGED_QUERY_MODES = ("graph", "hybrid")
 QUERY_CACHE_TYPES = ("answer", "retrieval", "render", "prompt")
+SQLITE_CACHE_CORRUPTION_MARKERS = (
+    "malformed",
+    "not a database",
+)
 CACHE_HIT_STAGES = frozenset(
     {
         "answer_cache_hit",
@@ -80,6 +85,77 @@ def resolve_query_cache_paths(
     return [base_dir / "kv_store_llm_response_cache.sqlite"]
 
 
+def is_sqlite_cache_corruption_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in SQLITE_CACHE_CORRUPTION_MARKERS)
+
+
+def _query_cache_sidecar_paths(cache_path: Path) -> list[Path]:
+    return [
+        cache_path,
+        Path(f"{cache_path}-wal"),
+        Path(f"{cache_path}-shm"),
+    ]
+
+
+def _initialize_empty_query_cache(cache_path: Path) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(cache_path) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS query_cache_entries (
+                key TEXT PRIMARY KEY,
+                mode TEXT NOT NULL,
+                cache_type TEXT NOT NULL,
+                args_hash TEXT NOT NULL,
+                entry_json TEXT NOT NULL,
+                corpus_revision INTEGER NOT NULL DEFAULT 0,
+                expires_at INTEGER,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                last_accessed_at INTEGER NOT NULL DEFAULT 0,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                is_query_cache INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_query_cache_mode_type ON query_cache_entries(mode, cache_type)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_query_cache_revision ON query_cache_entries(corpus_revision)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_query_cache_expires_at ON query_cache_entries(expires_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_query_cache_last_accessed_at ON query_cache_entries(last_accessed_at)"
+        )
+        conn.commit()
+
+
+def recover_malformed_query_cache(cache_path: Path) -> list[str]:
+    """Quarantine a corrupt query-cache DB and replace it with an empty cache.
+
+    Query cache files are disposable. If SQLite reports corruption, selective
+    deletion is no longer reliable, so the safest benchmark behavior is to
+    replace the cache file and let subsequent requests repopulate it.
+    """
+
+    recovered_files: list[str] = []
+    suffix = f".malformed.{int(time.time_ns())}"
+    for path in _query_cache_sidecar_paths(cache_path):
+        if not path.exists():
+            continue
+        target = path.with_name(f"{path.name}{suffix}")
+        path.replace(target)
+        recovered_files.append(str(target))
+
+    _initialize_empty_query_cache(cache_path)
+    return recovered_files
+
+
 def extract_stage_seconds(stage_timings: list[dict[str, Any]] | None, stage_name: str) -> float | None:
     for item in reversed(stage_timings or []):
         if not isinstance(item, dict) or item.get("stage") != stage_name:
@@ -115,6 +191,7 @@ def clear_query_cache_entries(
     ]
     deleted_entry_count = 0
     touched_files: list[str] = []
+    recovered_cache_files: list[str] = []
 
     for cache_path in resolve_query_cache_paths(
         project_dir,
@@ -125,32 +202,55 @@ def clear_query_cache_entries(
         if not cache_path.exists():
             continue
 
-        with sqlite3.connect(cache_path) as conn:
-            clauses: list[str] = []
-            parameters: list[str] = []
+        try:
+            with sqlite3.connect(cache_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS query_cache_entries (
+                        key TEXT PRIMARY KEY,
+                        mode TEXT NOT NULL,
+                        cache_type TEXT NOT NULL,
+                        args_hash TEXT NOT NULL,
+                        entry_json TEXT NOT NULL,
+                        corpus_revision INTEGER NOT NULL DEFAULT 0,
+                        expires_at INTEGER,
+                        created_at INTEGER NOT NULL DEFAULT 0,
+                        last_accessed_at INTEGER NOT NULL DEFAULT 0,
+                        access_count INTEGER NOT NULL DEFAULT 0,
+                        is_query_cache INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                clauses: list[str] = []
+                parameters: list[str] = []
 
-            if normalized_modes:
-                placeholders = ",".join("?" for _ in normalized_modes)
-                clauses.append(f"mode IN ({placeholders})")
-                parameters.extend(normalized_modes)
-            if normalized_cache_types:
-                placeholders = ",".join("?" for _ in normalized_cache_types)
-                clauses.append(f"cache_type IN ({placeholders})")
-                parameters.extend(normalized_cache_types)
+                if normalized_modes:
+                    placeholders = ",".join("?" for _ in normalized_modes)
+                    clauses.append(f"mode IN ({placeholders})")
+                    parameters.extend(normalized_modes)
+                if normalized_cache_types:
+                    placeholders = ",".join("?" for _ in normalized_cache_types)
+                    clauses.append(f"cache_type IN ({placeholders})")
+                    parameters.extend(normalized_cache_types)
 
-            if not clauses:
-                continue
+                if not clauses:
+                    continue
 
-            cursor = conn.execute(
-                "DELETE FROM query_cache_entries WHERE " + " AND ".join(clauses),
-                tuple(parameters),
-            )
-            conn.commit()
-            deleted_entry_count += max(cursor.rowcount, 0)
+                cursor = conn.execute(
+                    "DELETE FROM query_cache_entries WHERE " + " AND ".join(clauses),
+                    tuple(parameters),
+                )
+                conn.commit()
+                deleted_entry_count += max(cursor.rowcount, 0)
+        except sqlite3.DatabaseError as exc:
+            if not is_sqlite_cache_corruption_error(exc):
+                raise
+            recovered_cache_files.extend(recover_malformed_query_cache(cache_path))
 
     return {
         "cache_files": touched_files,
         "deleted_entry_count": deleted_entry_count,
+        "recovered_cache_files": recovered_cache_files,
         "modes": normalized_modes,
         "cache_types": normalized_cache_types,
     }

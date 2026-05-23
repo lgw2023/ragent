@@ -306,10 +306,7 @@ def _resolve_rerank_identifier(global_config: dict[str, Any]) -> Any:
 
 
 def _llm_keyword_extraction_allowed(query_param: QueryParam) -> bool:
-    return bool(
-        getattr(query_param, "allow_llm_keyword_extraction", True)
-        and not getattr(query_param, "only_need_context", False)
-    )
+    return bool(getattr(query_param, "allow_llm_keyword_extraction", True))
 
 
 def _resolve_keyword_fingerprint_metadata(

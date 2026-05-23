@@ -152,7 +152,10 @@ class InferenceRuntimeSession:
     async def run(self, request: InferenceRequest) -> dict[str, Any]:
         retrieval_only = request.retrieval_only or request.only_need_context
         await self.load(
-            require_llm=not retrieval_only,
+            require_llm=_request_should_require_llm(
+                retrieval_only=retrieval_only,
+                only_need_context=request.only_need_context,
+            ),
             enable_rerank=request.enable_rerank,
         )
         if self.rag is None:
@@ -705,7 +708,10 @@ async def _run_one_hop_with_rag(
     query_param = QueryParam(mode=mode)
     context_only = retrieval_only or only_need_context
     query_param.only_need_context = context_only
-    query_param.allow_llm_keyword_extraction = not context_only
+    query_param.allow_llm_keyword_extraction = _request_should_use_llm_for_keywords(
+        retrieval_only=retrieval_only,
+        only_need_context=only_need_context,
+    )
     if enable_rerank is not None:
         query_param.enable_rerank = enable_rerank
     if response_type:
@@ -1067,6 +1073,27 @@ def _parse_optional_bool_env_value(value: Any) -> bool | None:
 
 def _has_complete_llm_config() -> bool:
     return all((os.getenv(name) or "").strip() for name in _LLM_CONFIG_ENV_VARS)
+
+
+def _request_should_use_llm_for_keywords(
+    *,
+    retrieval_only: bool,
+    only_need_context: bool,
+) -> bool:
+    if not (retrieval_only or only_need_context):
+        return True
+    return _has_complete_llm_config()
+
+
+def _request_should_require_llm(
+    *,
+    retrieval_only: bool,
+    only_need_context: bool,
+) -> bool:
+    return _request_should_use_llm_for_keywords(
+        retrieval_only=retrieval_only,
+        only_need_context=only_need_context,
+    )
 
 
 def _keyword_fallback_preload_enabled(default: bool) -> bool:
@@ -1597,7 +1624,10 @@ async def execute_inference_request(
 ) -> dict[str, Any]:
     retrieval_only = request.retrieval_only or request.only_need_context
     await ensure_startup_model_check_once(
-        require_llm=not retrieval_only,
+        require_llm=_request_should_require_llm(
+            retrieval_only=retrieval_only,
+            only_need_context=request.only_need_context,
+        ),
         enable_rerank=request.enable_rerank,
     )
 
