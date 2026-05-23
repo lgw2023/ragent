@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 from abc import ABC, abstractmethod
 from enum import Enum
 import os
@@ -141,6 +143,9 @@ class QueryParam:
     Default is True to enable reranking when rerank model is available.
     """
 
+    disable_rerank_for_retrieval_only: bool | None = None
+    """If True, skip reranking when only returning retrieval context. Defaults to None so global/env config can decide."""
+
     answer_prompt_mode: str | None = None
     """Optional override for answer generation prompt strategy.
     Supported values:
@@ -203,9 +208,70 @@ class BaseVectorStorage(StorageNameSpace, ABC):
 
     @abstractmethod
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
         """Query the vector storage and retrieve top_k results."""
+
+    async def query_many(
+        self,
+        queries: list[str],
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        """Query multiple texts and return results in the same order."""
+        try:
+            query_parameters = inspect.signature(self.query).parameters
+        except (TypeError, ValueError):
+            query_parameters = {}
+        accepts_timing = "timing_collector" in query_parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in query_parameters.values()
+        )
+        if not accepts_timing:
+            return await asyncio.gather(
+                *[
+                    self.query(
+                        query,
+                        top_k=top_k,
+                        ids=ids,
+                    )
+                    for query in queries
+                ]
+            )
+
+        return await asyncio.gather(
+            *[
+                self.query(
+                    query,
+                    top_k=top_k,
+                    ids=ids,
+                    timing_collector=timing_collector,
+                    stage_prefix=stage_prefix,
+                )
+                for query in queries
+            ]
+        )
+
+    async def query_many_by_embeddings(
+        self,
+        embeddings: Any,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        """Query multiple precomputed embeddings and return results in the same order."""
+        raise NotImplementedError
 
     @abstractmethod
     async def upsert(self, data: dict[str, dict[str, Any]]) -> None:

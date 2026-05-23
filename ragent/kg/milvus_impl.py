@@ -5,6 +5,7 @@ import ast
 import importlib.util
 import json
 import os
+import time
 from typing import Any, final
 from dataclasses import dataclass
 import numpy as np
@@ -840,18 +841,44 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         return results
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
+        prefix = stage_prefix or self.namespace
         # Ensure collection is loaded before querying
+        stage_started_at = time.perf_counter()
         self._ensure_collection_loaded()
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_collection_load_check",
+                    "label": f"{self.namespace} collection load check",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                }
+            )
 
+        stage_started_at = time.perf_counter()
         embedding = await self.embedding_func(
             [query], _priority=5
         )  # higher priority for query
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_embedding",
+                    "label": f"{self.namespace} query embedding",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                }
+            )
 
         # Include all meta_fields (created_at is now always included)
         output_fields = list(self.meta_fields)
 
+        stage_started_at = time.perf_counter()
         results = self._client.search(
             collection_name=self.namespace,
             data=embedding,
@@ -862,6 +889,14 @@ class MilvusVectorDBStorage(BaseVectorStorage):
                 "params": {"radius": self.cosine_better_than_threshold},
             },
         )
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_index_search",
+                    "label": f"{self.namespace} vector index search",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                }
+            )
         return [
             {
                 **dp["entity"],
@@ -870,6 +905,100 @@ class MilvusVectorDBStorage(BaseVectorStorage):
                 "created_at": dp.get("created_at"),
             }
             for dp in results[0]
+        ]
+
+    async def query_many(
+        self,
+        queries: list[str],
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        query_list = [str(query) for query in queries]
+        if not query_list:
+            return []
+
+        prefix = stage_prefix or self.namespace
+        stage_started_at = time.perf_counter()
+        embeddings = await self.embedding_func(query_list, _priority=5)
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_embedding",
+                    "label": f"{self.namespace} batch query embedding",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                    "query_count": len(query_list),
+                }
+            )
+
+        return await self.query_many_by_embeddings(
+            embeddings,
+            top_k=top_k,
+            ids=ids,
+            timing_collector=timing_collector,
+            stage_prefix=stage_prefix,
+        )
+
+    async def query_many_by_embeddings(
+        self,
+        embeddings: Any,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        prefix = stage_prefix or self.namespace
+        if len(embeddings) == 0:
+            return []
+        stage_started_at = time.perf_counter()
+        self._ensure_collection_loaded()
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_collection_load_check",
+                    "label": f"{self.namespace} collection load check",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                    "query_count": len(embeddings),
+                }
+            )
+
+        output_fields = list(self.meta_fields)
+
+        stage_started_at = time.perf_counter()
+        results = self._client.search(
+            collection_name=self.namespace,
+            data=embeddings,
+            limit=top_k,
+            output_fields=output_fields,
+            search_params={
+                "metric_type": "COSINE",
+                "params": {"radius": self.cosine_better_than_threshold},
+            },
+        )
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_index_search",
+                    "label": f"{self.namespace} batch vector index search",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                    "query_count": len(embeddings),
+                }
+            )
+
+        return [
+            [
+                {
+                    **dp["entity"],
+                    "id": dp["id"],
+                    "distance": dp["distance"],
+                    "created_at": dp.get("created_at"),
+                }
+                for dp in result_set
+            ]
+            for result_set in results
         ]
 
     async def index_done_callback(self) -> None:

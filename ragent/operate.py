@@ -4,6 +4,7 @@ from functools import partial
 import asyncio
 import ast
 from contextlib import asynccontextmanager
+import inspect
 import json
 import math
 import os
@@ -399,6 +400,49 @@ def _missing_rerank_env_names() -> list[str]:
     ]
 
 
+def _parse_optional_bool_value(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _retrieval_only_rerank_disabled(
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+) -> bool:
+    if not getattr(query_param, "only_need_context", False):
+        return False
+    for value in (
+        getattr(query_param, "disable_rerank_for_retrieval_only", None),
+        global_config.get("disable_rerank_for_retrieval_only"),
+        os.getenv("RAG_RETRIEVAL_ONLY_DISABLE_RERANK"),
+    ):
+        parsed = _parse_optional_bool_value(value)
+        if parsed is not None:
+            return parsed
+    return False
+
+
+def _shared_graph_hit_embedding_enabled(global_config: dict[str, Any]) -> bool:
+    for value in (
+        global_config.get("enable_shared_graph_hit_embedding"),
+        os.getenv("RAG_ENABLE_SHARED_GRAPH_HIT_EMBEDDING"),
+    ):
+        parsed = _parse_optional_bool_value(value)
+        if parsed is not None:
+            return parsed
+    return False
+
+
 def _has_unstable_rerank_callable(global_config: dict[str, Any]) -> bool:
     rerank_model_func = global_config.get("rerank_model_func")
     return callable(rerank_model_func) and resolve_callable_cache_id(rerank_model_func) is None
@@ -504,6 +548,10 @@ def _build_query_request_fingerprint_payload(
                 "tokenizer": _resolve_tokenizer_identifier(global_config),
                 "query_model": query_model_identifier,
                 "rerank_model": _resolve_rerank_identifier(global_config),
+                "disable_rerank_for_retrieval_only": _retrieval_only_rerank_disabled(
+                    query_param,
+                    global_config,
+                ),
                 "addon_params": addon_params,
             }
         )
@@ -1136,25 +1184,291 @@ async def _query_vector_storage_diversified(
     vector_storage: BaseVectorStorage,
     top_k: int,
     ids: list[str] | None = None,
+    *,
+    timing_collector: list[dict[str, Any]] | None = None,
+    stage_prefix: str | None = None,
 ) -> list[dict[str, Any]]:
     query_variants = _build_diversified_retrieval_queries(query)
     if not query_variants:
         return []
+
+    async def _query_variant(variant: str, variant_top_k: int) -> list[dict[str, Any]]:
+        if timing_collector is None and stage_prefix is None:
+            return await vector_storage.query(variant, top_k=variant_top_k, ids=ids)
+
+        try:
+            query_parameters = inspect.signature(vector_storage.query).parameters
+        except (TypeError, ValueError):
+            query_parameters = {}
+        accepts_timing = "timing_collector" in query_parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in query_parameters.values()
+        )
+        if not accepts_timing:
+            return await vector_storage.query(variant, top_k=variant_top_k, ids=ids)
+
+        return await vector_storage.query(
+            variant,
+            top_k=variant_top_k,
+            ids=ids,
+            timing_collector=timing_collector,
+            stage_prefix=stage_prefix,
+        )
+
     if len(query_variants) == 1:
-        return await vector_storage.query(query_variants[0], top_k=top_k, ids=ids)
+        return await _query_variant(query_variants[0], top_k)
 
     per_query_top_k = min(
         max(top_k * 3, len(query_variants) * 4, 6),
         24,
     )
-    result_sets = await asyncio.gather(
-        *[
-            vector_storage.query(variant, top_k=per_query_top_k, ids=ids)
-            for variant in query_variants
-        ]
-    )
+    query_many = getattr(vector_storage, "query_many", None)
+    if callable(query_many):
+        try:
+            query_many_parameters = inspect.signature(query_many).parameters
+        except (TypeError, ValueError):
+            query_many_parameters = {}
+        accepts_timing = "timing_collector" in query_many_parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in query_many_parameters.values()
+        )
+        if (timing_collector is not None or stage_prefix is not None) and accepts_timing:
+            result_sets = await query_many(
+                query_variants,
+                top_k=per_query_top_k,
+                ids=ids,
+                timing_collector=timing_collector,
+                stage_prefix=stage_prefix,
+            )
+        else:
+            result_sets = await query_many(
+                query_variants,
+                top_k=per_query_top_k,
+                ids=ids,
+            )
+    else:
+        result_sets = await asyncio.gather(
+            *[_query_variant(variant, per_query_top_k) for variant in query_variants]
+        )
+    stage_started_at = time.perf_counter()
     merged_results = _merge_diversified_vector_query_results(query_variants, result_sets)
-    return _select_diversified_vector_results(merged_results, query_variants, top_k)
+    selected_results = _select_diversified_vector_results(
+        merged_results,
+        query_variants,
+        top_k,
+    )
+    if timing_collector is not None and stage_prefix:
+        _record_stage_timing(
+            timing_collector,
+            f"{stage_prefix}_merge",
+            "多查询向量结果融合",
+            stage_started_at,
+        )
+    return selected_results
+
+
+def _supports_precomputed_vector_queries(vector_storage: BaseVectorStorage) -> bool:
+    method = getattr(type(vector_storage), "query_many_by_embeddings", None)
+    return callable(method) and method is not BaseVectorStorage.query_many_by_embeddings
+
+
+async def _select_diversified_vector_results_from_embeddings(
+    query_variants: list[str],
+    embeddings: Any,
+    vector_storage: BaseVectorStorage,
+    top_k: int,
+    ids: list[str] | None,
+    *,
+    timing_collector: list[dict[str, Any]] | None,
+    stage_prefix: str,
+) -> list[dict[str, Any]]:
+    if not query_variants:
+        return []
+    variant_top_k = (
+        top_k
+        if len(query_variants) == 1
+        else min(max(top_k * 3, len(query_variants) * 4, 6), 24)
+    )
+    query_many_by_embeddings = vector_storage.query_many_by_embeddings
+    try:
+        query_many_parameters = inspect.signature(query_many_by_embeddings).parameters
+    except (TypeError, ValueError):
+        query_many_parameters = {}
+    accepts_timing = "timing_collector" in query_many_parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in query_many_parameters.values()
+    )
+    if (timing_collector is not None or stage_prefix is not None) and accepts_timing:
+        result_sets = await query_many_by_embeddings(
+            embeddings,
+            top_k=variant_top_k,
+            ids=ids,
+            timing_collector=timing_collector,
+            stage_prefix=stage_prefix,
+        )
+    else:
+        result_sets = await query_many_by_embeddings(
+            embeddings,
+            top_k=variant_top_k,
+            ids=ids,
+        )
+    if len(query_variants) == 1:
+        return (result_sets[0] if result_sets else [])[:top_k]
+
+    stage_started_at = time.perf_counter()
+    merged_results = _merge_diversified_vector_query_results(
+        query_variants,
+        result_sets,
+    )
+    selected_results = _select_diversified_vector_results(
+        merged_results,
+        query_variants,
+        top_k,
+    )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            f"{stage_prefix}_merge",
+            "多查询向量结果融合",
+            stage_started_at,
+        )
+    return selected_results
+
+
+async def _query_graph_hit_vectors_with_shared_embedding(
+    ll_keywords_str: str,
+    hl_keywords_str: str,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
+    query_param: QueryParam,
+    stage_timings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    if not (
+        _supports_precomputed_vector_queries(entities_vdb)
+        and _supports_precomputed_vector_queries(relationships_vdb)
+    ):
+        return None
+    if entities_vdb.embedding_func is not relationships_vdb.embedding_func:
+        return None
+
+    entity_variants = _build_diversified_retrieval_queries(ll_keywords_str)
+    relation_variants = _build_diversified_retrieval_queries(hl_keywords_str)
+    all_variants = [*entity_variants, *relation_variants]
+    if not all_variants:
+        return [], []
+
+    stage_started_at = time.perf_counter()
+    with model_usage_stage("graph_hit_vector_embedding", "图谱命中 / 共享查询向量化"):
+        embeddings = await entities_vdb.embedding_func(all_variants, _priority=5)
+    _append_stage_timing(
+        stage_timings,
+        "graph_hit_vector_embedding",
+        "图谱命中 / 共享查询向量化",
+        time.perf_counter() - stage_started_at,
+    )
+
+    entity_embeddings = embeddings[: len(entity_variants)]
+    relation_embeddings = embeddings[len(entity_variants) :]
+
+    entity_task = _select_diversified_vector_results_from_embeddings(
+        entity_variants,
+        entity_embeddings,
+        entities_vdb,
+        query_param.top_k,
+        query_param.ids,
+        timing_collector=stage_timings,
+        stage_prefix="graph_entity_vector",
+    )
+    relation_task = _select_diversified_vector_results_from_embeddings(
+        relation_variants,
+        relation_embeddings,
+        relationships_vdb,
+        query_param.top_k,
+        query_param.ids,
+        timing_collector=stage_timings,
+        stage_prefix="graph_relation_vector",
+    )
+    entity_results, relation_results = await asyncio.gather(entity_task, relation_task)
+    return entity_results, relation_results
+
+
+async def _get_graph_hit_data_concurrently(
+    ll_keywords_str: str,
+    hl_keywords_str: str,
+    knowledge_graph_inst: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
+    query_param: QueryParam,
+    stage_timings: list[dict[str, Any]],
+    global_config: dict[str, Any],
+) -> tuple[
+    tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]],
+    tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]],
+]:
+    shared_vector_results = None
+    if _shared_graph_hit_embedding_enabled(global_config):
+        shared_vector_results = await _query_graph_hit_vectors_with_shared_embedding(
+            ll_keywords_str,
+            hl_keywords_str,
+            entities_vdb,
+            relationships_vdb,
+            query_param,
+            stage_timings,
+        )
+
+    async def _get_entity_hits():
+        stage_started_at = time.perf_counter()
+        with model_usage_stage("graph_entity_hits", "图谱命中 / 实体"):
+            vector_results = (
+                shared_vector_results[0]
+                if shared_vector_results is not None
+                else None
+            )
+            result = await _get_node_data(
+                ll_keywords_str,
+                knowledge_graph_inst,
+                entities_vdb,
+                query_param,
+                timing_collector=stage_timings,
+                vector_results=vector_results,
+            )
+        _record_stage_timing(
+            stage_timings,
+            "graph_entity_hits",
+            "图谱命中 / 实体",
+            stage_started_at,
+        )
+        return result
+
+    async def _get_relation_hits():
+        stage_started_at = time.perf_counter()
+        with model_usage_stage("graph_relation_hits", "图谱命中 / 关系"):
+            vector_results = (
+                shared_vector_results[1]
+                if shared_vector_results is not None
+                else None
+            )
+            result = await _get_edge_data(
+                hl_keywords_str,
+                knowledge_graph_inst,
+                relationships_vdb,
+                query_param,
+                timing_collector=stage_timings,
+                vector_results=vector_results,
+            )
+        _record_stage_timing(
+            stage_timings,
+            "graph_relation_hits",
+            "图谱命中 / 关系",
+            stage_started_at,
+        )
+        return result
+
+    entity_hits, relation_hits = await asyncio.gather(
+        _get_entity_hits(),
+        _get_relation_hits(),
+    )
+    return entity_hits, relation_hits
 
 
 def _dedupe_keywords(keywords: list[str]) -> list[str]:
@@ -3637,10 +3951,9 @@ async def _build_graph_context_debug_data_from_hits(
             available_chunk_tokens,
         )
 
-        temp_chunks = [chunk.copy() for chunk in all_chunks]
         truncated_chunks = await process_chunks_unified(
             query=query,
-            chunks=temp_chunks,
+            chunks=all_chunks,
             query_param=query_param,
             global_config=text_chunks_db.global_config,
             source_type="mixed",
@@ -3651,7 +3964,7 @@ async def _build_graph_context_debug_data_from_hits(
 
         logger.debug(
             "Re-truncated chunks for dynamic token limit: %s -> %s (chunk available tokens: %s)",
-            len(temp_chunks),
+            len(all_chunks),
             len(text_units_context),
             available_chunk_tokens,
         )
@@ -3720,36 +4033,28 @@ async def _build_graph_retrieval_debug_data(
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
 
-    stage_started_at = time.perf_counter()
-    ll_entities_context, ll_relations_context, ll_node_datas, ll_use_relations = (
-        await _get_node_data(
-            ll_keywords_str,
-            knowledge_graph_inst,
-            entities_vdb,
-            query_param,
-        )
-    )
-    _record_stage_timing(
+    (
+        (
+            ll_entities_context,
+            ll_relations_context,
+            ll_node_datas,
+            ll_use_relations,
+        ),
+        (
+            hl_entities_context,
+            hl_relations_context,
+            hl_edge_datas,
+            hl_use_entities,
+        ),
+    ) = await _get_graph_hit_data_concurrently(
+        ll_keywords_str,
+        hl_keywords_str,
+        knowledge_graph_inst,
+        entities_vdb,
+        relationships_vdb,
+        query_param,
         stage_timings,
-        "graph_entity_hits",
-        "图谱命中 / 实体",
-        stage_started_at,
-    )
-
-    stage_started_at = time.perf_counter()
-    hl_entities_context, hl_relations_context, hl_edge_datas, hl_use_entities = (
-        await _get_edge_data(
-            hl_keywords_str,
-            knowledge_graph_inst,
-            relationships_vdb,
-            query_param,
-        )
-    )
-    _record_stage_timing(
-        stage_timings,
-        "graph_relation_hits",
-        "图谱命中 / 关系",
-        stage_started_at,
+        global_config,
     )
 
     graph_entities = process_combine_contexts(
@@ -4501,6 +4806,7 @@ async def _get_vector_context_new(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
+    timing_collector: list[dict[str, Any]] | None = None,
 ) -> list[dict]:
     """
     Retrieve text chunks from the vector database without reranking or truncation.
@@ -4519,7 +4825,13 @@ async def _get_vector_context_new(
     try:
         # Use chunk_top_k if specified, otherwise fall back to top_k
         search_top_k = query_param.chunk_top_k or query_param.top_k
-        results = await chunks_vdb.query(query, top_k=search_top_k, ids=query_param.ids)
+        results = await chunks_vdb.query(
+            query,
+            top_k=search_top_k,
+            ids=query_param.ids,
+            timing_collector=timing_collector,
+            stage_prefix="hybrid_chunk_vector",
+        )
         chunk_weight = {}
         chunk_text = {}
         chunk_file_path = {}
@@ -4626,6 +4938,7 @@ async def _build_query_context(
             knowledge_graph_inst,
             entities_vdb,
             query_param,
+            timing_collector=stage_timings,
         )
         if timing_collector is not None:
             _record_stage_timing(
@@ -4640,6 +4953,7 @@ async def _build_query_context(
             knowledge_graph_inst,
             relationships_vdb,
             query_param,
+            timing_collector=stage_timings,
         )
         if timing_collector is not None:
             _record_stage_timing(
@@ -4894,15 +5208,11 @@ async def _build_query_context(
             f"Token allocation - Total: {max_total_tokens}, History: {history_tokens}, SysPrompt: {sys_prompt_overhead}, KG: {kg_context_tokens}, Buffer: {buffer_tokens}, Available for chunks: {available_chunk_tokens}"
         )
 
-        # Re-process chunks with dynamic token limit
         if all_chunks:
-            # Create a temporary query_param copy with adjusted chunk token limit
-            temp_chunks = [chunk.copy() for chunk in all_chunks]
-
             # Apply token truncation to chunks using the dynamic limit
             truncated_chunks = await process_chunks_unified(
                 query=query,
-                chunks=temp_chunks,
+                chunks=all_chunks,
                 query_param=query_param,
                 global_config=text_chunks_db.global_config,
                 source_type="mixed",
@@ -4914,7 +5224,7 @@ async def _build_query_context(
                 text_units_context.append(_build_chunk_context_entry(i + 1, chunk))
 
             logger.debug(
-                f"Re-truncated chunks for dynamic token limit: {len(temp_chunks)} -> {len(text_units_context)} (chunk available tokens: {available_chunk_tokens})"
+                f"Re-truncated chunks for dynamic token limit: {len(all_chunks)} -> {len(text_units_context)} (chunk available tokens: {available_chunk_tokens})"
             )
     if timing_collector is not None:
         _record_stage_timing(
@@ -4996,6 +5306,8 @@ async def _get_node_data(
     knowledge_graph_inst: BaseGraphStorage,
     entities_vdb: BaseVectorStorage,
     query_param: QueryParam,
+    timing_collector: list[dict[str, Any]] | None = None,
+    vector_results: list[dict[str, Any]] | None = None,
 ):
     query_variants = _build_diversified_retrieval_queries(query)
     # get similar entities
@@ -5007,11 +5319,17 @@ async def _get_node_data(
         entities_vdb.cosine_better_than_threshold,
     )
 
-    results = await _query_vector_storage_diversified(
-        query,
-        entities_vdb,
-        top_k=query_param.top_k,
-        ids=query_param.ids,
+    results = (
+        vector_results
+        if vector_results is not None
+        else await _query_vector_storage_diversified(
+            query,
+            entities_vdb,
+            top_k=query_param.top_k,
+            ids=query_param.ids,
+            timing_collector=timing_collector,
+            stage_prefix="graph_entity_vector",
+        )
     )
     if not len(results):
         return "", "", [], []
@@ -5020,10 +5338,18 @@ async def _get_node_data(
     node_ids = [r["entity_name"] for r in results]
 
     # Call the batch node retrieval and degree functions concurrently.
+    stage_started_at = time.perf_counter()
     nodes_dict, degrees_dict = await asyncio.gather(
         knowledge_graph_inst.get_nodes_batch(node_ids),
         knowledge_graph_inst.node_degrees_batch(node_ids),
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_entity_graph_fetch",
+            "实体图谱属性 / degree 批量读取",
+            stage_started_at,
+        )
 
     # Now, if you need the node data and degree in order:
     node_datas = [nodes_dict.get(nid) for nid in node_ids]
@@ -5048,17 +5374,27 @@ async def _get_node_data(
         if n is not None
     ]
 
+    stage_started_at = time.perf_counter()
     use_relations = await _find_most_related_edges_from_entities(
         node_datas,
         query_param,
         knowledge_graph_inst,
+        timing_collector=timing_collector,
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_entity_edge_expand",
+            "实体一跳关系扩展 / 排序",
+            stage_started_at,
+        )
 
     logger.info(
         f"Local query: {len(node_datas)} entites, {len(use_relations)} relations"
     )
 
     # build prompt
+    stage_started_at = time.perf_counter()
     entities_context = []
     for i, n in enumerate(node_datas):
         created_at = n.get("created_at", "UNKNOWN")
@@ -5100,6 +5436,13 @@ async def _get_node_data(
                 "file_path": file_path,
                 "source_chunk_ids": e.get("source_chunk_ids") or e.get("source_id", ""),
             }
+        )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_entity_context_assembly",
+            "实体命中上下文组装",
+            stage_started_at,
         )
 
     return entities_context, relations_context, node_datas, use_relations
@@ -5192,16 +5535,11 @@ async def _find_most_related_text_unit_from_entities(
                     and c_id in all_one_hop_text_units_lookup[e[1]]
                 )
 
-    # Process in batches tasks at a time to avoid overwhelming resources
-    batch_size = 5
-    results = []
-
-    for i in range(0, len(tasks), batch_size):
-        batch_tasks = tasks[i : i + batch_size]
-        batch_results = await asyncio.gather(
-            *[text_chunks_db.get_by_id(c_id) for c_id in batch_tasks]
-        )
-        results.extend(batch_results)
+    results = (
+        await asyncio.gather(*[text_chunks_db.get_by_id(c_id) for c_id in tasks])
+        if tasks
+        else []
+    )
 
     for c_id, data in zip(tasks, results):
         all_text_units_lookup[c_id]["data"] = data
@@ -5250,10 +5588,20 @@ async def _find_most_related_edges_from_entities(
     node_datas: list[dict],
     query_param: QueryParam,
     knowledge_graph_inst: BaseGraphStorage,
+    timing_collector: list[dict[str, Any]] | None = None,
 ):
     node_names = [dp["entity_name"] for dp in node_datas]
+    stage_started_at = time.perf_counter()
     batch_edges_dict = await knowledge_graph_inst.get_nodes_edges_batch(node_names)
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_entity_neighbor_edges_fetch",
+            "实体邻接边批量读取",
+            stage_started_at,
+        )
 
+    stage_started_at = time.perf_counter()
     all_edges = []
     seen = set()
     node_query_scores = {
@@ -5273,14 +5621,30 @@ async def _find_most_related_edges_from_entities(
     edge_pairs_dicts = [{"src": e[0], "tgt": e[1]} for e in all_edges]
     # For edge degrees, use tuples.
     edge_pairs_tuples = list(all_edges)  # all_edges is already a list of tuples
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_entity_neighbor_edge_collect",
+            "实体邻接边去重收集",
+            stage_started_at,
+        )
 
     # Call the batched functions concurrently.
+    stage_started_at = time.perf_counter()
     edge_data_dict, edge_degrees_dict = await asyncio.gather(
         knowledge_graph_inst.get_edges_batch(edge_pairs_dicts),
         knowledge_graph_inst.edge_degrees_batch(edge_pairs_tuples),
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_entity_neighbor_edge_props_fetch",
+            "实体邻接边属性 / degree 批量读取",
+            stage_started_at,
+        )
 
     # Reconstruct edge_datas list in the same order as the deduplicated results.
+    stage_started_at = time.perf_counter()
     all_edges_data = []
     for pair in all_edges:
         edge_props = edge_data_dict.get(pair)
@@ -5305,6 +5669,13 @@ async def _find_most_related_edges_from_entities(
     all_edges_data = sorted(
         all_edges_data, key=lambda x: (x["rank"], x["weight"]), reverse=True
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_entity_edge_sort",
+            "实体邻接边重排",
+            stage_started_at,
+        )
 
     return all_edges_data
 
@@ -5314,6 +5685,8 @@ async def _get_edge_data(
     knowledge_graph_inst: BaseGraphStorage,
     relationships_vdb: BaseVectorStorage,
     query_param: QueryParam,
+    timing_collector: list[dict[str, Any]] | None = None,
+    vector_results: list[dict[str, Any]] | None = None,
 ):
     query_variants = _build_diversified_retrieval_queries(keywords)
     logger.info(
@@ -5324,11 +5697,17 @@ async def _get_edge_data(
         relationships_vdb.cosine_better_than_threshold,
     )
 
-    results = await _query_vector_storage_diversified(
-        keywords,
-        relationships_vdb,
-        top_k=query_param.top_k,
-        ids=query_param.ids,
+    results = (
+        vector_results
+        if vector_results is not None
+        else await _query_vector_storage_diversified(
+            keywords,
+            relationships_vdb,
+            top_k=query_param.top_k,
+            ids=query_param.ids,
+            timing_collector=timing_collector,
+            stage_prefix="graph_relation_vector",
+        )
     )
 
     if not len(results):
@@ -5341,12 +5720,21 @@ async def _get_edge_data(
     edge_pairs_tuples = [(r["src_id"], r["tgt_id"]) for r in results]
 
     # Call the batched functions concurrently.
+    stage_started_at = time.perf_counter()
     edge_data_dict, edge_degrees_dict = await asyncio.gather(
         knowledge_graph_inst.get_edges_batch(edge_pairs_dicts),
         knowledge_graph_inst.edge_degrees_batch(edge_pairs_tuples),
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_relation_graph_fetch",
+            "关系图谱属性 / degree 批量读取",
+            stage_started_at,
+        )
 
     # Reconstruct edge_datas list in the same order as results.
+    stage_started_at = time.perf_counter()
     edge_datas = []
     for k in results:
         pair = (k["src_id"], k["tgt_id"])
@@ -5376,17 +5764,34 @@ async def _get_edge_data(
     edge_datas = sorted(
         edge_datas, key=lambda x: (x["rank"], x["weight"]), reverse=True
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_relation_edge_sort",
+            "关系命中重排",
+            stage_started_at,
+        )
 
+    stage_started_at = time.perf_counter()
     use_entities = await _find_most_related_entities_from_relationships(
         edge_datas,
         query_param,
         knowledge_graph_inst,
+        timing_collector=timing_collector,
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_relation_entity_expand",
+            "关系端点实体扩展 / 排序",
+            stage_started_at,
+        )
 
     logger.info(
         f"Global query: {len(use_entities)} entites, {len(edge_datas)} relations"
     )
 
+    stage_started_at = time.perf_counter()
     relations_context = []
     for i, e in enumerate(edge_datas):
         created_at = e.get("created_at", "UNKNOWN")
@@ -5430,6 +5835,13 @@ async def _get_edge_data(
                 "source_chunk_ids": n.get("source_chunk_ids") or n.get("source_id", ""),
             }
         )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_relation_context_assembly",
+            "关系命中上下文组装",
+            stage_started_at,
+        )
 
     # Return original data for later text chunk retrieval
     return entities_context, relations_context, edge_datas, use_entities
@@ -5439,7 +5851,9 @@ async def _find_most_related_entities_from_relationships(
     edge_datas: list[dict],
     query_param: QueryParam,
     knowledge_graph_inst: BaseGraphStorage,
+    timing_collector: list[dict[str, Any]] | None = None,
 ):
+    stage_started_at = time.perf_counter()
     entity_names = []
     seen = set()
     entity_query_scores: dict[str, float] = defaultdict(float)
@@ -5465,12 +5879,29 @@ async def _find_most_related_entities_from_relationships(
         entity_relation_support[e["tgt_id"]] += 1
 
     # Batch approach: Retrieve nodes and their degrees concurrently with one query each.
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_relation_endpoint_collect",
+            "关系端点实体收集",
+            stage_started_at,
+        )
+
+    stage_started_at = time.perf_counter()
     nodes_dict, degrees_dict = await asyncio.gather(
         knowledge_graph_inst.get_nodes_batch(entity_names),
         knowledge_graph_inst.node_degrees_batch(entity_names),
     )
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_relation_endpoint_fetch",
+            "关系端点实体属性 / degree 批量读取",
+            stage_started_at,
+        )
 
     # Rebuild the list in the same order as entity_names
+    stage_started_at = time.perf_counter()
     node_datas = []
     for entity_name in entity_names:
         node = nodes_dict.get(entity_name)
@@ -5487,6 +5918,13 @@ async def _find_most_related_entities_from_relationships(
             "relation_support": entity_relation_support.get(entity_name, 0),
         }
         node_datas.append(combined)
+    if timing_collector is not None:
+        _record_stage_timing(
+            timing_collector,
+            "graph_relation_endpoint_assembly",
+            "关系端点实体结果组装",
+            stage_started_at,
+        )
 
     return node_datas
 
@@ -5672,38 +6110,94 @@ async def _build_hybrid_retrieval_debug_data(
 ) -> dict[str, Any]:
     stage_timings: list[dict[str, Any]] = []
     retrieval_total_started_at = time.perf_counter()
-    stage_started_at = time.perf_counter()
-    with model_usage_stage("vector_retrieval", "混合召回 / Chunk 向量检索"):
-        vector_weights, vector_texts, vector_file_paths, vector_metadata_map = await _get_vector_context_new(
-            query, chunks_vdb, query_param
-        )
-    _record_stage_timing(
-        stage_timings,
-        "vector_retrieval",
-        "混合召回 / Chunk 向量检索",
-        stage_started_at,
-    )
 
-    stage_started_at = time.perf_counter()
-    with model_usage_stage("keyword_extraction", "关键词提取"):
-        hl_keywords, ll_keywords = await get_keywords_from_query(
-            query, query_param, global_config, hashing_kv
-        )
-        if not _llm_keyword_extraction_allowed(query_param):
-            hl_keywords, ll_keywords = await _refresh_no_llm_keywords_from_vector_context(
-                query_param,
-                vector_weights=vector_weights,
-                vector_texts=vector_texts,
-                vector_file_paths=vector_file_paths,
-                vector_metadata_map=vector_metadata_map,
-                global_config=global_config,
+    async def _retrieve_vector_context():
+        stage_started_at = time.perf_counter()
+        with model_usage_stage("vector_retrieval", "混合召回 / Chunk 向量检索"):
+            try:
+                vector_context_parameters = inspect.signature(
+                    _get_vector_context_new
+                ).parameters
+            except (TypeError, ValueError):
+                vector_context_parameters = {}
+            accepts_timing = "timing_collector" in vector_context_parameters or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in vector_context_parameters.values()
             )
-    _record_stage_timing(
-        stage_timings,
-        "keyword_extraction",
-        "关键词提取",
-        stage_started_at,
-    )
+            if accepts_timing:
+                result = await _get_vector_context_new(
+                    query,
+                    chunks_vdb,
+                    query_param,
+                    timing_collector=stage_timings,
+                )
+            else:
+                result = await _get_vector_context_new(
+                    query,
+                    chunks_vdb,
+                    query_param,
+                )
+        _record_stage_timing(
+            stage_timings,
+            "vector_retrieval",
+            "混合召回 / Chunk 向量检索",
+            stage_started_at,
+        )
+        return result
+
+    async def _extract_keywords(
+        vector_context: tuple[
+            dict[str, float],
+            dict[str, str],
+            dict[str, str],
+            dict[str, dict[str, Any]],
+        ] | None = None,
+    ):
+        stage_started_at = time.perf_counter()
+        with model_usage_stage("keyword_extraction", "关键词提取"):
+            hl_keywords, ll_keywords = await get_keywords_from_query(
+                query, query_param, global_config, hashing_kv
+            )
+            if not _llm_keyword_extraction_allowed(query_param):
+                if vector_context is None:
+                    vector_context = ({}, {}, {}, {})
+                (
+                    vector_weights,
+                    vector_texts,
+                    vector_file_paths,
+                    vector_metadata_map,
+                ) = vector_context
+                hl_keywords, ll_keywords = await _refresh_no_llm_keywords_from_vector_context(
+                    query_param,
+                    vector_weights=vector_weights,
+                    vector_texts=vector_texts,
+                    vector_file_paths=vector_file_paths,
+                    vector_metadata_map=vector_metadata_map,
+                    global_config=global_config,
+                )
+        _record_stage_timing(
+            stage_timings,
+            "keyword_extraction",
+            "关键词提取",
+            stage_started_at,
+        )
+        return hl_keywords, ll_keywords
+
+    if _llm_keyword_extraction_allowed(query_param):
+        (
+            (vector_weights, vector_texts, vector_file_paths, vector_metadata_map),
+            (hl_keywords, ll_keywords),
+        ) = await asyncio.gather(
+            _retrieve_vector_context(),
+            _extract_keywords(),
+        )
+    else:
+        vector_weights, vector_texts, vector_file_paths, vector_metadata_map = (
+            await _retrieve_vector_context()
+        )
+        hl_keywords, ll_keywords = await _extract_keywords(
+            (vector_weights, vector_texts, vector_file_paths, vector_metadata_map)
+        )
 
     logger.debug(f"High-level keywords: {hl_keywords}")
     logger.debug(f"Low-level  keywords: {ll_keywords}")
@@ -5711,43 +6205,28 @@ async def _build_hybrid_retrieval_debug_data(
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
 
-    stage_started_at = time.perf_counter()
-    with model_usage_stage("graph_entity_hits", "图谱命中 / 实体"):
+    (
         (
             ll_entities_context,
             ll_relations_context,
             ll_node_datas,
             ll_use_relations,
-        ) = await _get_node_data(
-            ll_keywords_str,
-            knowledge_graph_inst,
-            entities_vdb,
-            query_param,
-        )
-    _record_stage_timing(
-        stage_timings,
-        "graph_entity_hits",
-        "图谱命中 / 实体",
-        stage_started_at,
-    )
-    stage_started_at = time.perf_counter()
-    with model_usage_stage("graph_relation_hits", "图谱命中 / 关系"):
+        ),
         (
             hl_entities_context,
             hl_relations_context,
             hl_edge_datas,
             hl_use_entities,
-        ) = await _get_edge_data(
-            hl_keywords_str,
-            knowledge_graph_inst,
-            relationships_vdb,
-            query_param,
-        )
-    _record_stage_timing(
+        ),
+    ) = await _get_graph_hit_data_concurrently(
+        ll_keywords_str,
+        hl_keywords_str,
+        knowledge_graph_inst,
+        entities_vdb,
+        relationships_vdb,
+        query_param,
         stage_timings,
-        "graph_relation_hits",
-        "图谱命中 / 关系",
-        stage_started_at,
+        global_config,
     )
 
     graph_entities = process_combine_contexts(
@@ -5892,9 +6371,13 @@ async def _build_hybrid_retrieval_debug_data(
     rerank_used = False
     rerank_skip_reason = None
     rerank_model = os.getenv("RERANK_MODEL")
+    rerank_disabled_for_retrieval_only = _retrieval_only_rerank_disabled(
+        query_param,
+        global_config,
+    )
     stage_started_at = time.perf_counter()
     with model_usage_stage("rerank", "Rerank 重排"):
-        if results_text and query_param.enable_rerank:
+        if results_text and query_param.enable_rerank and not rerank_disabled_for_retrieval_only:
             if _has_complete_rerank_env_config():
                 try:
                     rerank_results = await rerank_from_env(
@@ -5928,7 +6411,11 @@ async def _build_hybrid_retrieval_debug_data(
                 )
                 rerank_results = [{"index": index} for index in range(len(results_text))]
         elif results_text:
-            rerank_skip_reason = "enable_rerank=false"
+            rerank_skip_reason = (
+                "retrieval_only_rerank_disabled"
+                if rerank_disabled_for_retrieval_only
+                else "enable_rerank=false"
+            )
             rerank_results = [{"index": index} for index in range(len(results_text))]
     _record_stage_timing(
         stage_timings,
@@ -6715,7 +7202,16 @@ async def process_chunks_unified(
     )
 
     # 2. Apply reranking if enabled and query is provided
-    if query_param.enable_rerank and query and unique_chunks:
+    rerank_disabled_for_retrieval_only = _retrieval_only_rerank_disabled(
+        query_param,
+        global_config,
+    )
+    if (
+        query_param.enable_rerank
+        and not rerank_disabled_for_retrieval_only
+        and query
+        and unique_chunks
+    ):
         rerank_top_k = query_param.chunk_top_k or len(unique_chunks)
         unique_chunks = await apply_rerank_if_enabled(
             query=query,

@@ -207,20 +207,45 @@ class NanoVectorDBStorage(BaseVectorStorage):
 
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
+        prefix = stage_prefix or self.namespace
         # Execute embedding outside of lock to avoid improve cocurrent
+        stage_started_at = time.perf_counter()
         embedding = await self.embedding_func(
             [query], _priority=5
         )  # higher priority for query
         embedding = embedding[0]
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_embedding",
+                    "label": f"{self.namespace} query embedding",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                }
+            )
 
+        stage_started_at = time.perf_counter()
         client = await self._get_client()
         results = client.query(
             query=embedding,
             top_k=top_k,
             better_than_threshold=self.cosine_better_than_threshold,
         )
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_index_search",
+                    "label": f"{self.namespace} vector index search",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                }
+            )
         results = [
             {
                 **dp,
@@ -231,6 +256,83 @@ class NanoVectorDBStorage(BaseVectorStorage):
             for dp in results
         ]
         return results
+
+    async def query_many(
+        self,
+        queries: list[str],
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        query_list = [str(query) for query in queries]
+        if not query_list:
+            return []
+
+        prefix = stage_prefix or self.namespace
+        stage_started_at = time.perf_counter()
+        embeddings = await self.embedding_func(query_list, _priority=5)
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_embedding",
+                    "label": f"{self.namespace} batch query embedding",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                    "query_count": len(query_list),
+                }
+            )
+
+        return await self.query_many_by_embeddings(
+            embeddings,
+            top_k=top_k,
+            ids=ids,
+            timing_collector=timing_collector,
+            stage_prefix=stage_prefix,
+        )
+
+    async def query_many_by_embeddings(
+        self,
+        embeddings: Any,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        prefix = stage_prefix or self.namespace
+        if len(embeddings) == 0:
+            return []
+        client = await self._get_client()
+        stage_started_at = time.perf_counter()
+        result_sets: list[list[dict[str, Any]]] = []
+        for embedding in embeddings:
+            raw_results = client.query(
+                query=embedding,
+                top_k=top_k,
+                better_than_threshold=self.cosine_better_than_threshold,
+            )
+            result_sets.append(
+                [
+                    {
+                        **dp,
+                        "id": dp["__id__"],
+                        "distance": dp["__metrics__"],
+                        "created_at": dp.get("__created_at__"),
+                    }
+                    for dp in raw_results
+                ]
+            )
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_index_search",
+                    "label": f"{self.namespace} batch vector index search",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                    "query_count": len(result_sets),
+                }
+            )
+        return result_sets
 
     @property
     async def client_storage(self):

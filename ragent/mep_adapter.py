@@ -942,6 +942,16 @@ def normalize_mep_request(req_data: Any) -> NormalizedMepRequest:
         include_trace=bool(include_trace) or retrieval_only_enabled,
         retrieval_only=retrieval_only_enabled,
         only_need_context=bool(only_need_context) or retrieval_only_enabled,
+        disable_rerank_for_retrieval_only=_parse_optional_bool(
+            _first_with_fallback(
+                data,
+                process_spec,
+                source_json,
+                "disable_rerank_for_retrieval_only",
+                "disableRerankForRetrievalOnly",
+            ),
+            field_name="disable_rerank_for_retrieval_only",
+        ),
         high_level_keywords=_parse_string_list(
             _first_with_fallback(
                 data,
@@ -1032,6 +1042,10 @@ def build_result_payload(
                 "only_need_context",
                 request.inference_request.only_need_context or retrieval_only,
             )
+        ),
+        "disable_rerank_for_retrieval_only": result.get(
+            "disable_rerank_for_retrieval_only",
+            request.inference_request.disable_rerank_for_retrieval_only,
         ),
         "answer": str(result.get("answer") or ""),
         "referenced_file_paths": list(result.get("referenced_file_paths") or []),

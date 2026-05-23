@@ -34,6 +34,7 @@ class BenchmarkQueryRequest(BaseModel):
     include_trace: bool = False
     retrieval_only: bool = False
     only_need_context: bool = False
+    disable_rerank_for_retrieval_only: bool | None = None
     response_type: str = "Multiple Paragraphs"
     conversation_history: list[dict[str, str]] = Field(default_factory=list)
     history_turns: int | None = None
@@ -229,6 +230,7 @@ def _response_payload(
         "include_trace": request.include_trace,
         "retrieval_only": request.retrieval_only,
         "only_need_context": request.only_need_context or request.retrieval_only,
+        "disable_rerank_for_retrieval_only": request.disable_rerank_for_retrieval_only,
         "answer": result.get("answer", ""),
         "retrieval_result": result.get("retrieval_result"),
         "referenced_file_paths": referenced_file_paths,
@@ -300,6 +302,7 @@ def create_app() -> FastAPI:
                 response_type=request.response_type,
                 retrieval_only=request.retrieval_only,
                 only_need_context=request.only_need_context or request.retrieval_only,
+                disable_rerank_for_retrieval_only=request.disable_rerank_for_retrieval_only,
             )
             session.query_count += 1
 

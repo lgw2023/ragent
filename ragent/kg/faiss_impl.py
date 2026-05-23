@@ -240,21 +240,46 @@ class FaissVectorDBStorage(BaseVectorStorage):
         return [m["__id__"] for m in list_data]
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search by a textual query; returns top_k results with their metadata + similarity distance.
         """
+        prefix = stage_prefix or self.namespace
+        stage_started_at = time.perf_counter()
         embedding = await self.embedding_func(
             [query], _priority=5
         )  # higher priority for query
         # embedding is shape (1, dim)
         embedding = np.array(embedding, dtype=np.float32)
         faiss.normalize_L2(embedding)  # we do in-place normalization
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_embedding",
+                    "label": f"{self.namespace} query embedding",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                }
+            )
 
         # Perform the similarity search
+        stage_started_at = time.perf_counter()
         index = await self._get_index()
         distances, indices = index.search(embedding, top_k)
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_index_search",
+                    "label": f"{self.namespace} vector index search",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                }
+            )
 
         distances = distances[0]
         indices = indices[0]
@@ -280,6 +305,91 @@ class FaissVectorDBStorage(BaseVectorStorage):
             )
 
         return results
+
+    async def query_many(
+        self,
+        queries: list[str],
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        """
+        Search multiple textual queries with one embedding request and one Faiss search call.
+        """
+        query_list = [str(query) for query in queries]
+        if not query_list:
+            return []
+
+        prefix = stage_prefix or self.namespace
+        stage_started_at = time.perf_counter()
+        embeddings = await self.embedding_func(query_list, _priority=5)
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_embedding",
+                    "label": f"{self.namespace} batch query embedding",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                    "query_count": len(query_list),
+                }
+            )
+
+        return await self.query_many_by_embeddings(
+            embeddings,
+            top_k=top_k,
+            ids=ids,
+            timing_collector=timing_collector,
+            stage_prefix=stage_prefix,
+        )
+
+    async def query_many_by_embeddings(
+        self,
+        embeddings: Any,
+        top_k: int,
+        ids: list[str] | None = None,
+        *,
+        timing_collector: list[dict[str, Any]] | None = None,
+        stage_prefix: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        prefix = stage_prefix or self.namespace
+        embeddings = np.array(embeddings, dtype=np.float32)
+        if embeddings.size == 0:
+            return []
+        faiss.normalize_L2(embeddings)
+        stage_started_at = time.perf_counter()
+        index = await self._get_index()
+        distances, indices = index.search(embeddings, top_k)
+        if timing_collector is not None:
+            timing_collector.append(
+                {
+                    "stage": f"{prefix}_index_search",
+                    "label": f"{self.namespace} batch vector index search",
+                    "seconds": round(max(time.perf_counter() - stage_started_at, 0.0), 3),
+                    "query_count": len(embeddings),
+                }
+            )
+
+        result_sets: list[list[dict[str, Any]]] = []
+        for row_distances, row_indices in zip(distances, indices):
+            results: list[dict[str, Any]] = []
+            for dist, idx in zip(row_distances, row_indices):
+                if idx == -1:
+                    continue
+                if dist < self.cosine_better_than_threshold:
+                    continue
+                meta = self._id_to_meta.get(idx, {})
+                results.append(
+                    {
+                        **meta,
+                        "id": meta.get("__id__"),
+                        "distance": float(dist),
+                        "created_at": meta.get("__created_at__"),
+                    }
+                )
+            result_sets.append(results)
+
+        return result_sets
 
     @property
     def client_storage(self):

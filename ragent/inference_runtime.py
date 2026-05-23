@@ -114,6 +114,7 @@ class InferenceRequest:
     include_trace: bool = False
     retrieval_only: bool = False
     only_need_context: bool = False
+    disable_rerank_for_retrieval_only: bool | None = None
     high_level_keywords: list[str] = field(default_factory=list)
     low_level_keywords: list[str] = field(default_factory=list)
 
@@ -704,6 +705,7 @@ async def _run_one_hop_with_rag(
     only_need_context: bool = False,
     high_level_keywords: list[str] | None = None,
     low_level_keywords: list[str] | None = None,
+    disable_rerank_for_retrieval_only: bool | None = None,
 ) -> dict[str, Any]:
     query_param = QueryParam(mode=mode)
     context_only = retrieval_only or only_need_context
@@ -714,6 +716,10 @@ async def _run_one_hop_with_rag(
     )
     if enable_rerank is not None:
         query_param.enable_rerank = enable_rerank
+    if disable_rerank_for_retrieval_only is not None:
+        query_param.disable_rerank_for_retrieval_only = (
+            disable_rerank_for_retrieval_only
+        )
     if response_type:
         query_param.response_type = response_type
     if high_level_keywords:
@@ -1646,6 +1652,9 @@ async def execute_inference_request(
             only_need_context=request.only_need_context or retrieval_only,
             high_level_keywords=request.high_level_keywords,
             low_level_keywords=request.low_level_keywords,
+            disable_rerank_for_retrieval_only=(
+                request.disable_rerank_for_retrieval_only
+            ),
         )
         payload = {
             **result,
@@ -1660,6 +1669,9 @@ async def execute_inference_request(
             "response_type": request.response_type,
             "retrieval_only": retrieval_only,
             "only_need_context": request.only_need_context or retrieval_only,
+            "disable_rerank_for_retrieval_only": (
+                request.disable_rerank_for_retrieval_only
+            ),
         }
         if retrieval_only and request.query_type == "multihop":
             payload["retrieval_only_degraded_from"] = "multihop"

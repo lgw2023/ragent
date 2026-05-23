@@ -113,9 +113,25 @@ class NetworkXStorage(BaseGraphStorage):
         graph = await self._get_graph()
         return graph.nodes.get(node_id)
 
+    async def get_nodes_batch(self, node_ids: list[str]) -> dict[str, dict]:
+        graph = await self._get_graph()
+        result = {}
+        for node_id in node_ids:
+            node = graph.nodes.get(node_id)
+            if node is not None:
+                result[node_id] = node
+        return result
+
     async def node_degree(self, node_id: str) -> int:
         graph = await self._get_graph()
         return graph.degree(node_id)
+
+    async def node_degrees_batch(self, node_ids: list[str]) -> dict[str, int]:
+        graph = await self._get_graph()
+        return {
+            node_id: graph.degree(node_id) if graph.has_node(node_id) else 0
+            for node_id in node_ids
+        }
 
     async def edge_degree(self, src_id: str, tgt_id: str) -> int:
         graph = await self._get_graph()
@@ -123,17 +139,53 @@ class NetworkXStorage(BaseGraphStorage):
         tgt_degree = graph.degree(tgt_id) if graph.has_node(tgt_id) else 0
         return src_degree + tgt_degree
 
+    async def edge_degrees_batch(
+        self,
+        edge_pairs: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], int]:
+        graph = await self._get_graph()
+        result = {}
+        for src_id, tgt_id in edge_pairs:
+            src_degree = graph.degree(src_id) if graph.has_node(src_id) else 0
+            tgt_degree = graph.degree(tgt_id) if graph.has_node(tgt_id) else 0
+            result[(src_id, tgt_id)] = src_degree + tgt_degree
+        return result
+
     async def get_edge(
         self, source_node_id: str, target_node_id: str
     ) -> dict[str, str] | None:
         graph = await self._get_graph()
         return graph.edges.get((source_node_id, target_node_id))
 
+    async def get_edges_batch(
+        self,
+        pairs: list[dict[str, str]],
+    ) -> dict[tuple[str, str], dict]:
+        graph = await self._get_graph()
+        result = {}
+        for pair in pairs:
+            src_id = pair["src"]
+            tgt_id = pair["tgt"]
+            edge = graph.edges.get((src_id, tgt_id))
+            if edge is not None:
+                result[(src_id, tgt_id)] = edge
+        return result
+
     async def get_node_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
         graph = await self._get_graph()
         if graph.has_node(source_node_id):
             return list(graph.edges(source_node_id))
         return None
+
+    async def get_nodes_edges_batch(
+        self,
+        node_ids: list[str],
+    ) -> dict[str, list[tuple[str, str]]]:
+        graph = await self._get_graph()
+        return {
+            node_id: list(graph.edges(node_id)) if graph.has_node(node_id) else []
+            for node_id in node_ids
+        }
 
     async def upsert_node(self, node_id: str, node_data: dict[str, str]) -> None:
         """
