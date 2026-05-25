@@ -13,6 +13,7 @@ from ragent.utils import logger
 
 
 _QUERY_CACHE_MANAGED_MODES = {"graph", "hybrid"}
+_KEYWORD_CANDIDATE_CACHE_TYPE = "keyword_candidate"
 
 
 @final
@@ -98,10 +99,28 @@ class SQLiteQueryCacheStorage(BaseKVStorage):
         except (TypeError, ValueError):
             return 0
 
+    def _cache_ttl_seconds(self, cache_type: str) -> int:
+        if cache_type == _KEYWORD_CANDIDATE_CACHE_TYPE:
+            try:
+                return max(
+                    0, int(self.global_config.get("keyword_cache_ttl_seconds") or 0)
+                )
+            except (TypeError, ValueError):
+                return 0
+        return self._query_cache_ttl_seconds()
+
     def _query_cache_max_entries(self) -> int:
         try:
             return max(
                 0, int(self.global_config.get("query_cache_max_entries") or 0)
+            )
+        except (TypeError, ValueError):
+            return 0
+
+    def _keyword_cache_max_entries(self) -> int:
+        try:
+            return max(
+                0, int(self.global_config.get("keyword_cache_max_entries") or 0)
             )
         except (TypeError, ValueError):
             return 0
@@ -148,7 +167,7 @@ class SQLiteQueryCacheStorage(BaseKVStorage):
                     0, int(entry.get("_query_cache_access_count") or 0)
                 )
 
-            ttl_seconds = self._query_cache_ttl_seconds()
+            ttl_seconds = self._cache_ttl_seconds(cache_type)
             if ttl_seconds > 0:
                 expires_at = created_at + ttl_seconds
 
@@ -379,6 +398,39 @@ class SQLiteQueryCacheStorage(BaseKVStorage):
             )
 
         max_entries = self._query_cache_max_entries()
+        keyword_max_entries = self._keyword_cache_max_entries()
+        if keyword_max_entries > 0:
+            count_row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM query_cache_entries
+                WHERE is_query_cache = 1
+                  AND cache_type = ?
+                """,
+                (_KEYWORD_CANDIDATE_CACHE_TYPE,),
+            ).fetchone()
+            current_count = int(count_row["count"]) if count_row is not None else 0
+            overflow = current_count - keyword_max_entries
+            if overflow > 0:
+                rows = conn.execute(
+                    """
+                    SELECT key
+                    FROM query_cache_entries
+                    WHERE is_query_cache = 1
+                      AND cache_type = ?
+                    ORDER BY last_accessed_at ASC, created_at ASC, key ASC
+                    LIMIT ?
+                    """,
+                    (_KEYWORD_CANDIDATE_CACHE_TYPE, overflow),
+                ).fetchall()
+                keys_to_delete = [str(row["key"]) for row in rows]
+                if keys_to_delete:
+                    placeholders = ",".join("?" for _ in keys_to_delete)
+                    conn.execute(
+                        f"DELETE FROM query_cache_entries WHERE key IN ({placeholders})",
+                        tuple(keys_to_delete),
+                    )
+
         if max_entries > 0:
             count_row = conn.execute(
                 """

@@ -11,7 +11,7 @@ from ragent.runtime_env import should_skip_dotenv
 
 
 MANAGED_QUERY_MODES = ("graph", "hybrid")
-QUERY_CACHE_TYPES = ("answer", "retrieval", "render", "prompt")
+QUERY_CACHE_TYPES = ("answer", "retrieval", "render", "prompt", "keyword_candidate")
 SQLITE_CACHE_CORRUPTION_MARKERS = (
     "malformed",
     "not a database",
@@ -22,6 +22,7 @@ CACHE_HIT_STAGES = frozenset(
         "retrieval_cache_hit",
         "render_cache_hit",
         "prompt_cache_hit",
+        "keyword_candidate_cache_hit",
     }
 )
 BENCHMARK_SCENARIO_DESCRIPTIONS = {

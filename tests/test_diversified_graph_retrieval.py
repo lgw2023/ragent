@@ -68,6 +68,18 @@ class _BatchFakeVectorStorage(_FakeVectorStorage):
         return [list(self._responses.get(query, [])) for query in queries]
 
 
+class _FakeKeywordCacheKV:
+    def __init__(self, global_config):
+        self.global_config = global_config
+        self.store = {}
+
+    async def get_by_id(self, key):
+        return self.store.get(key)
+
+    async def upsert(self, data):
+        self.store.update(data)
+
+
 class _SharedEmbeddingFunc:
     def __init__(self):
         self.calls = []
@@ -415,6 +427,164 @@ class DiversifiedGraphRetrievalTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([item["entity_name"] for item in results], ["含糖饮料"])
         self.assertEqual(timings, [])
+
+    async def test_keyword_candidate_cache_reuses_warm_variant_results(self):
+        config = {
+            "enable_llm_cache": True,
+            "keyword_cache_enabled": True,
+            "keyword_cache_read_enabled": True,
+            "keyword_cache_write_enabled": True,
+            "keyword_cache_top_k": 20,
+            "corpus_revision": 3,
+            "index_digest": "idx",
+            "vector_db_storage_cls_kwargs": {},
+        }
+        cache = _FakeKeywordCacheKV(config)
+        storage = _FakeVectorStorage(
+            {
+                "A, B": [{"entity_name": "AB", "distance": 0.9}],
+                "A": [{"entity_name": "A", "distance": 0.8}],
+                "B": [{"entity_name": "B", "distance": 0.7}],
+            }
+        )
+
+        first = await _query_vector_storage_diversified(
+            "A, B",
+            storage,
+            top_k=3,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=config,
+            hashing_kv=cache,
+        )
+        first_names = [item["entity_name"] for item in first]
+        self.assertEqual(sorted(first_names), ["A", "AB", "B"])
+        self.assertEqual(
+            [query for query, _, _ in storage.calls],
+            ["A, B", "A", "B"],
+        )
+
+        storage.calls.clear()
+        storage._responses = {}
+        timings = []
+        second = await _query_vector_storage_diversified(
+            "A, B",
+            storage,
+            top_k=3,
+            timing_collector=timings,
+            stage_prefix="unit_vector",
+            query_param=QueryParam(mode="hybrid"),
+            global_config=config,
+            hashing_kv=cache,
+        )
+
+        self.assertEqual([item["entity_name"] for item in second], first_names)
+        self.assertEqual(storage.calls, [])
+        self.assertIn(
+            "keyword_candidate_cache_hit",
+            [item["stage"] for item in timings],
+        )
+
+    async def test_keyword_candidate_cache_fetches_top20_and_serves_smaller_top_k(self):
+        config = {
+            "enable_llm_cache": True,
+            "keyword_cache_enabled": True,
+            "keyword_cache_read_enabled": True,
+            "keyword_cache_write_enabled": True,
+            "keyword_cache_top_k": 20,
+            "corpus_revision": 3,
+            "index_digest": "idx",
+            "vector_db_storage_cls_kwargs": {},
+        }
+        cache = _FakeKeywordCacheKV(config)
+        storage = _FakeVectorStorage(
+            {
+                "A": [
+                    {"entity_name": f"A{i}", "distance": 1.0 - i * 0.01}
+                    for i in range(20)
+                ]
+            }
+        )
+
+        first = await _query_vector_storage_diversified(
+            "A",
+            storage,
+            top_k=10,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=config,
+            hashing_kv=cache,
+        )
+        self.assertEqual(len(first), 10)
+        self.assertEqual(storage.calls, [("A", 20, None)])
+
+        storage.calls.clear()
+        storage._responses = {}
+        second = await _query_vector_storage_diversified(
+            "A",
+            storage,
+            top_k=5,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=config,
+            hashing_kv=cache,
+        )
+
+        self.assertEqual(
+            [item["entity_name"] for item in second],
+            [f"A{i}" for i in range(5)],
+        )
+        self.assertEqual(storage.calls, [])
+
+    async def test_keyword_candidate_cache_respects_read_and_write_switches(self):
+        base_config = {
+            "enable_llm_cache": True,
+            "keyword_cache_enabled": True,
+            "keyword_cache_read_enabled": True,
+            "keyword_cache_write_enabled": False,
+            "keyword_cache_top_k": 20,
+            "corpus_revision": 3,
+            "index_digest": "idx",
+            "vector_db_storage_cls_kwargs": {},
+        }
+        cache = _FakeKeywordCacheKV(base_config)
+        storage = _FakeVectorStorage(
+            {"A": [{"entity_name": "A", "distance": 0.9}]}
+        )
+
+        await _query_vector_storage_diversified(
+            "A",
+            storage,
+            top_k=1,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=base_config,
+            hashing_kv=cache,
+        )
+        self.assertEqual(cache.store, {})
+
+        write_config = dict(base_config)
+        write_config["keyword_cache_write_enabled"] = True
+        cache.global_config = write_config
+        await _query_vector_storage_diversified(
+            "A",
+            storage,
+            top_k=1,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=write_config,
+            hashing_kv=cache,
+        )
+        self.assertTrue(cache.store)
+
+        storage.calls.clear()
+        read_off_config = dict(write_config)
+        read_off_config["keyword_cache_read_enabled"] = False
+        cache.global_config = read_off_config
+        await _query_vector_storage_diversified(
+            "A",
+            storage,
+            top_k=1,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=read_off_config,
+            hashing_kv=cache,
+        )
+        self.assertEqual(storage.calls, [("A", 20, None)])
 
 
 if __name__ == "__main__":

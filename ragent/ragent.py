@@ -31,6 +31,7 @@ from ragent.constants import (
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_COSINE_THRESHOLD,
     DEFAULT_RELATED_CHUNK_NUMBER,
+    DEFAULT_KEYWORD_CACHE_TOP_K,
 )
 from ragent.utils import (
     format_exception_brief,
@@ -465,6 +466,44 @@ class Ragent:
         default=get_env_value("QUERY_CACHE_BACKEND", "sqlite", str)
     )
     """Query cache backend. Only "sqlite" is supported."""
+
+    keyword_cache_enabled: bool = field(
+        default=get_env_value("RAG_KEYWORD_CACHE_ENABLED", False, bool)
+    )
+    """Enable keyword-level candidate caching for graph/vector retrieval variants."""
+
+    keyword_cache_read_enabled: bool = field(
+        default=get_env_value("RAG_KEYWORD_CACHE_READ_ENABLED", True, bool)
+    )
+    """If keyword cache is enabled, allow reading existing keyword candidate entries."""
+
+    keyword_cache_write_enabled: bool = field(
+        default=get_env_value("RAG_KEYWORD_CACHE_WRITE_ENABLED", True, bool)
+    )
+    """If keyword cache is enabled, allow writing keyword candidate entries."""
+
+    keyword_cache_top_k: int = field(
+        default=get_env_value(
+            "RAG_KEYWORD_CACHE_TOP_K",
+            DEFAULT_KEYWORD_CACHE_TOP_K,
+            int,
+        )
+    )
+    """Number of candidate records stored per normalized keyword."""
+
+    keyword_cache_ttl_seconds: int = field(
+        default=get_env_value(
+            "RAG_KEYWORD_CACHE_TTL_SECONDS",
+            get_env_value("QUERY_CACHE_TTL_SECONDS", 0, int),
+            int,
+        )
+    )
+    """Absolute TTL for keyword candidate cache entries in seconds. 0 disables TTL."""
+
+    keyword_cache_max_entries: int = field(
+        default=get_env_value("RAG_KEYWORD_CACHE_MAX_ENTRIES", 0, int)
+    )
+    """Maximum managed keyword candidate cache entries. 0 disables keyword-only LRU pruning."""
 
     corpus_revision: int = field(default=0)
     """Monotonic index revision included in query cache fingerprints."""

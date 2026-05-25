@@ -154,6 +154,18 @@ class QueryParam:
     If None, inherits the global setting from `RAG_ANSWER_PROMPT_MODE`.
     """
 
+    keyword_cache_enabled: bool | None = None
+    """Optional per-query override for keyword candidate cache usage."""
+
+    keyword_cache_read_enabled: bool | None = None
+    """Optional per-query override for reading keyword candidate cache entries."""
+
+    keyword_cache_write_enabled: bool | None = None
+    """Optional per-query override for writing keyword candidate cache entries."""
+
+    keyword_cache_top_k: int | None = None
+    """Number of candidate records stored per normalized keyword when keyword cache is enabled."""
+
 
 @dataclass
 class StorageNameSpace(ABC):

@@ -49,6 +49,7 @@ from .constants import (
     DEFAULT_MAX_RELATION_TOKENS,
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_RELATED_CHUNK_NUMBER,
+    DEFAULT_KEYWORD_CACHE_TOP_K,
 )
 from .portable_paths import make_portable_file_path, normalize_portable_file_paths
 from .kg.shared_storage import get_storage_keyed_lock
@@ -142,9 +143,11 @@ def _resolve_answer_prompt_mode(
 
 _QUERY_CACHE_SCHEMA_VERSION = 2
 _QUERY_CACHE_TYPE_KEYWORDS = "keywords"
+_QUERY_CACHE_TYPE_KEYWORD_CANDIDATE = "keyword_candidate"
 _QUERY_CACHE_TYPE_RETRIEVAL = "retrieval"
 _QUERY_CACHE_TYPE_RENDER = "render"
 _QUERY_CACHE_TYPE_ANSWER = "answer"
+_KEYWORD_CANDIDATE_CACHE_SCHEMA_VERSION = 1
 _QUERY_RESULT_KIND_RETRIEVAL = "retrieval"
 _QUERY_RESULT_KIND_CONTEXT = "context"
 _QUERY_RESULT_KIND_PROMPT = "prompt"
@@ -272,6 +275,338 @@ def _collect_dependency_chunk_ids(
 def _query_cache_enabled(hashing_kv: BaseKVStorage | None) -> bool:
     return bool(
         hashing_kv is not None and hashing_kv.global_config.get("enable_llm_cache")
+    )
+
+
+def _resolve_query_param_or_global_bool(
+    query_param: QueryParam | None,
+    global_config: dict[str, Any] | None,
+    field_name: str,
+    default: bool,
+) -> bool:
+    query_value = (
+        getattr(query_param, field_name, None) if query_param is not None else None
+    )
+    if query_value is not None:
+        return bool(query_value)
+    if global_config is not None and field_name in global_config:
+        return bool(global_config.get(field_name))
+    return default
+
+
+def _resolve_keyword_candidate_cache_top_k(
+    query_param: QueryParam | None,
+    global_config: dict[str, Any] | None,
+) -> int:
+    raw_value = (
+        getattr(query_param, "keyword_cache_top_k", None)
+        if query_param is not None
+        else None
+    )
+    if raw_value is None and global_config is not None:
+        raw_value = global_config.get("keyword_cache_top_k")
+    try:
+        return max(1, int(raw_value or DEFAULT_KEYWORD_CACHE_TOP_K))
+    except (TypeError, ValueError):
+        return DEFAULT_KEYWORD_CACHE_TOP_K
+
+
+def _keyword_candidate_cache_enabled(
+    hashing_kv: BaseKVStorage | None,
+    query_param: QueryParam | None,
+    global_config: dict[str, Any] | None,
+) -> bool:
+    return bool(
+        _query_cache_enabled(hashing_kv)
+        and query_param is not None
+        and global_config is not None
+        and _resolve_query_param_or_global_bool(
+            query_param,
+            global_config,
+            "keyword_cache_enabled",
+            False,
+        )
+    )
+
+
+def _keyword_candidate_cache_read_enabled(
+    hashing_kv: BaseKVStorage | None,
+    query_param: QueryParam | None,
+    global_config: dict[str, Any] | None,
+) -> bool:
+    return bool(
+        _keyword_candidate_cache_enabled(hashing_kv, query_param, global_config)
+        and _resolve_query_param_or_global_bool(
+            query_param,
+            global_config,
+            "keyword_cache_read_enabled",
+            True,
+        )
+    )
+
+
+def _keyword_candidate_cache_write_enabled(
+    hashing_kv: BaseKVStorage | None,
+    query_param: QueryParam | None,
+    global_config: dict[str, Any] | None,
+) -> bool:
+    return bool(
+        _keyword_candidate_cache_enabled(hashing_kv, query_param, global_config)
+        and _resolve_query_param_or_global_bool(
+            query_param,
+            global_config,
+            "keyword_cache_write_enabled",
+            True,
+        )
+    )
+
+
+def _resolve_vector_storage_cache_profile(
+    vector_storage: BaseVectorStorage,
+    global_config: dict[str, Any],
+) -> dict[str, Any]:
+    embedding_func = getattr(vector_storage, "embedding_func", None)
+    embedding_identifier: dict[str, Any] = {
+        "type": (
+            f"{type(embedding_func).__module__}.{type(embedding_func).__qualname__}"
+            if embedding_func is not None
+            else None
+        ),
+        "callable": resolve_callable_cache_id(embedding_func),
+    }
+    for attr_name in ("embedding_dim", "max_token_size", "model_name"):
+        attr_value = getattr(embedding_func, attr_name, None)
+        if attr_value not in (None, "", [], {}):
+            embedding_identifier[attr_name] = attr_value
+
+    embedding_env: dict[str, str] = {}
+    for env_name in (
+        "EMBEDDING_MODEL",
+        "EMBEDDING_MODEL_NAME",
+        "EMBEDDING_MODEL_PATH",
+        "EMBEDDING_DIMENSIONS",
+        "EMBEDDING_DIM",
+    ):
+        env_value = os.getenv(env_name)
+        if env_value:
+            embedding_env[env_name] = env_value
+
+    return {
+        "vector_namespace": getattr(vector_storage, "namespace", None),
+        "vector_storage_type": (
+            f"{type(vector_storage).__module__}.{type(vector_storage).__qualname__}"
+        ),
+        "meta_fields": sorted(
+            str(item)
+            for item in getattr(vector_storage, "meta_fields", set()) or []
+        ),
+        "cosine_better_than_threshold": getattr(
+            vector_storage,
+            "cosine_better_than_threshold",
+            None,
+        ),
+        "vector_db_storage_cls_kwargs_hash": compute_structured_hash(
+            global_config.get("vector_db_storage_cls_kwargs") or {},
+            strict=False,
+        ),
+        "embedding": embedding_identifier,
+        "embedding_env": embedding_env,
+    }
+
+
+def _build_keyword_candidate_cache_fingerprint(
+    *,
+    keyword: str,
+    vector_storage: BaseVectorStorage,
+    ids: list[str] | None,
+    query_param: QueryParam,
+    global_config: dict[str, Any],
+    keyword_top_k: int,
+) -> str | None:
+    normalized_keyword = _normalize_retrieval_query_text(keyword).casefold()
+    if not normalized_keyword:
+        return None
+
+    filter_signature = (
+        global_config.get("filter_signature")
+        or global_config.get("query_filter_signature")
+        or global_config.get("permission_filter_signature")
+    )
+    permission_scope = (
+        global_config.get("permission_scope")
+        or global_config.get("user_scope")
+        or global_config.get("tenant_id")
+        or os.getenv("RAG_PERMISSION_SCOPE")
+    )
+    payload = {
+        "schema_version": _KEYWORD_CANDIDATE_CACHE_SCHEMA_VERSION,
+        "scope": _QUERY_CACHE_TYPE_KEYWORD_CANDIDATE,
+        "mode": query_param.mode,
+        "normalized_keyword": normalized_keyword,
+        "keyword_top_k": keyword_top_k,
+        "corpus_revision": _coerce_non_negative_int(
+            global_config.get("corpus_revision"),
+            0,
+        ),
+        "index_digest": global_config.get("index_digest"),
+        "ids": sorted(str(item) for item in (ids or [])),
+        "filter_signature": filter_signature,
+        "permission_scope": permission_scope,
+        "retrieval_profile": _resolve_vector_storage_cache_profile(
+            vector_storage,
+            global_config,
+        ),
+    }
+    return compute_structured_hash(payload, strict=True)
+
+
+_VECTOR_RESULT_CACHE_OMIT_FIELDS = {
+    "__vector__",
+    "vector",
+    "embedding",
+    "embeddings",
+}
+
+
+def _json_cache_default(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, set):
+        return sorted(value)
+    return str(value)
+
+
+def _sanitize_vector_results_for_keyword_cache(
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    sanitized_results: list[dict[str, Any]] = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        sanitized = {
+            key: value
+            for key, value in result.items()
+            if key not in _VECTOR_RESULT_CACHE_OMIT_FIELDS
+        }
+        sanitized_results.append(sanitized)
+    return json.loads(
+        json.dumps(
+            sanitized_results,
+            ensure_ascii=False,
+            default=_json_cache_default,
+        )
+    )
+
+
+def _build_keyword_candidate_cache_payload(
+    *,
+    keyword: str,
+    results: list[dict[str, Any]],
+    keyword_top_k: int,
+    global_config: dict[str, Any],
+) -> dict[str, Any]:
+    now = int(time.time())
+    return {
+        "schema_version": _KEYWORD_CANDIDATE_CACHE_SCHEMA_VERSION,
+        "result_kind": _QUERY_CACHE_TYPE_KEYWORD_CANDIDATE,
+        "keyword": keyword,
+        "normalized_keyword": _normalize_retrieval_query_text(keyword).casefold(),
+        "keyword_top_k": keyword_top_k,
+        "candidates": _sanitize_vector_results_for_keyword_cache(
+            list(results or [])[:keyword_top_k]
+        ),
+        "corpus_revision": _coerce_non_negative_int(
+            global_config.get("corpus_revision"),
+            0,
+        ),
+        "created_at": now,
+        "last_accessed_at": now,
+        "access_count": 1,
+    }
+
+
+def _coerce_keyword_candidate_cache_payload(
+    cached_content: Any,
+    *,
+    normalized_keyword: str,
+    requested_top_k: int,
+) -> dict[str, Any] | None:
+    if not isinstance(cached_content, dict):
+        return None
+    payload = dict(cached_content)
+    if payload.get("result_kind") != _QUERY_CACHE_TYPE_KEYWORD_CANDIDATE:
+        return None
+    if payload.get("schema_version") != _KEYWORD_CANDIDATE_CACHE_SCHEMA_VERSION:
+        return None
+    if str(payload.get("normalized_keyword") or "") != normalized_keyword:
+        return None
+    keyword_top_k = _coerce_non_negative_int(payload.get("keyword_top_k"), 0)
+    candidates = payload.get("candidates") or []
+    if keyword_top_k < requested_top_k or not isinstance(candidates, list):
+        return None
+    return {
+        "candidates": [dict(item) for item in candidates if isinstance(item, dict)][
+            :requested_top_k
+        ],
+        "keyword_top_k": keyword_top_k,
+    }
+
+
+async def _load_keyword_candidate_cache(
+    hashing_kv: BaseKVStorage | None,
+    *,
+    args_hash: str | None,
+    mode: str,
+    keyword: str,
+    requested_top_k: int,
+) -> list[dict[str, Any]] | None:
+    if not _query_cache_enabled(hashing_kv) or not args_hash:
+        return None
+    cached_content, _, _, _ = await handle_cache(
+        hashing_kv,
+        args_hash,
+        keyword,
+        mode,
+        cache_type=_QUERY_CACHE_TYPE_KEYWORD_CANDIDATE,
+    )
+    payload = _coerce_keyword_candidate_cache_payload(
+        cached_content,
+        normalized_keyword=_normalize_retrieval_query_text(keyword).casefold(),
+        requested_top_k=requested_top_k,
+    )
+    if payload is None:
+        return None
+    return payload["candidates"]
+
+
+async def _save_keyword_candidate_cache(
+    hashing_kv: BaseKVStorage | None,
+    *,
+    args_hash: str | None,
+    mode: str,
+    keyword: str,
+    results: list[dict[str, Any]],
+    keyword_top_k: int,
+    global_config: dict[str, Any],
+) -> None:
+    if not _query_cache_enabled(hashing_kv) or not args_hash:
+        return
+    await save_to_cache(
+        hashing_kv,
+        CacheData(
+            args_hash=args_hash,
+            content=_build_keyword_candidate_cache_payload(
+                keyword=keyword,
+                results=results,
+                keyword_top_k=keyword_top_k,
+                global_config=global_config,
+            ),
+            prompt=keyword,
+            mode=mode,
+            cache_type=_QUERY_CACHE_TYPE_KEYWORD_CANDIDATE,
+        ),
     )
 
 
@@ -552,6 +887,30 @@ def _build_query_request_fingerprint_payload(
                     query_param,
                     global_config,
                 ),
+                "keyword_candidate_cache": {
+                    "enabled": _resolve_query_param_or_global_bool(
+                        query_param,
+                        global_config,
+                        "keyword_cache_enabled",
+                        False,
+                    ),
+                    "read_enabled": _resolve_query_param_or_global_bool(
+                        query_param,
+                        global_config,
+                        "keyword_cache_read_enabled",
+                        True,
+                    ),
+                    "write_enabled": _resolve_query_param_or_global_bool(
+                        query_param,
+                        global_config,
+                        "keyword_cache_write_enabled",
+                        True,
+                    ),
+                    "top_k": _resolve_keyword_candidate_cache_top_k(
+                        query_param,
+                        global_config,
+                    ),
+                },
                 "addon_params": addon_params,
             }
         )
@@ -1187,10 +1546,19 @@ async def _query_vector_storage_diversified(
     *,
     timing_collector: list[dict[str, Any]] | None = None,
     stage_prefix: str | None = None,
+    query_param: QueryParam | None = None,
+    global_config: dict[str, Any] | None = None,
+    hashing_kv: BaseKVStorage | None = None,
 ) -> list[dict[str, Any]]:
     query_variants = _build_diversified_retrieval_queries(query)
     if not query_variants:
         return []
+    cache_top_k = _resolve_keyword_candidate_cache_top_k(query_param, global_config)
+    cache_active = _keyword_candidate_cache_enabled(
+        hashing_kv,
+        query_param,
+        global_config,
+    )
 
     async def _query_variant(variant: str, variant_top_k: int) -> list[dict[str, Any]]:
         if timing_collector is None and stage_prefix is None:
@@ -1215,41 +1583,148 @@ async def _query_vector_storage_diversified(
             stage_prefix=stage_prefix,
         )
 
+    async def _query_variants_direct(
+        variants: list[str],
+        variant_top_k: int,
+    ) -> list[list[dict[str, Any]]]:
+        query_many = getattr(vector_storage, "query_many", None)
+        if callable(query_many):
+            try:
+                query_many_parameters = inspect.signature(query_many).parameters
+            except (TypeError, ValueError):
+                query_many_parameters = {}
+            accepts_timing = "timing_collector" in query_many_parameters or any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in query_many_parameters.values()
+            )
+            if (
+                timing_collector is not None or stage_prefix is not None
+            ) and accepts_timing:
+                return await query_many(
+                    variants,
+                    top_k=variant_top_k,
+                    ids=ids,
+                    timing_collector=timing_collector,
+                    stage_prefix=stage_prefix,
+                )
+            return await query_many(
+                variants,
+                top_k=variant_top_k,
+                ids=ids,
+            )
+
+        return await asyncio.gather(
+            *[_query_variant(variant, variant_top_k) for variant in variants]
+        )
+
+    async def _query_variants_with_keyword_cache(
+        variants: list[str],
+        variant_top_k: int,
+    ) -> list[list[dict[str, Any]]]:
+        if (
+            not cache_active
+            or query_param is None
+            or global_config is None
+            or hashing_kv is None
+        ):
+            return await _query_variants_direct(variants, variant_top_k)
+
+        cache_hashes: list[str | None] = [
+            _build_keyword_candidate_cache_fingerprint(
+                keyword=variant,
+                vector_storage=vector_storage,
+                ids=ids,
+                query_param=query_param,
+                global_config=global_config,
+                keyword_top_k=cache_top_k,
+            )
+            for variant in variants
+        ]
+        result_sets: list[list[dict[str, Any]] | None] = [None] * len(variants)
+        miss_indexes: list[int] = []
+
+        lookup_started_at = time.perf_counter()
+        hit_count = 0
+        if _keyword_candidate_cache_read_enabled(
+            hashing_kv,
+            query_param,
+            global_config,
+        ):
+            for index, (variant, args_hash) in enumerate(zip(variants, cache_hashes)):
+                cached_results = await _load_keyword_candidate_cache(
+                    hashing_kv,
+                    args_hash=args_hash,
+                    mode=query_param.mode,
+                    keyword=variant,
+                    requested_top_k=variant_top_k,
+                )
+                if cached_results is None:
+                    miss_indexes.append(index)
+                    continue
+                result_sets[index] = cached_results
+                hit_count += 1
+        else:
+            miss_indexes = list(range(len(variants)))
+
+        if timing_collector is not None:
+            _record_stage_timing(
+                timing_collector,
+                "keyword_candidate_cache_lookup",
+                "关键词候选缓存检查",
+                lookup_started_at,
+            )
+            if hit_count:
+                timing_collector.append(
+                    {
+                        "stage": "keyword_candidate_cache_hit",
+                        "label": "关键词候选缓存命中",
+                        "seconds": 0.0,
+                        "hit_count": hit_count,
+                        "query_count": len(variants),
+                    }
+                )
+
+        if miss_indexes:
+            miss_variants = [variants[index] for index in miss_indexes]
+            miss_results = await _query_variants_direct(miss_variants, cache_top_k)
+            write_enabled = _keyword_candidate_cache_write_enabled(
+                hashing_kv,
+                query_param,
+                global_config,
+            )
+            for index, results in zip(miss_indexes, miss_results):
+                result_sets[index] = list(results or [])[:variant_top_k]
+                if write_enabled:
+                    await _save_keyword_candidate_cache(
+                        hashing_kv,
+                        args_hash=cache_hashes[index],
+                        mode=query_param.mode,
+                        keyword=variants[index],
+                        results=list(results or []),
+                        keyword_top_k=cache_top_k,
+                        global_config=global_config,
+                    )
+
+        return [list(results or []) for results in result_sets]
+
     if len(query_variants) == 1:
-        return await _query_variant(query_variants[0], top_k)
+        variant_top_k = min(top_k, cache_top_k) if cache_active else top_k
+        result_sets = await _query_variants_with_keyword_cache(
+            query_variants,
+            variant_top_k,
+        )
+        return result_sets[0][:top_k] if result_sets else []
 
     per_query_top_k = min(
         max(top_k * 3, len(query_variants) * 4, 6),
         24,
     )
-    query_many = getattr(vector_storage, "query_many", None)
-    if callable(query_many):
-        try:
-            query_many_parameters = inspect.signature(query_many).parameters
-        except (TypeError, ValueError):
-            query_many_parameters = {}
-        accepts_timing = "timing_collector" in query_many_parameters or any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD
-            for parameter in query_many_parameters.values()
-        )
-        if (timing_collector is not None or stage_prefix is not None) and accepts_timing:
-            result_sets = await query_many(
-                query_variants,
-                top_k=per_query_top_k,
-                ids=ids,
-                timing_collector=timing_collector,
-                stage_prefix=stage_prefix,
-            )
-        else:
-            result_sets = await query_many(
-                query_variants,
-                top_k=per_query_top_k,
-                ids=ids,
-            )
-    else:
-        result_sets = await asyncio.gather(
-            *[_query_variant(variant, per_query_top_k) for variant in query_variants]
-        )
+    if cache_active:
+        per_query_top_k = min(per_query_top_k, cache_top_k)
+    result_sets = await _query_variants_with_keyword_cache(
+        query_variants,
+        per_query_top_k,
+    )
     stage_started_at = time.perf_counter()
     merged_results = _merge_diversified_vector_query_results(query_variants, result_sets)
     selected_results = _select_diversified_vector_results(
@@ -1401,12 +1876,15 @@ async def _get_graph_hit_data_concurrently(
     query_param: QueryParam,
     stage_timings: list[dict[str, Any]],
     global_config: dict[str, Any],
+    hashing_kv: BaseKVStorage | None = None,
 ) -> tuple[
     tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]],
     tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]],
 ]:
     shared_vector_results = None
-    if _shared_graph_hit_embedding_enabled(global_config):
+    if _shared_graph_hit_embedding_enabled(
+        global_config
+    ) and not _keyword_candidate_cache_enabled(hashing_kv, query_param, global_config):
         shared_vector_results = await _query_graph_hit_vectors_with_shared_embedding(
             ll_keywords_str,
             hl_keywords_str,
@@ -1431,6 +1909,8 @@ async def _get_graph_hit_data_concurrently(
                 query_param,
                 timing_collector=stage_timings,
                 vector_results=vector_results,
+                global_config=global_config,
+                hashing_kv=hashing_kv,
             )
         _record_stage_timing(
             stage_timings,
@@ -1455,6 +1935,8 @@ async def _get_graph_hit_data_concurrently(
                 query_param,
                 timing_collector=stage_timings,
                 vector_results=vector_results,
+                global_config=global_config,
+                hashing_kv=hashing_kv,
             )
         _record_stage_timing(
             stage_timings,
@@ -4055,6 +4537,7 @@ async def _build_graph_retrieval_debug_data(
         query_param,
         stage_timings,
         global_config,
+        hashing_kv,
     )
 
     graph_entities = process_combine_contexts(
@@ -5308,6 +5791,8 @@ async def _get_node_data(
     query_param: QueryParam,
     timing_collector: list[dict[str, Any]] | None = None,
     vector_results: list[dict[str, Any]] | None = None,
+    global_config: dict[str, Any] | None = None,
+    hashing_kv: BaseKVStorage | None = None,
 ):
     query_variants = _build_diversified_retrieval_queries(query)
     # get similar entities
@@ -5329,6 +5814,9 @@ async def _get_node_data(
             ids=query_param.ids,
             timing_collector=timing_collector,
             stage_prefix="graph_entity_vector",
+            query_param=query_param,
+            global_config=global_config,
+            hashing_kv=hashing_kv,
         )
     )
     if not len(results):
@@ -5687,6 +6175,8 @@ async def _get_edge_data(
     query_param: QueryParam,
     timing_collector: list[dict[str, Any]] | None = None,
     vector_results: list[dict[str, Any]] | None = None,
+    global_config: dict[str, Any] | None = None,
+    hashing_kv: BaseKVStorage | None = None,
 ):
     query_variants = _build_diversified_retrieval_queries(keywords)
     logger.info(
@@ -5707,6 +6197,9 @@ async def _get_edge_data(
             ids=query_param.ids,
             timing_collector=timing_collector,
             stage_prefix="graph_relation_vector",
+            query_param=query_param,
+            global_config=global_config,
+            hashing_kv=hashing_kv,
         )
     )
 
@@ -6227,6 +6720,7 @@ async def _build_hybrid_retrieval_debug_data(
         query_param,
         stage_timings,
         global_config,
+        hashing_kv,
     )
 
     graph_entities = process_combine_contexts(

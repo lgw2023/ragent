@@ -19,6 +19,8 @@ class SQLiteQueryCacheStorageTests(unittest.IsolatedAsyncioTestCase):
                 "working_dir": temp_dir.name,
                 "query_cache_ttl_seconds": ttl_seconds,
                 "query_cache_max_entries": max_entries,
+                "keyword_cache_ttl_seconds": ttl_seconds,
+                "keyword_cache_max_entries": 0,
             },
             embedding_func=None,
         )
@@ -212,6 +214,79 @@ class SQLiteQueryCacheStorageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("drop failed", result["message"])
+
+    async def test_keyword_candidate_entries_are_managed_query_cache_entries(self):
+        storage, _ = await self._create_storage(ttl_seconds=1)
+        await storage.upsert(
+            {
+                "hybrid:keyword_candidate:expired": {
+                    "return": {
+                        "result_kind": "keyword_candidate",
+                        "normalized_keyword": "a",
+                        "keyword_top_k": 20,
+                        "candidates": [],
+                        "corpus_revision": 7,
+                        "created_at": 10,
+                        "last_accessed_at": 10,
+                        "access_count": 1,
+                    }
+                },
+                "default:keyword_candidate:keep": {"return": "keep-me"},
+            }
+        )
+
+        self.assertIsNone(await storage.get_by_id("hybrid:keyword_candidate:expired"))
+        self.assertEqual(
+            (await storage.get_by_id("default:keyword_candidate:keep"))["return"],
+            "keep-me",
+        )
+
+    async def test_keyword_candidate_max_entries_prunes_only_keyword_entries(self):
+        storage, _ = await self._create_storage(max_entries=0)
+        storage.global_config["keyword_cache_max_entries"] = 1
+        await storage.upsert(
+            {
+                "hybrid:keyword_candidate:a": {
+                    "return": {
+                        "result_kind": "keyword_candidate",
+                        "normalized_keyword": "a",
+                        "keyword_top_k": 20,
+                        "candidates": [],
+                        "corpus_revision": 7,
+                        "created_at": 1,
+                        "last_accessed_at": 1,
+                        "access_count": 1,
+                    }
+                },
+                "hybrid:keyword_candidate:b": {
+                    "return": {
+                        "result_kind": "keyword_candidate",
+                        "normalized_keyword": "b",
+                        "keyword_top_k": 20,
+                        "candidates": [],
+                        "corpus_revision": 7,
+                        "created_at": 2,
+                        "last_accessed_at": 2,
+                        "access_count": 1,
+                    }
+                },
+                "hybrid:answer:keep": {
+                    "return": _build_query_cache_payload(
+                        result_kind=_QUERY_RESULT_KIND_ANSWER,
+                        answer="answer",
+                        created_at=1,
+                        last_accessed_at=1,
+                    )
+                },
+            }
+        )
+
+        self.assertIsNone(await storage.get_by_id("hybrid:keyword_candidate:a"))
+        self.assertIsNotNone(await storage.get_by_id("hybrid:keyword_candidate:b"))
+        self.assertEqual(
+            (await storage.get_by_id("hybrid:answer:keep"))["return"]["answer"],
+            "answer",
+        )
 
 if __name__ == "__main__":
     unittest.main()
