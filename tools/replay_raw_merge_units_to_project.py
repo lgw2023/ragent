@@ -14,23 +14,29 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ragent.llm.openai import env_openai_complete, openai_embed
-from ragent.offline_replay import (
+from ragent.llm.openai import env_openai_complete, openai_embed  # noqa: E402
+from ragent.offline_replay import (  # noqa: E402
     iter_raw_merge_units_jsonl,
     replay_raw_merge_units_jsonl_to_rag,
     replay_raw_merge_units_to_rag,
 )
-from ragent.ragent import Ragent
-from ragent.utils import ModelUsageCollector, write_model_usage_report
+from ragent.ragent import Ragent  # noqa: E402
+from ragent.utils import ModelUsageCollector, write_model_usage_report  # noqa: E402
 
 
-def _prepare_output_dir(output_dir: Path, *, overwrite: bool) -> None:
+def _prepare_output_dir(output_dir: Path, *, overwrite: bool, resume: bool) -> None:
+    if overwrite and resume:
+        raise ValueError("--overwrite and --resume cannot be used together.")
     if output_dir.exists():
         if overwrite:
             shutil.rmtree(output_dir)
+        elif resume:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            return
         elif any(output_dir.iterdir()):
             raise FileExistsError(
-                f"Output directory is not empty: {output_dir}. Use --overwrite to replace it."
+                f"Output directory is not empty: {output_dir}. Use --overwrite to replace it "
+                "or --resume to continue into the existing project."
             )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -57,6 +63,14 @@ def _parse_args() -> argparse.Namespace:
         "--overwrite",
         action="store_true",
         help="Replace the output directory if it already exists.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Continue into an existing output project. Raw units with doc_status "
+            "records already present in the target project are skipped."
+        ),
     )
     parser.add_argument(
         "--workspace",
@@ -118,7 +132,7 @@ def _parse_args() -> argparse.Namespace:
 
 async def _run(args: argparse.Namespace) -> None:
     output_dir = Path(args.output).expanduser().resolve()
-    _prepare_output_dir(output_dir, overwrite=args.overwrite)
+    _prepare_output_dir(output_dir, overwrite=args.overwrite, resume=args.resume)
 
     if not args.llm_model:
         raise ValueError("Missing --llm-model or LLM_MODEL environment variable.")

@@ -23,6 +23,23 @@ python tools/export_raw_merge_units.py ./md_dir -o ./raw_units/shard-0001.jsonl 
 
 失败文件会写到 `<output-stem>.failures.jsonl`，也可以用 `--failures-output` 指定路径。
 
+长时间运行的 shard 建议同时开启断点续跑和旁路进度记录：
+
+```bash
+python tools/export_raw_merge_units.py ./md_dir \
+  -o ./raw_units/shard-0001.jsonl \
+  --recursive \
+  --resume \
+  --flush-each-unit \
+  --continue-on-error \
+  --progress-output ./progress/shard-0001.ndjson \
+  --successes-output ./successes/shard-0001.ndjson \
+  --failures-output ./failures/shard-0001.ndjson
+```
+
+`--resume` 会读取已有 output JSONL 中的 `doc_id` 并跳过这些文档，然后追加新结果。
+如果已有 JSONL 存在坏行，命令会停止，避免在损坏文件后继续追加。
+
 接入现有 PDF -> markdown 管线的导出：
 
 ```bash
@@ -39,6 +56,13 @@ python singlefile.py parse ./example.pdf ./mineru_out ./raw_units raw
 
 ```bash
 python tools/replay_raw_merge_units_to_project.py ./raw_units -o ./final_project --overwrite
+```
+
+如果目标 project 已经存在，可用 `--resume` 继续写入；已有 `doc_status`
+记录的文档会被跳过：
+
+```bash
+python tools/replay_raw_merge_units_to_project.py ./raw_units -o ./final_project --resume
 ```
 
 小样本调试或历史非连续 group 输入可以使用 in-memory grouping：
@@ -66,6 +90,21 @@ Replay CLI 会把 `model_usage_raw_replay_*.md` 写到目标 project 目录。�
 3. `source_group_key`：独立 markdown export 使用源文件 stem；`singlefile.py parse ... raw` 使用在线入库的 `doc_name` stem，因此同一 PDF 的文本和图片描述会落到同一个 source group。
 4. 同一 source group 内的 doc/chunk 顺序：继承 markdown insert plan 的 `sort_order`；parser 模式按 markdown 行号、图片描述优先级、chunk index 排序。
 5. 流式 replay 要求同一个 `source_group_key` 在 JSONL 输入中只出现一个连续块。大规模 shard 建议一篇源文档一个 raw JSONL，或按 `source_group_key` 对 shard 输出做外部排序。
+
+## Multi-Corpus Canonical Merge
+
+多个语料各自 export 完成后，可以先合并成 canonical JSONL，再统一 replay：
+
+```bash
+python tools/merge_raw_units_canonical.py \
+  pdf=./raw_units_pdf \
+  otherdocs=./raw_units_otherdocs \
+  -o ./raw_units_merged/all.raw-units.jsonl
+```
+
+默认会把 `source_group_key` 改写为 `<label>:<source_group_key>`，避免不同语料中同名
+PDF、同名 markdown 或相同 stem 发生 group key 碰撞。需要跳过重复 `doc_id`
+时加 `--dedupe-doc-ids`；需要保持原 key 时加 `--no-prefix-source-group-key`。
 
 ## Cache And Failure Semantics
 

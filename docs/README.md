@@ -35,6 +35,8 @@ readers do not have to search the repository root.
   offline wheelhouses, and component-owned dependencies to an offline server.
 - [Strict offline replay](operations/offline_replay.md): exporting raw merge
   units and replaying them into a deterministic final KG project.
+- [Bulk KG build pipeline](operations/bulk_kg_pipeline.md): recommended
+  export/replay/canonical-merge structure for large document corpora.
 - [Latency benchmark usage](../benchmark/README.md): benchmark service flow,
   scenario semantics, output files, and validation checks.
 

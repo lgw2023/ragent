@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
 import json
 import os
 import shutil
@@ -16,14 +17,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ragent.llm.openai import env_openai_complete, openai_embed
-from ragent.offline_replay import (
+from ragent.llm.openai import env_openai_complete, openai_embed  # noqa: E402
+from ragent.offline_replay import (  # noqa: E402
     RawMergeUnit,
     build_raw_merge_unit_from_text,
     raw_merge_unit_to_json_obj,
 )
-from ragent.ragent import Ragent
-from ragent.utils import (
+from ragent.ragent import Ragent  # noqa: E402
+from ragent.utils import (  # noqa: E402
     ModelUsageCollector,
     clean_text,
     compute_mdhash_id,
@@ -56,6 +57,51 @@ def _source_group_key(path: Path) -> str:
 
 def _default_failures_path(output_path: Path) -> Path:
     return output_path.with_name(f"{output_path.stem}.failures.jsonl")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _append_jsonl_record(path: Path | None, payload: dict[str, Any]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {"timestamp": _utc_now_iso(), **payload}
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _load_existing_doc_ids(output_path: Path) -> set[str]:
+    if not output_path.exists():
+        return set()
+
+    doc_ids: set[str] = set()
+    with output_path.open("r", encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Cannot resume from invalid JSONL line {output_path}:{line_number}: {exc}"
+                ) from exc
+            doc_id = payload.get("doc_id")
+            if doc_id:
+                doc_ids.add(str(doc_id))
+    return doc_ids
+
+
+def _ensure_trailing_newline(path: Path) -> None:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+
+    with path.open("rb+") as file:
+        file.seek(-1, os.SEEK_END)
+        if file.read(1) != b"\n":
+            file.write(b"\n")
 
 
 def _write_failure_record(
@@ -174,6 +220,29 @@ def _parse_args() -> argparse.Namespace:
             "<output-stem>.failures.jsonl next to --output."
         ),
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Append to an existing output JSONL and skip doc_ids already present "
+            "in that file."
+        ),
+    )
+    parser.add_argument(
+        "--flush-each-unit",
+        action="store_true",
+        help="Flush the output JSONL after each exported unit.",
+    )
+    parser.add_argument(
+        "--progress-output",
+        default=None,
+        help="Optional JSONL path for per-file progress events.",
+    )
+    parser.add_argument(
+        "--successes-output",
+        default=None,
+        help="Optional JSONL path for successfully exported files.",
+    )
     return parser.parse_args()
 
 
@@ -189,6 +258,16 @@ async def _run_with_working_dir(
         Path(args.failures_output).expanduser().resolve()
         if args.failures_output
         else _default_failures_path(output_path)
+    )
+    progress_path = (
+        Path(args.progress_output).expanduser().resolve()
+        if args.progress_output
+        else None
+    )
+    successes_path = (
+        Path(args.successes_output).expanduser().resolve()
+        if args.successes_output
+        else None
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     collector = ModelUsageCollector("export_raw_merge_units")
@@ -214,13 +293,48 @@ async def _run_with_working_dir(
                     pattern=args.glob,
                     recursive=args.recursive,
                 )
-                with output_path.open("w", encoding="utf-8") as file:
+                existing_doc_ids = (
+                    _load_existing_doc_ids(output_path) if args.resume else set()
+                )
+                if args.resume:
+                    _ensure_trailing_newline(output_path)
+                seen_doc_ids: set[str] = set(existing_doc_ids)
+                skipped_existing = 0
+                file_mode = "a" if args.resume else "w"
+                with output_path.open(file_mode, encoding="utf-8") as file:
                     for input_file in input_files:
                         try:
                             content = clean_text(input_file.read_text(encoding="utf-8"))
                             doc_id = compute_mdhash_id(content, prefix="doc-")
+                            if doc_id in existing_doc_ids:
+                                skipped_existing += 1
+                                _append_jsonl_record(
+                                    progress_path,
+                                    {
+                                        "status": "skipped_existing",
+                                        "input_file": str(input_file),
+                                        "doc_id": doc_id,
+                                        "exported_units": exported,
+                                        "skipped_existing": skipped_existing,
+                                        "skipped_duplicates": skipped_duplicates,
+                                        "failed_files": failed_files,
+                                    },
+                                )
+                                continue
                             if doc_id in seen_doc_ids:
                                 skipped_duplicates += 1
+                                _append_jsonl_record(
+                                    progress_path,
+                                    {
+                                        "status": "skipped_duplicate",
+                                        "input_file": str(input_file),
+                                        "doc_id": doc_id,
+                                        "exported_units": exported,
+                                        "skipped_existing": skipped_existing,
+                                        "skipped_duplicates": skipped_duplicates,
+                                        "failed_files": failed_files,
+                                    },
+                                )
                                 continue
                             unit = await _export_one_file(
                                 rag,
@@ -238,6 +352,24 @@ async def _run_with_working_dir(
                             )
                             seen_doc_ids.add(doc_id)
                             exported += 1
+                            if args.flush_each_unit:
+                                file.flush()
+                            source_group_key = unit.source_group_key or _source_group_key(
+                                input_file
+                            )
+                            success_payload = {
+                                "status": "exported",
+                                "input_file": str(input_file),
+                                "doc_id": doc_id,
+                                "source_group_key": source_group_key,
+                                "output": str(output_path),
+                                "exported_units": exported,
+                                "skipped_existing": skipped_existing,
+                                "skipped_duplicates": skipped_duplicates,
+                                "failed_files": failed_files,
+                            }
+                            _append_jsonl_record(successes_path, success_payload)
+                            _append_jsonl_record(progress_path, success_payload)
                         except Exception as exc:
                             failed_files += 1
                             if not args.continue_on_error:
@@ -247,16 +379,35 @@ async def _run_with_working_dir(
                                 input_file=input_file,
                                 error=exc,
                             )
+                            _append_jsonl_record(
+                                progress_path,
+                                {
+                                    "status": "failed",
+                                    "input_file": str(input_file),
+                                    "error": str(exc),
+                                    "error_type": type(exc).__name__,
+                                    "exported_units": exported,
+                                    "skipped_existing": skipped_existing,
+                                    "skipped_duplicates": skipped_duplicates,
+                                    "failed_files": failed_files,
+                                },
+                            )
                             continue
                 stats = {
                     "input_files": len(input_files),
+                    "preexisting_units": len(existing_doc_ids),
                     "exported_units": exported,
+                    "skipped_existing": skipped_existing,
                     "skipped_duplicates": skipped_duplicates,
                     "failed_files": failed_files,
                     "output": str(output_path),
                 }
                 if failed_files:
                     stats["failures"] = str(failures_path)
+                if progress_path is not None:
+                    stats["progress"] = str(progress_path)
+                if successes_path is not None:
+                    stats["successes"] = str(successes_path)
             finally:
                 if rag is not None:
                     await rag.finalize_storages()
