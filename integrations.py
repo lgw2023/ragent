@@ -3458,12 +3458,19 @@ async def initialize_rag(
         )
 
     rag_create_started_at = time.perf_counter()
+    rag_kwargs: dict[str, Any] = {}
+    raw_export_max_async = _parse_positive_int_env("RAG_RAW_EXPORT_MAX_ASYNC")
+    if raw_export_max_async is None and os.getenv("RAG_RAW_EXPORT_RESUME") == "1":
+        raw_export_max_async = 1
+    if raw_export_max_async is not None:
+        rag_kwargs["llm_model_max_async"] = raw_export_max_async
     rag = Ragent(
         working_dir=WORKING_DIR,
         embedding_func=openai_embed,
         llm_model_func=env_openai_complete,
         rerank_model_func=rerank_from_env,
         llm_model_name=os.getenv("LLM_MODEL"),
+        **rag_kwargs,
     )
     if stage_timings is not None:
         stage_timings.append(
@@ -5018,7 +5025,23 @@ async def export_md_to_raw_merge_units(
                     exported = 0
                     skipped_duplicates = 0
                     failed_units = 0
+                    skipped_existing = 0
                     seen_doc_ids: set[str] = set()
+                    if append and os.path.exists(output_path):
+                        with open(output_path, "r", encoding="utf-8") as existing_file:
+                            for line_number, line in enumerate(existing_file, 1):
+                                stripped = line.strip()
+                                if not stripped:
+                                    continue
+                                try:
+                                    existing_payload = json.loads(stripped)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError(
+                                        f"Cannot append raw units after invalid JSONL line {output_path}:{line_number}: {exc}"
+                                    ) from exc
+                                existing_doc_id = existing_payload.get("doc_id")
+                                if existing_doc_id:
+                                    seen_doc_ids.add(str(existing_doc_id))
                     mode = "a" if append else "w"
 
                     with open(output_path, mode, encoding="utf-8") as output_file:
@@ -5036,7 +5059,10 @@ async def export_md_to_raw_merge_units(
                             content = clean_text(_clean_text_for_xml(text))
                             doc_id = compute_mdhash_id(content, prefix="doc-")
                             if doc_id in seen_doc_ids:
-                                skipped_duplicates += 1
+                                if append:
+                                    skipped_existing += 1
+                                else:
+                                    skipped_duplicates += 1
                                 continue
 
                             _update_progress(
@@ -5114,7 +5140,10 @@ async def export_md_to_raw_merge_units(
                                 _weighted_ratio(
                                     0.10,
                                     1.0,
-                                    exported + skipped_duplicates + failed_units,
+                                    exported
+                                    + skipped_existing
+                                    + skipped_duplicates
+                                    + failed_units,
                                     total_units,
                                 ),
                                 "raw_extract",
@@ -5125,6 +5154,7 @@ async def export_md_to_raw_merge_units(
                     stats = {
                         "input_units": total_units,
                         "exported_units": exported,
+                        "skipped_existing": skipped_existing,
                         "skipped_duplicates": skipped_duplicates,
                         "failed_units": failed_units,
                         "output": output_path,

@@ -8,6 +8,12 @@ from pathlib import Path
 from collections import Counter
 from contextlib import contextmanager
 from typing import Any
+
+if os.getenv("RAG_RAW_EXPORT_RESUME", "").strip() == "1" and not os.getenv(
+    "RAG_RAW_EXPORT_MAX_ASYNC"
+):
+    os.environ["RAG_RAW_EXPORT_MAX_ASYNC"] = "1"
+
 if __package__:
     # Package execution (e.g., python -m ragent.singlefile)
     from .integrations import (
@@ -1308,12 +1314,19 @@ class RagentApp:
             raw_units_path = self._resolve_raw_units_output_path(
                 pdf_file_path, target_project_dir
             )
+            raw_resume = os.getenv("RAG_RAW_EXPORT_RESUME", "0").strip() == "1"
+            raw_append = raw_resume or os.getenv("RAG_RAW_EXPORT_APPEND", "0").strip() == "1"
+            raw_continue = (
+                os.getenv("RAG_RAW_EXPORT_CONTINUE_ON_ERROR", "0").strip() == "1"
+            )
             logger.info(f"开始基于最终 md 导出 raw merge units: {md_path}")
             stats = await export_md_to_raw_merge_units(
                 pdf_file_path,
                 raw_units_path,
                 md_path,
                 content_list_path=raw_content_list_path,
+                append=raw_append,
+                continue_on_error=raw_continue,
             )
             logger.info(f"raw merge units 导出完成: {stats['output']}")
             return stats

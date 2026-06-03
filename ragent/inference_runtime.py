@@ -1461,6 +1461,12 @@ async def initialize_rag(
 
     rag_create_started_at = time.perf_counter()
     ragent_class = _resolve_ragent_class()
+    rag_kwargs: dict[str, Any] = {}
+    raw_export_max_async = _parse_positive_int_env("RAG_RAW_EXPORT_MAX_ASYNC")
+    if raw_export_max_async is None and os.getenv("RAG_RAW_EXPORT_RESUME") == "1":
+        raw_export_max_async = 1
+    if raw_export_max_async is not None:
+        rag_kwargs["llm_model_max_async"] = raw_export_max_async
     rag = ragent_class(
         working_dir=working_dir,
         embedding_func=openai_embed,
@@ -1468,6 +1474,7 @@ async def initialize_rag(
         rerank_model_func=rerank_from_env,
         llm_model_name=os.getenv("LLM_MODEL")
         or (None if require_llm else _RETRIEVAL_ONLY_LLM_MODEL_NAME),
+        **rag_kwargs,
     )
     if stage_timings is not None:
         stage_timings.append(

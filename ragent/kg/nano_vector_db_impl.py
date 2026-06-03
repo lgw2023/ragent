@@ -186,8 +186,32 @@ class NanoVectorDBStorage(BaseVectorStorage):
             ]
 
             # Execute embedding outside of lock to avoid long lock times
-            embedding_tasks = [self.embedding_func(batch) for batch in batches]
-            embeddings_list = await asyncio.gather(*embedding_tasks)
+            if (
+                os.getenv("RAG_VECTOR_UPSERT_SEQUENTIAL_EMBEDDING", "").strip() == "1"
+                or int(self.global_config.get("embedding_func_max_async") or 0) <= 1
+            ):
+                embeddings_list = []
+                total_batches = len(batches)
+                for batch_index, batch in enumerate(batches, start=1):
+                    if (
+                        total_batches >= 10
+                        and (
+                            batch_index == 1
+                            or batch_index % 25 == 0
+                            or batch_index == total_batches
+                        )
+                    ):
+                        logger.info(
+                            "Sequential embedding upsert progress: namespace=%s batch=%s/%s batch_size=%s",
+                            self.namespace,
+                            batch_index,
+                            total_batches,
+                            len(batch),
+                        )
+                    embeddings_list.append(await self.embedding_func(batch))
+            else:
+                embedding_tasks = [self.embedding_func(batch) for batch in batches]
+                embeddings_list = await asyncio.gather(*embedding_tasks)
             embeddings = np.concatenate(embeddings_list, axis=0)
 
             if len(embeddings) != len(pending_contents):

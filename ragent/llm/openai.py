@@ -432,6 +432,29 @@ def _resolve_timeout(
     return None
 
 
+def _resolve_timeout_from_envs(
+    client_configs: dict[str, Any],
+    env_vars: list[str],
+) -> float | None:
+    timeout = client_configs.get("timeout")
+    if timeout is not None:
+        return timeout
+
+    for env_var in env_vars:
+        timeout_env = os.getenv(env_var)
+        if not timeout_env:
+            continue
+        try:
+            return float(timeout_env)
+        except ValueError:
+            logger.warning(
+                "Invalid %s value: %s. Ignore timeout override.",
+                env_var,
+                timeout_env,
+            )
+    return None
+
+
 def _resolve_num_retries(client_configs: dict[str, Any]) -> int:
     if "num_retries" in client_configs:
         try:
@@ -1460,7 +1483,10 @@ async def openai_embed(
             model=embedding_model,
         )
 
-        timeout = _resolve_timeout(client_configs)
+        timeout = _resolve_timeout_from_envs(
+            client_configs,
+            ["EMBEDDING_TIMEOUT_SECONDS", "LLM_API_TIMEOUT_SECONDS"],
+        )
         extra_headers = client_configs.get("extra_headers")
         headers = {
             "Content-Type": "application/json",

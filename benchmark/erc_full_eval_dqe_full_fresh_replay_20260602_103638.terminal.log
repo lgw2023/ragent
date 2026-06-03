@@ -1,0 +1,24 @@
+Traceback (most recent call last):
+  File "/Volumes/SSD1/ragent/tools/erc_full_eval.py", line 2172, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/Volumes/SSD1/ragent/tools/erc_full_eval.py", line 2148, in main
+    run = run_full_evaluation(
+        dataset_path=_repo_path(args.dataset),
+    ...<13 lines>...
+        live_judge_timeout_seconds=args.live_judge_timeout,
+    )
+  File "/Volumes/SSD1/ragent/tools/erc_full_eval.py", line 2021, in run_full_evaluation
+    project_dir, separation_summary, build_commands = build_live_projects(
+                                                      ~~~~~~~~~~~~~~~~~~~^
+        resolved_output_dir,
+        ^^^^^^^^^^^^^^^^^^^^
+        live_project_dir=live_project_dir,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        skip_live_build=skip_live_build,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Volumes/SSD1/ragent/tools/erc_full_eval.py", line 1240, in build_live_projects
+    raise RuntimeError(f"No raw unit JSONL files were exported: {raw_dir}")
+RuntimeError: No raw unit JSONL files were exported: /Volumes/SSD1/ragent/benchmark/erc_full_eval_dqe_full_fresh_replay_20260602_103638/build_inference_separation/raw_units

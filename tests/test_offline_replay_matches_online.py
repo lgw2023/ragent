@@ -156,6 +156,24 @@ class _MemoryVectorStorage:
         return None
 
 
+class _ClientStorageOnlyVectorStorage(_MemoryVectorStorage):
+    async def get_by_id(self, item_id: str) -> dict[str, Any] | None:
+        if item_id not in self.data:
+            return None
+        return deepcopy(self.data[item_id])
+
+    @property
+    async def client_storage(self) -> dict[str, Any]:
+        ids = list(self.data)
+        return {
+            "data": [
+                {"__id__": item_id, **deepcopy(self.data[item_id])}
+                for item_id in ids
+            ],
+            "matrix": np.asarray([self.vectors[item_id] for item_id in ids]),
+        }
+
+
 class _MemoryGraphStorage:
     def __init__(self):
         self.nodes: dict[str, dict[str, Any]] = {}
@@ -552,6 +570,71 @@ def _assert_vectors_match(left: _MemoryVectorStorage, right: _MemoryVectorStorag
     assert set(left.vectors) == set(right.vectors)
     for item_id in left.vectors:
         np.testing.assert_allclose(left.vectors[item_id], right.vectors[item_id])
+
+
+def test_vector_snapshot_uses_client_storage_vectors_without_reembedding():
+    class _FailEmbedding:
+        embedding_dim = 4
+
+        async def __call__(self, _texts: list[str], **_kwargs: Any) -> np.ndarray:
+            raise AssertionError("restore should use precomputed vectors")
+
+    async def run() -> None:
+        storage = _ClientStorageOnlyVectorStorage(_FakeEmbedding())
+        await storage.upsert({"vec-1": {"content": "existing vector content"}})
+        expected_vector = list(storage.vectors["vec-1"])
+
+        snapshot = await offline_replay_module._snapshot_vector_records(
+            storage,
+            ["vec-1"],
+        )
+
+        assert snapshot["vec-1"] is not None
+        assert "__vector__" in snapshot["vec-1"]
+
+        storage.embedding_func = _FailEmbedding()
+        await storage.delete(["vec-1"])
+        await offline_replay_module._restore_vector_records(storage, snapshot)
+
+        assert storage.data["vec-1"]["content"] == "existing vector content"
+        np.testing.assert_allclose(storage.vectors["vec-1"], expected_vector)
+
+    asyncio.run(run())
+
+
+def test_doc_already_seen_only_skips_processed_records():
+    async def run() -> None:
+        storage = _MemoryKVStorage()
+
+        for status in (
+            DocStatus.PENDING,
+            DocStatus.PROCESSING,
+            DocStatus.FAILED,
+        ):
+            storage.data["doc-a"] = {"status": status.value}
+            assert not await offline_replay_module._doc_already_seen(
+                storage,
+                set(),
+                "doc-a",
+            )
+
+        storage.data["doc-a"] = {"status": DocStatus.PROCESSED.value}
+        assert await offline_replay_module._doc_already_seen(storage, set(), "doc-a")
+
+        storage.data["legacy-doc"] = {"content": "old completed record"}
+        assert await offline_replay_module._doc_already_seen(
+            storage,
+            set(),
+            "legacy-doc",
+        )
+
+        assert await offline_replay_module._doc_already_seen(
+            storage,
+            {"new-doc"},
+            "new-doc",
+        )
+
+    asyncio.run(run())
 
 
 def test_offline_replay_matches_online_reference_with_jsonl_artifacts(tmp_path: Path):

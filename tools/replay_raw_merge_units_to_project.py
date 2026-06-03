@@ -95,6 +95,18 @@ def _parse_args() -> argparse.Namespace:
         help="Override Ragent llm_model_max_async for deterministic replay runs.",
     )
     parser.add_argument(
+        "--embedding-func-max-async",
+        type=int,
+        default=None,
+        help="Override Ragent embedding_func_max_async for deterministic replay runs.",
+    )
+    parser.add_argument(
+        "--embedding-batch-num",
+        type=int,
+        default=None,
+        help="Override Ragent embedding_batch_num for low-rate replay runs.",
+    )
+    parser.add_argument(
         "--in-memory",
         action="store_true",
         help=(
@@ -149,6 +161,10 @@ async def _run(args: argparse.Namespace) -> None:
         rag_kwargs["force_llm_summary_on_merge"] = args.force_llm_summary_on_merge
     if args.llm_model_max_async is not None:
         rag_kwargs["llm_model_max_async"] = args.llm_model_max_async
+    if args.embedding_func_max_async is not None:
+        rag_kwargs["embedding_func_max_async"] = args.embedding_func_max_async
+    if args.embedding_batch_num is not None:
+        rag_kwargs["embedding_batch_num"] = args.embedding_batch_num
 
     collector = ModelUsageCollector("replay_raw_merge_units_to_project")
     stats_payload: dict | None = None

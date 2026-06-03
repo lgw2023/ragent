@@ -1,0 +1,73 @@
+2026-05-28 11:41:59,708 | INFO | ragent:ensure_keyword_fallback_model_ready_once:1147 - No complete LLM config detected in MEP runtime; preloading resident GLiNER keyword fallback model. model=mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small device=cpu
+Asking to truncate to max_length but no maximum length is provided and the model has no predefined maximum length. Default to no truncation.
+2026-05-28 11:42:11,365 | INFO | ragent:ensure_keyword_fallback_model_ready_once:1155 - Resident GLiNER keyword fallback model is ready. model=mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small device=cpu warmup_entities=4
+2026-05-28 11:42:11,382 | WARNING | ragent:__post_init__:607 - No tokenizer/tiktoken_model_name provided. Using estimated-char-ratio tokenizer (English char ~= 0.3 token, Chinese char ~= 0.6 token).
+2026-05-28 11:42:13,124 | INFO | ragent:__post_init__:72 - Loaded graph from /Volumes/SSD1/ragent/benchmark/erc_full_eval_qwen4b_smoke_20260528_114149/build_inference_separation/existing_project_copy/graph_chunk_entity_relation.graphml with 6157 nodes, 21792 edges
+INFO:nano-vectordb:Load (6156, 2560) data
+INFO:nano-vectordb:Init {'embedding_dim': 2560, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/benchmark/erc_full_eval_qwen4b_smoke_20260528_114149/build_inference_separation/existing_project_copy/vdb_entities.json'} 6156 data
+INFO:nano-vectordb:Load (21792, 2560) data
+INFO:nano-vectordb:Init {'embedding_dim': 2560, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/benchmark/erc_full_eval_qwen4b_smoke_20260528_114149/build_inference_separation/existing_project_copy/vdb_relationships.json'} 21792 data
+INFO:nano-vectordb:Load (1725, 2560) data
+INFO:nano-vectordb:Init {'embedding_dim': 2560, 'metric': 'cosine', 'storage_file': '/Volumes/SSD1/ragent/benchmark/erc_full_eval_qwen4b_smoke_20260528_114149/build_inference_separation/existing_project_copy/vdb_chunks.json'} 1725 data
+2026-05-28 11:42:18,146 | INFO | ragent:initialize:63 - Process 45493 doc status load doc_status with 1715 records
+2026-05-28 11:42:18,158 | INFO | ragent:ensure_workers:780 - limit_async[embedding]: 8 new workers initialized
+2026-05-28 11:42:18,158 | INFO | ragent:<lambda>:782 - Storage Initialization completed!
+2026-05-28 11:42:20,544 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:b39648418fbe16f30dc41a88095749b0
+2026-05-28 11:42:20,550 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:8e0dcfda5fb18bc6664ca8c7fd4a5287
+2026-05-28 11:42:20,556 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:0f3832a38c00b386bf83d4fdc1fa43ea
+2026-05-28 11:42:20,569 | INFO | ragent:ensure_workers:780 - limit_async[llm]: 4 new workers initialized
+2026-05-28 11:42:31,751 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:25df8fd3faccb9d065fa25553c486f1a
+2026-05-28 11:42:34,174 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keywords:4f2b2ed0a41940857e0cc6d9d7e89e48
+2026-05-28 11:42:34,179 | INFO | ragent:_get_node_data:5840 - Query nodes: 男性, 腰围, 血压, 能量摄入, variants: ['男性, 腰围, 血压, 能量摄入', '男性', '腰围', '血压', '能量摄入'], top_k: 40, cosine: 0.2
+2026-05-28 11:42:34,180 | INFO | ragent:_get_edge_data:6223 - Query edges: 高血压, 超重肥胖, 能量控制, 减重干预, variants: ['高血压, 超重肥胖, 能量控制, 减重干预', '高血压', '超重肥胖', '能量控制', '减重干预'], top_k: 40, cosine: 0.2
+2026-05-28 11:42:37,550 | INFO | ragent:_get_edge_data:6324 - Global query: 61 entites, 40 relations
+2026-05-28 11:42:38,030 | INFO | ragent:_get_node_data:5921 - Local query: 40 entites, 267 relations
+2026-05-28 11:42:38,796 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:3aa4e47159f140b9a668ba87e2a19bc1
+2026-05-28 11:42:38,801 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:0574f30d9d23ca5876b25a044412770d
+2026-05-28 11:42:38,808 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:1ec3e6beae6cf5ad5f0f7a78303f9330
+2026-05-28 11:42:50,279 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:f27c3f2244c153f74cbdcf4b20b8eea0
+2026-05-28 11:42:50,317 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:e1c94d5c357209bfb3bd647843d50306
+2026-05-28 11:42:50,322 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:740a5b976a73d7c2ef8d889ecc43e7ef
+2026-05-28 11:43:04,103 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:f27c3f2244c153f74cbdcf4b20b8eea0
+2026-05-28 11:43:06,193 | INFO | ragent:_get_node_data:5840 - Query nodes: 男性, 腰围, 血压, 能量摄入, variants: ['男性, 腰围, 血压, 能量摄入', '男性', '腰围', '血压', '能量摄入'], top_k: 40, cosine: 0.2
+2026-05-28 11:43:06,193 | INFO | ragent:_get_edge_data:6223 - Query edges: 高血压, 超重肥胖, 能量控制, 减重干预, variants: ['高血压, 超重肥胖, 能量控制, 减重干预', '高血压', '超重肥胖', '能量控制', '减重干预'], top_k: 40, cosine: 0.2
+2026-05-28 11:43:08,528 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:aabdd9246d3f13b8da50f4249bbfdb36
+2026-05-28 11:43:08,529 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:6d085062cfe4eaad4bd6cb054ebbaae8
+2026-05-28 11:43:08,529 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:6a72178afe21bea5a671b72f09b2d5fe
+2026-05-28 11:43:08,529 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:3c69775577e2d87b8a533ccfd7711ced
+2026-05-28 11:43:08,529 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:679c861a450e3f7af80d1a485d53c84d
+2026-05-28 11:43:08,531 | INFO | ragent:_get_edge_data:6324 - Global query: 59 entites, 40 relations
+2026-05-28 11:43:08,741 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:12076fc121d1febe4da49da07aa76790
+2026-05-28 11:43:08,742 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:6eddf22408e8b112b5957e06d0bdbdc9
+2026-05-28 11:43:08,742 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:d4493add7d95cd86452838b3037b4a0a
+2026-05-28 11:43:08,742 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:ac3f4452c737dc389e6f66aae1247bb6
+2026-05-28 11:43:08,743 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:keyword_candidate:8f624b0d77896742262716c70cdc209f
+2026-05-28 11:43:08,745 | INFO | ragent:_get_node_data:5921 - Local query: 40 entites, 232 relations
+2026-05-28 11:43:09,189 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:retrieval:a22ea8463e201bb780e0d337c5495896
+2026-05-28 11:43:09,196 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:26ae2cece0acab5c808c349e8b0fd942
+2026-05-28 11:43:09,203 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:render:a0829c4a0da8277f812a110af7e85fcc
+2026-05-28 11:43:21,957 | INFO | ragent:save_to_cache:1241 -  == LLM cache == saving: hybrid:answer:e5fff22a8a0a9f33de4ecfcff01f73e5
+2026-05-28 11:43:21,963 | INFO | ragent:shutdown:784 - limit_async[embedding]: Shutting down priority queue workers
+2026-05-28 11:43:21,964 | INFO | ragent:shutdown:819 - limit_async[embedding]: Priority queue workers shutdown complete
+2026-05-28 11:43:21,964 | INFO | ragent:shutdown:784 - limit_async[llm]: Shutting down priority queue workers
+2026-05-28 11:43:21,965 | INFO | ragent:shutdown:819 - limit_async[llm]: Priority queue workers shutdown complete
+2026-05-28 11:43:21,977 | INFO | ragent:<lambda>:782 - Storage Finalization completed!
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+benchmark/erc_full_eval_qwen4b_smoke_20260528_114149

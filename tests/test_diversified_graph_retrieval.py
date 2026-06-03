@@ -210,6 +210,33 @@ class DiversifiedGraphRetrievalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("中速（5km/h）", combined)
         self.assertIn("上楼", combined)
 
+    def test_final_chunk_selection_can_be_disabled_for_ablation(self):
+        rerank_results = [{"index": 2}, {"index": 1}, {"index": 0}]
+        results_text = ["chunk A", "chunk B", "chunk C"]
+        results_file_paths = ["/tmp/doc.pdf"] * 3
+        results_chunk_metadata = [
+            {"source_ref": "doc.pdf | p.1"},
+            {"source_ref": "doc.pdf | p.2"},
+            {"source_ref": "doc.pdf | p.3"},
+        ]
+        query_param = QueryParam(chunk_top_k=2)
+        query_param.enable_evidence_selection = False
+
+        selected, text_units_context = _select_hybrid_context_entries(
+            rerank_results=rerank_results,
+            results_text=results_text,
+            results_file_paths=results_file_paths,
+            results_chunk_metadata=results_chunk_metadata,
+            query_param=query_param,
+            query_variants=["chunk A", "chunk B", "chunk C"],
+        )
+
+        self.assertEqual(selected, [2, 1])
+        self.assertEqual(
+            [item["content"] for item in text_units_context],
+            ["chunk C", "chunk B"],
+        )
+
     def test_quantitative_table_prefers_chunk_with_actual_variant_coverage(self):
         rerank_results = [
             {"index": 0},
@@ -258,6 +285,35 @@ class DiversifiedGraphRetrievalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("上楼", combined)
         self.assertNotIn("游泳 爬泳（慢）", combined)
 
+    def test_scored_rerank_candidates_are_preserved_before_coverage_selection(self):
+        rerank_results = [
+            {"index": index, "relevance_score": 1.0 - index * 0.01}
+            for index in range(10)
+        ]
+        results_text = [f"high rerank chunk {index}" for index in range(10)]
+        results_file_paths = ["/tmp/doc.pdf"] * 10
+        results_chunk_metadata = [
+            {
+                "source_ref": "doc.pdf | p.10",
+                "section_path": "same table section",
+                "matched_query_variants": ["variant-a"] if index >= 6 else [],
+            }
+            for index in range(10)
+        ]
+
+        selected, text_units_context = _select_hybrid_context_entries(
+            rerank_results=rerank_results,
+            results_text=results_text,
+            results_file_paths=results_file_paths,
+            results_chunk_metadata=results_chunk_metadata,
+            query_param=QueryParam(chunk_top_k=10),
+            query_variants=["variant-a", "variant-b"],
+        )
+
+        self.assertGreaterEqual(set(selected), set(range(6)))
+        combined = "\n".join(item["content"] for item in text_units_context)
+        self.assertIn("high rerank chunk 5", combined)
+
     async def test_diversified_query_preserves_specific_activity_entities(self):
         storage = _FakeVectorStorage(
             {
@@ -291,6 +347,29 @@ class DiversifiedGraphRetrievalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [query for query, _, _ in storage.calls],
             ["含糖饮料, 中速步行, 爬楼", "含糖饮料", "中速步行", "爬楼"],
+        )
+
+    async def test_diversified_query_does_not_force_weak_variant_candidate(self):
+        storage = _FakeVectorStorage(
+            {
+                "主约束, 噪声约束": [
+                    {"entity_name": "strong-full-a", "distance": 0.95},
+                    {"entity_name": "strong-full-b", "distance": 0.90},
+                ],
+                "主约束": [{"entity_name": "strong-full-a", "distance": 0.96}],
+                "噪声约束": [{"entity_name": "weak-split", "distance": 0.20}],
+            }
+        )
+
+        results = await _query_vector_storage_diversified(
+            "主约束, 噪声约束",
+            storage,
+            top_k=2,
+        )
+
+        self.assertEqual(
+            [item["entity_name"] for item in results],
+            ["strong-full-a", "strong-full-b"],
         )
 
     async def test_diversified_query_records_optional_timing_stages(self):
@@ -427,6 +506,34 @@ class DiversifiedGraphRetrievalTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([item["entity_name"] for item in results], ["含糖饮料"])
         self.assertEqual(timings, [])
+
+    async def test_query_variants_can_be_disabled_for_ablation(self):
+        storage = _FakeVectorStorage(
+            {
+                "含糖饮料, 中速步行,爬楼": [
+                    {"entity_name": "full-query-only", "distance": 0.9}
+                ],
+                "含糖饮料": [{"entity_name": "split-query", "distance": 0.99}],
+            }
+        )
+        query_param = QueryParam(mode="hybrid")
+        query_param.enable_query_variants = False
+
+        results = await _query_vector_storage_diversified(
+            "含糖饮料, 中速步行，爬楼",
+            storage,
+            top_k=3,
+            query_param=query_param,
+        )
+
+        self.assertEqual(
+            [item["entity_name"] for item in results],
+            ["full-query-only"],
+        )
+        self.assertEqual(
+            storage.calls,
+            [("含糖饮料, 中速步行,爬楼", 3, None)],
+        )
 
     async def test_keyword_candidate_cache_reuses_warm_variant_results(self):
         config = {

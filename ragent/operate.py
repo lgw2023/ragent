@@ -876,6 +876,27 @@ def _build_query_request_fingerprint_payload(
                     "vector_db_storage_cls_kwargs"
                 ),
                 "enable_rerank": query_param.enable_rerank,
+                "enable_chunk_retrieval": getattr(
+                    query_param, "enable_chunk_retrieval", True
+                ),
+                "enable_graph_retrieval": getattr(
+                    query_param, "enable_graph_retrieval", True
+                ),
+                "enable_entity_retrieval": getattr(
+                    query_param, "enable_entity_retrieval", True
+                ),
+                "enable_relation_retrieval": getattr(
+                    query_param, "enable_relation_retrieval", True
+                ),
+                "enable_graph_expansion": getattr(
+                    query_param, "enable_graph_expansion", True
+                ),
+                "enable_query_variants": getattr(
+                    query_param, "enable_query_variants", True
+                ),
+                "enable_evidence_selection": getattr(
+                    query_param, "enable_evidence_selection", True
+                ),
                 "conversation_history": normalized_history,
                 "history_turns": query_param.history_turns,
                 "keyword_language": addon_params.get("language"),
@@ -1366,6 +1387,7 @@ _RETRIEVAL_VARIANT_TRANSLATION = str.maketrans(
 _DIVERSIFIED_RETRIEVAL_RRF_K = 60
 _DIVERSIFIED_RETRIEVAL_MAX_TERMS = 8
 _DIVERSIFIED_RETRIEVAL_FULL_QUERY_WEIGHT = 0.75
+_DIVERSIFIED_RETRIEVAL_VARIANT_MIN_SCORE_RATIO = 0.75
 _STANDALONE_NUMERIC_KEYWORD_RE = re.compile(
     rf"^[<>~≈约≤≥]?\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?(?:\s*(?:/|~|～|-|—|–|到|至)\s*\d+(?:\.\d+)?\s*(?:{_MEASUREMENT_UNITS_PATTERN})?)*$",
     re.IGNORECASE,
@@ -1421,6 +1443,12 @@ def _build_diversified_retrieval_queries(query: Any) -> list[str]:
         if len(deduped_queries) >= _DIVERSIFIED_RETRIEVAL_MAX_TERMS:
             break
     return deduped_queries
+
+
+def _query_variants_enabled(query_param: QueryParam | None) -> bool:
+    if query_param is None:
+        return True
+    return bool(getattr(query_param, "enable_query_variants", True))
 
 
 def _is_atomic_retrieval_variant(variant: Any) -> bool:
@@ -1508,30 +1536,54 @@ def _select_diversified_vector_results(
     else:
         selected_results: list[dict[str, Any]] = []
         selected_identities: set[tuple[str, ...]] = set()
+        best_distance = max(
+            (_coerce_score(result.get("distance")) for result in merged_results),
+            default=0.0,
+        )
+        primary_variant = query_variants[0].casefold()
+
+        def _matched_variant_keys(result: dict[str, Any]) -> set[str]:
+            return {
+                str(item).casefold()
+                for item in result.get("matched_query_variants", [])
+            }
+
+        def _is_weak_split_only_result(result: dict[str, Any]) -> bool:
+            if best_distance <= 0.0:
+                return False
+            if _coerce_score(result.get("distance")) >= (
+                best_distance * _DIVERSIFIED_RETRIEVAL_VARIANT_MIN_SCORE_RATIO
+            ):
+                return False
+            return primary_variant not in _matched_variant_keys(result)
 
         for variant in [item.casefold() for item in query_variants[1:]]:
             for result in merged_results:
-                matched_variants = {
-                    str(item).casefold()
-                    for item in result.get("matched_query_variants", [])
-                }
+                matched_variants = _matched_variant_keys(result)
                 identity = result.get("_vector_result_identity")
                 if variant not in matched_variants or identity in selected_identities:
+                    continue
+                if _is_weak_split_only_result(result):
                     continue
                 selected_results.append(result)
                 if identity is not None:
                     selected_identities.add(identity)
                 break
 
-        for result in merged_results:
+        for allow_weak_split_only in (False, True):
+            for result in merged_results:
+                if len(selected_results) >= top_k:
+                    break
+                if not allow_weak_split_only and _is_weak_split_only_result(result):
+                    continue
+                identity = result.get("_vector_result_identity")
+                if identity in selected_identities:
+                    continue
+                selected_results.append(result)
+                if identity is not None:
+                    selected_identities.add(identity)
             if len(selected_results) >= top_k:
                 break
-            identity = result.get("_vector_result_identity")
-            if identity in selected_identities:
-                continue
-            selected_results.append(result)
-            if identity is not None:
-                selected_identities.add(identity)
 
     for result in selected_results:
         result.pop("_vector_result_identity", None)
@@ -1551,6 +1603,8 @@ async def _query_vector_storage_diversified(
     hashing_kv: BaseKVStorage | None = None,
 ) -> list[dict[str, Any]]:
     query_variants = _build_diversified_retrieval_queries(query)
+    if not _query_variants_enabled(query_param):
+        query_variants = query_variants[:1]
     if not query_variants:
         return []
     cache_top_k = _resolve_keyword_candidate_cache_top_k(query_param, global_config)
@@ -1826,8 +1880,19 @@ async def _query_graph_hit_vectors_with_shared_embedding(
     if entities_vdb.embedding_func is not relationships_vdb.embedding_func:
         return None
 
-    entity_variants = _build_diversified_retrieval_queries(ll_keywords_str)
-    relation_variants = _build_diversified_retrieval_queries(hl_keywords_str)
+    entity_variants = (
+        _build_diversified_retrieval_queries(ll_keywords_str)
+        if getattr(query_param, "enable_entity_retrieval", True)
+        else []
+    )
+    relation_variants = (
+        _build_diversified_retrieval_queries(hl_keywords_str)
+        if getattr(query_param, "enable_relation_retrieval", True)
+        else []
+    )
+    if not _query_variants_enabled(query_param):
+        entity_variants = entity_variants[:1]
+        relation_variants = relation_variants[:1]
     all_variants = [*entity_variants, *relation_variants]
     if not all_variants:
         return [], []
@@ -1881,6 +1946,8 @@ async def _get_graph_hit_data_concurrently(
     tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]],
     tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]],
 ]:
+    entity_retrieval_enabled = getattr(query_param, "enable_entity_retrieval", True)
+    relation_retrieval_enabled = getattr(query_param, "enable_relation_retrieval", True)
     shared_vector_results = None
     if _shared_graph_hit_embedding_enabled(
         global_config
@@ -1895,6 +1962,14 @@ async def _get_graph_hit_data_concurrently(
         )
 
     async def _get_entity_hits():
+        if not entity_retrieval_enabled:
+            _append_stage_timing(
+                stage_timings,
+                "graph_entity_hits",
+                "图谱命中 / 实体检索已禁用",
+                0.0,
+            )
+            return "", "", [], []
         stage_started_at = time.perf_counter()
         with model_usage_stage("graph_entity_hits", "图谱命中 / 实体"):
             vector_results = (
@@ -1921,6 +1996,14 @@ async def _get_graph_hit_data_concurrently(
         return result
 
     async def _get_relation_hits():
+        if not relation_retrieval_enabled:
+            _append_stage_timing(
+                stage_timings,
+                "graph_relation_hits",
+                "图谱命中 / 关系检索已禁用",
+                0.0,
+            )
+            return "", "", [], []
         stage_started_at = time.perf_counter()
         with model_usage_stage("graph_relation_hits", "图谱命中 / 关系"):
             vector_results = (
@@ -2786,6 +2869,21 @@ def _select_hybrid_context_entries(
 
     chunk_limit = query_param.chunk_top_k or 10
     final_limit = min(len(results_text), max(1, min(chunk_limit, 10)))
+    if not getattr(query_param, "enable_evidence_selection", True):
+        selected_indexes = _build_candidate_order(
+            rerank_results,
+            len(results_text),
+        )[:final_limit]
+        text_units_context: list[dict[str, Any]] = []
+        for rank, index in enumerate(selected_indexes, 1):
+            chunk_entry = {
+                "content": results_text[index],
+                "file_path": results_file_paths[index],
+            }
+            chunk_entry.update(results_chunk_metadata[index])
+            text_units_context.append(_build_chunk_context_entry(rank, chunk_entry))
+        return selected_indexes, text_units_context
+
     retrieval_indexes = list(range(len(results_text)))
     rerank_indexes = _build_candidate_order(rerank_results, len(results_text))
 
@@ -2858,13 +2956,14 @@ def _select_hybrid_context_entries(
 
     selected_indexes: list[int] = []
     selected_set: set[int] = set()
+    protected_selected_indexes: set[int] = set()
     file_counts: Counter[str] = Counter()
 
-    def _try_select(index: int) -> bool:
+    def _try_select(index: int, *, enforce_file_cap: bool = True) -> bool:
         if index in selected_set:
             return False
         file_key = candidate_meta[index]["file_key"]
-        if file_counts[file_key] >= 2:
+        if enforce_file_cap and file_counts[file_key] >= 2:
             return False
         selected_indexes.append(index)
         selected_set.add(index)
@@ -2884,6 +2983,24 @@ def _select_hybrid_context_entries(
 
     retrieval_seed_limit = min(final_limit, max(2, min(5, (final_limit + 1) // 2)))
     covered_query_variants: set[str] = set()
+
+    rerank_score_by_index = {
+        int(item["index"]): item
+        for item in rerank_results
+        if isinstance(item, dict)
+        and str(item.get("index", "")).isdigit()
+        and (
+            item.get("relevance_score") is not None
+            or item.get("score") is not None
+        )
+    }
+    if rerank_score_by_index:
+        rerank_preserve_limit = min(final_limit, max(2, math.ceil(final_limit * 0.6)))
+        for index in rerank_indexes[:rerank_preserve_limit]:
+            if index not in rerank_score_by_index:
+                continue
+            if _try_select(index, enforce_file_cap=False):
+                protected_selected_indexes.add(index)
 
     variant_support_counts: dict[str, int] = {}
     for variant in atomic_query_variants:
@@ -3020,6 +3137,7 @@ def _select_hybrid_context_entries(
                 for position, index in enumerate(selected_indexes)
                 if candidate_meta[index]["file_key"] == file_key
                 and index not in preferred_group_candidates
+                and index not in protected_selected_indexes
             ],
             key=lambda position: (
                 candidate_meta[selected_indexes[position]]["query_support_hit_count"],
@@ -6605,6 +6723,14 @@ async def _build_hybrid_retrieval_debug_data(
     retrieval_total_started_at = time.perf_counter()
 
     async def _retrieve_vector_context():
+        if not getattr(query_param, "enable_chunk_retrieval", True):
+            _append_stage_timing(
+                stage_timings,
+                "vector_retrieval",
+                "混合召回 / Chunk 向量检索已禁用",
+                0.0,
+            )
+            return {}, {}, {}, {}
         stage_started_at = time.perf_counter()
         with model_usage_stage("vector_retrieval", "混合召回 / Chunk 向量检索"):
             try:
@@ -6646,6 +6772,18 @@ async def _build_hybrid_retrieval_debug_data(
             dict[str, dict[str, Any]],
         ] | None = None,
     ):
+        if not getattr(query_param, "enable_graph_retrieval", True):
+            keyword_extraction.apply_keyword_resolution(
+                query_param,
+                keyword_extraction.build_request_keyword_resolution([], []),
+            )
+            _append_stage_timing(
+                stage_timings,
+                "keyword_extraction",
+                "关键词提取已禁用",
+                0.0,
+            )
+            return [], []
         stage_started_at = time.perf_counter()
         with model_usage_stage("keyword_extraction", "关键词提取"):
             hl_keywords, ll_keywords = await get_keywords_from_query(
@@ -6698,30 +6836,46 @@ async def _build_hybrid_retrieval_debug_data(
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
 
-    (
+    if getattr(query_param, "enable_graph_retrieval", True):
         (
-            ll_entities_context,
-            ll_relations_context,
-            ll_node_datas,
-            ll_use_relations,
-        ),
-        (
-            hl_entities_context,
-            hl_relations_context,
-            hl_edge_datas,
-            hl_use_entities,
-        ),
-    ) = await _get_graph_hit_data_concurrently(
-        ll_keywords_str,
-        hl_keywords_str,
-        knowledge_graph_inst,
-        entities_vdb,
-        relationships_vdb,
-        query_param,
-        stage_timings,
-        global_config,
-        hashing_kv,
-    )
+            (
+                ll_entities_context,
+                ll_relations_context,
+                ll_node_datas,
+                ll_use_relations,
+            ),
+            (
+                hl_entities_context,
+                hl_relations_context,
+                hl_edge_datas,
+                hl_use_entities,
+            ),
+        ) = await _get_graph_hit_data_concurrently(
+            ll_keywords_str,
+            hl_keywords_str,
+            knowledge_graph_inst,
+            entities_vdb,
+            relationships_vdb,
+            query_param,
+            stage_timings,
+            global_config,
+            hashing_kv,
+        )
+    else:
+        _append_stage_timing(
+            stage_timings,
+            "graph_retrieval",
+            "图谱实体/关系检索已禁用",
+            0.0,
+        )
+        ll_entities_context = ""
+        ll_relations_context = ""
+        ll_node_datas = []
+        ll_use_relations = []
+        hl_entities_context = ""
+        hl_relations_context = ""
+        hl_edge_datas = []
+        hl_use_entities = []
 
     graph_entities = process_combine_contexts(
         ll_entities_context, hl_entities_context
@@ -6741,22 +6895,30 @@ async def _build_hybrid_retrieval_debug_data(
 
     graph_chunk_candidates: list[dict[str, Any]] = []
     text_chunk_tasks = []
-    if graph_node_seeds:
-        text_chunk_tasks.append(
-            _find_most_related_text_unit_from_entities(
-                graph_node_seeds,
-                query_param,
-                text_chunks_db,
-                knowledge_graph_inst,
+    if getattr(query_param, "enable_graph_expansion", True):
+        if graph_node_seeds:
+            text_chunk_tasks.append(
+                _find_most_related_text_unit_from_entities(
+                    graph_node_seeds,
+                    query_param,
+                    text_chunks_db,
+                    knowledge_graph_inst,
+                )
             )
-        )
-    if graph_edge_seeds:
-        text_chunk_tasks.append(
-            _find_related_text_unit_from_relationships(
-                graph_edge_seeds,
-                query_param,
-                text_chunks_db,
+        if graph_edge_seeds:
+            text_chunk_tasks.append(
+                _find_related_text_unit_from_relationships(
+                    graph_edge_seeds,
+                    query_param,
+                    text_chunks_db,
+                )
             )
+    else:
+        _append_stage_timing(
+            stage_timings,
+            "graph_expansion",
+            "图谱邻域 Chunk 扩展已禁用",
+            0.0,
         )
     if text_chunk_tasks:
         text_chunk_results = await asyncio.gather(*text_chunk_tasks)

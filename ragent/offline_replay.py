@@ -368,7 +368,12 @@ async def _doc_already_seen(
     if callable(get_by_id):
         existing = await get_by_id(doc_id)
         if existing:
-            return True
+            if not isinstance(existing, dict):
+                return True
+            status = existing.get("status")
+            if status is None:
+                return True
+            return status == DocStatus.PROCESSED or status == DocStatus.PROCESSED.value
     return False
 
 
@@ -406,12 +411,55 @@ def _sanitize_vector_record_for_upsert(record: dict[str, Any]) -> dict[str, Any]
     return restored
 
 
+async def _snapshot_vector_records_from_client_storage(
+    vector_storage: BaseVectorStorage,
+    ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    if not ids:
+        return {}
+
+    try:
+        client_storage = await vector_storage.client_storage  # type: ignore[attr-defined]
+    except (AttributeError, NotImplementedError):
+        return {}
+
+    if not isinstance(client_storage, dict):
+        return {}
+    data = client_storage.get("data")
+    matrix = client_storage.get("matrix")
+    if not isinstance(data, list) or matrix is None:
+        return {}
+
+    snapshots: dict[str, dict[str, Any]] = {}
+    for index, record in enumerate(data):
+        if not isinstance(record, dict):
+            continue
+        record_id = record.get("__id__")
+        if record_id not in ids:
+            continue
+        restored = deepcopy(record)
+        try:
+            vector = matrix[index]
+        except (IndexError, TypeError):
+            continue
+        restored["__vector__"] = vector.tolist() if hasattr(vector, "tolist") else vector
+        snapshots[str(record_id)] = restored
+    return snapshots
+
+
 async def _snapshot_vector_records(
     vector_storage: BaseVectorStorage,
     ids: list[str],
 ) -> dict[str, dict[str, Any] | None]:
+    direct_snapshots = await _snapshot_vector_records_from_client_storage(
+        vector_storage,
+        set(ids),
+    )
     snapshots: dict[str, dict[str, Any] | None] = {}
     for record_id in ids:
+        if record_id in direct_snapshots:
+            snapshots[record_id] = direct_snapshots[record_id]
+            continue
         record = await vector_storage.get_by_id(record_id)
         snapshots[record_id] = deepcopy(record) if record else None
     return snapshots

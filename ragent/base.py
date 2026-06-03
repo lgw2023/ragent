@@ -166,6 +166,27 @@ class QueryParam:
     keyword_cache_top_k: int | None = None
     """Number of candidate records stored per normalized keyword when keyword cache is enabled."""
 
+    enable_chunk_retrieval: bool = True
+    """Enable chunk-vector retrieval in hybrid mode. Evaluation-only ablation switch."""
+
+    enable_graph_retrieval: bool = True
+    """Enable entity/relation graph retrieval in hybrid mode. Evaluation-only ablation switch."""
+
+    enable_entity_retrieval: bool = True
+    """Enable entity vector retrieval inside hybrid graph retrieval. Evaluation-only ablation switch."""
+
+    enable_relation_retrieval: bool = True
+    """Enable relation vector retrieval inside hybrid graph retrieval. Evaluation-only ablation switch."""
+
+    enable_graph_expansion: bool = True
+    """Enable graph-neighborhood chunk expansion. Evaluation-only ablation switch."""
+
+    enable_query_variants: bool = True
+    """Enable diversified query variants for vector/entity/relation retrieval. Evaluation-only ablation switch."""
+
+    enable_evidence_selection: bool = True
+    """Enable coverage-aware final context selection. Evaluation-only ablation switch."""
+
 
 @dataclass
 class StorageNameSpace(ABC):
