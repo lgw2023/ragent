@@ -18,7 +18,11 @@ from .constants import GRAPH_FIELD_SEP
 from .kg.shared_storage import finalize_share_data, initialize_pipeline_status
 from .portable_paths import make_portable_file_path, normalize_portable_file_paths
 from .prompt import dismantle_prompt
-from .runtime_env import bootstrap_runtime_environment, is_mep_runtime
+from .runtime_env import (
+    bootstrap_runtime_environment,
+    is_mep_runtime,
+    resolve_ssl_verify,
+)
 from .utils import (
     ModelUsageCollector,
     get_configured_embedding_dim,
@@ -1234,7 +1238,13 @@ def _image_text_ping_sync(prompt: str) -> str:
         },
     )
     image_req_start = time.perf_counter()
-    resp = requests.post(url, headers=headers, json=payload, timeout=timeout_sec)
+    resp = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=timeout_sec,
+        verify=resolve_ssl_verify(),
+    )
     resp.raise_for_status()
     data = resp.json()
     image_elapsed = time.perf_counter() - image_req_start

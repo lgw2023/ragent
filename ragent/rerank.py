@@ -6,6 +6,7 @@ import aiohttp
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
+from .runtime_env import resolve_ssl_verify
 from .utils import logger, log_model_call, record_model_usage
 
 
@@ -173,7 +174,11 @@ async def rerank_api(
     )
 
     rerank_req_start = time.perf_counter()
-    async with aiohttp.ClientSession(trust_env=True) as session:
+    session_kwargs: dict[str, Any] = {"trust_env": True}
+    if not resolve_ssl_verify():
+        session_kwargs["connector"] = aiohttp.TCPConnector(ssl=False)
+
+    async with aiohttp.ClientSession(**session_kwargs) as session:
         async with session.post(request_url, headers=headers, json=data) as response:
             if response.status != 200:
                 error_text = await response.text()

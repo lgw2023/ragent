@@ -5,6 +5,7 @@ import base64
 import importlib
 import importlib.machinery
 import pickle
+import sqlite3
 import sys
 import types
 from pathlib import Path
@@ -164,6 +165,52 @@ def test_build_sidecar_and_query_exact_results(monkeypatch, tmp_path: Path):
     record = asyncio.run(storage.get_by_id("chunk-b"))
     assert record["content"] == "banana"
     asyncio.run(storage.finalize())
+
+
+def test_build_sidecar_allows_duplicate_external_ids(monkeypatch, capsys, tmp_path: Path):
+    _install_fake_faiss(monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    matrix = np.asarray(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    _write_vdb(
+        project_dir / "vdb_chunks.json",
+        matrix,
+        [
+            {"__id__": "chunk-dup", "__created_at__": 1, "content": "apple"},
+            {"__id__": "chunk-dup", "__created_at__": 2, "content": "banana"},
+        ],
+    )
+
+    sidecar_dir = tmp_path / "sidecar"
+    manifest = build_vector_sidecars.build_sidecars(
+        project_dir=project_dir,
+        output_dir=sidecar_dir,
+        namespaces=["chunks"],
+        default_spec=build_vector_sidecars.IndexSpec(index_type="flat"),
+    )
+
+    assert manifest["namespaces"]["chunks"]["count"] == 2
+    warning = capsys.readouterr().err
+    assert "duplicate vector external ids in chunks in vdb_chunks.json" in warning
+    assert "1 duplicate id values" in warning
+    assert "FAISS row_id remains authoritative" in warning
+    assert "chunk-dup(2)" in warning
+
+    conn = sqlite3.connect(sidecar_dir / "metadata_chunks.sqlite")
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM vector_metadata WHERE id = ?",
+            ("chunk-dup",),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 2
 
 
 def test_sidecar_dimension_mismatch_raises(monkeypatch, tmp_path: Path):

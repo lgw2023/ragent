@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections import Counter
 import hashlib
 import importlib.util
 import json
@@ -89,6 +90,35 @@ def _metadata_record(record: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in record.items() if key not in OMIT_METADATA_FIELDS}
 
 
+def _external_id(record: dict[str, Any]) -> str:
+    return str(record.get("__id__") or record.get("id") or "")
+
+
+def _warn_duplicate_external_ids(records: list[dict[str, Any]], *, context: str) -> None:
+    counts = Counter(_external_id(record) for record in records)
+    duplicates = [
+        (external_id, count)
+        for external_id, count in counts.items()
+        if external_id and count > 1
+    ]
+    if not duplicates:
+        return
+
+    duplicates.sort(key=lambda item: (-item[1], item[0]))
+    samples = ", ".join(
+        f"{external_id}({count})" for external_id, count in duplicates[:5]
+    )
+    more = len(duplicates) - 5
+    if more > 0:
+        samples = f"{samples} (+{more} more)"
+    print(
+        f"Warning: duplicate vector external ids in {context}: "
+        f"{len(duplicates)} duplicate id values; "
+        f"FAISS row_id remains authoritative. Samples: {samples}",
+        file=sys.stderr,
+    )
+
+
 def write_metadata_db(path: Path, records: list[dict[str, Any]]) -> None:
     if path.exists():
         path.unlink()
@@ -100,7 +130,7 @@ def write_metadata_db(path: Path, records: list[dict[str, Any]]) -> None:
             f"""
             CREATE TABLE {METADATA_TABLE} (
                 row_id INTEGER PRIMARY KEY,
-                id TEXT NOT NULL UNIQUE,
+                id TEXT NOT NULL,
                 created_at INTEGER,
                 record_json TEXT NOT NULL
             )
@@ -111,7 +141,7 @@ def write_metadata_db(path: Path, records: list[dict[str, Any]]) -> None:
         )
         rows = []
         for row_id, record in enumerate(records):
-            external_id = str(record.get("__id__") or record.get("id") or "")
+            external_id = _external_id(record)
             if not external_id:
                 raise ValueError(f"Missing vector record id at row {row_id}")
             metadata = _metadata_record(record)
@@ -196,6 +226,10 @@ def _build_namespace_sidecar(
         raise FileNotFoundError(f"Vector DB file not found: {source_path}")
 
     embedding_dim, records, matrix = load_vdb(source_path)
+    _warn_duplicate_external_ids(
+        records,
+        context=f"{namespace} in {source_path.name}",
+    )
     index_file = f"faiss_index_{namespace}.index"
     metadata_file = f"metadata_{namespace}.sqlite"
     index_path = output_dir / index_file

@@ -41,6 +41,7 @@ from tenacity import (
     retry_if_exception_type,
 )
 from pydantic import BaseModel
+from ragent.runtime_env import resolve_ssl_verify
 from ragent.utils import (
     wrap_embedding_func_with_attrs,
     locate_json_string_body_from_string,
@@ -1118,6 +1119,7 @@ async def openai_complete_if_cache(
         "messages": messages,
         **kwargs,
     }
+    request_kwargs.setdefault("ssl_verify", resolve_ssl_verify())
 
     try:
         response = await acompletion(**request_kwargs)
@@ -1526,7 +1528,10 @@ async def openai_embed(
         _trace_model(
             f"embed.request.start model={embedding_model} provider={resolved_provider or 'openai-compatible'} batch_size={len(texts)}"
         )
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            verify=resolve_ssl_verify(),
+        ) as client:
             response = await client.post(request_url, headers=headers, json=payload)
             try:
                 response.raise_for_status()
@@ -1594,6 +1599,7 @@ async def openai_embed(
         "input": texts,
         "encoding_format": "float",
     }
+    request_kwargs.setdefault("ssl_verify", resolve_ssl_verify())
     if dimensions:
         supports_dimensions = _supports_openai_param(
             model=request_model,

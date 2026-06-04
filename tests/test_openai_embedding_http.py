@@ -21,8 +21,9 @@ class _FakeEmbeddingResponse:
 
 def _install_fake_async_client(monkeypatch, captured_requests: list[dict]) -> None:
     class FakeAsyncClient:
-        def __init__(self, *, timeout):
+        def __init__(self, *, timeout, verify=True):
             self.timeout = timeout
+            self.verify = verify
 
         async def __aenter__(self):
             return self
@@ -36,6 +37,7 @@ def _install_fake_async_client(monkeypatch, captured_requests: list[dict]) -> No
                     "url": url,
                     "headers": headers,
                     "json": json,
+                    "verify": self.verify,
                 }
             )
             return _FakeEmbeddingResponse()
@@ -100,3 +102,14 @@ def test_openai_embed_skips_dimensions_when_request_override_is_disabled(
 
     assert captured_requests[0]["json"]["model"] == "qwen3-embedding-4b-local"
     assert "dimensions" not in captured_requests[0]["json"]
+
+
+def test_openai_embed_http_uses_ssl_verify_env(monkeypatch):
+    captured_requests: list[dict] = []
+    _install_fake_async_client(monkeypatch, captured_requests)
+    _set_custom_openai_embedding_env(monkeypatch)
+    monkeypatch.setenv("RAGENT_SSL_VERIFY", "0")
+
+    asyncio.run(openai_module.openai_embed(["hello"]))
+
+    assert captured_requests[0]["verify"] is False

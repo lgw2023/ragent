@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -11,6 +12,7 @@ from dotenv import dotenv_values, find_dotenv, load_dotenv
 _LOCAL_RUNTIME_VALUES = {"", "local", "cli", "dev", "development"}
 _MEP_RUNTIME_VALUES = {"mep", "component", "platform"}
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_BOOLEAN_FALSE_VALUES = {"0", "false", "no", "off"}
 _MISSING = object()
 
 
@@ -64,6 +66,30 @@ def should_skip_dotenv(runtime_env: str | None = None) -> bool:
         return True
     raw_override = (os.getenv("RAGENT_SKIP_DOTENV") or "").strip().lower()
     return raw_override in _TRUE_VALUES
+
+
+def resolve_ssl_verify() -> bool:
+    """Return whether outbound model API calls should verify TLS certificates."""
+    for env_name in ("RAGENT_SSL_VERIFY", "SSL_VERIFY"):
+        raw_value = os.getenv(env_name)
+        if raw_value is None:
+            continue
+
+        normalized = raw_value.strip().lower()
+        if normalized in _TRUE_VALUES:
+            return True
+        if normalized in _BOOLEAN_FALSE_VALUES:
+            return False
+
+        print(
+            f"Warning: unsupported {env_name}={raw_value!r}; "
+            "TLS verification remains disabled. Use one of "
+            "1/true/yes/on or 0/false/no/off.",
+            file=sys.stderr,
+        )
+        return False
+
+    return False
 
 
 def _iter_dotenv_candidates(repo_root: Path | None = None):
