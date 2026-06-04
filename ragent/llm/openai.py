@@ -13,16 +13,17 @@ if sys.version_info < (3, 9):
 else:
     from collections.abc import AsyncIterator, Iterator
 try:
+    import litellm
     from litellm import (
-    acompletion,
-    aembedding,
-    APIConnectionError,
-    InternalServerError,
-    RateLimitError,
-    Timeout as APITimeoutError,
-    get_llm_provider,
-    get_supported_openai_params,
-    supports_response_schema,
+        acompletion,
+        aembedding,
+        APIConnectionError,
+        InternalServerError,
+        RateLimitError,
+        Timeout as APITimeoutError,
+        get_llm_provider,
+        get_supported_openai_params,
+        supports_response_schema,
     )
 except ModuleNotFoundError as exc:
     if exc.name != "litellm":
@@ -1119,7 +1120,10 @@ async def openai_complete_if_cache(
         "messages": messages,
         **kwargs,
     }
-    request_kwargs.setdefault("ssl_verify", resolve_ssl_verify())
+    ssl_verify = request_kwargs.pop("ssl_verify", None)
+    litellm.ssl_verify = (
+        resolve_ssl_verify() if ssl_verify is None else ssl_verify
+    )
 
     try:
         response = await acompletion(**request_kwargs)

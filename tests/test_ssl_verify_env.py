@@ -40,7 +40,7 @@ def test_resolve_ssl_verify_can_enable_with_ragent_env(monkeypatch):
     assert runtime_env.resolve_ssl_verify() is True
 
 
-def test_openai_complete_passes_ssl_verify_to_litellm(monkeypatch):
+def test_openai_complete_sets_global_ssl_verify_without_request_kwarg(monkeypatch):
     captured_kwargs: dict = {}
 
     async def fake_acompletion(**kwargs):
@@ -55,6 +55,7 @@ def test_openai_complete_passes_ssl_verify_to_litellm(monkeypatch):
         )
 
     monkeypatch.setenv("RAGENT_SSL_VERIFY", "0")
+    monkeypatch.setattr(openai_module.litellm, "ssl_verify", True)
     monkeypatch.setattr(openai_module, "acompletion", fake_acompletion)
     monkeypatch.setattr(
         openai_module,
@@ -78,4 +79,5 @@ def test_openai_complete_passes_ssl_verify_to_litellm(monkeypatch):
     )
 
     assert result == "ok"
-    assert captured_kwargs["ssl_verify"] is False
+    assert "ssl_verify" not in captured_kwargs
+    assert openai_module.litellm.ssl_verify is False
