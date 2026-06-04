@@ -97,6 +97,17 @@ RAG_INSERT_TRACE_ENABLED = os.getenv("RAG_INSERT_TRACE", "0") == "1"
 _INDEX_METADATA_KEY = "corpus"
 
 
+def _resolve_default_vector_storage() -> str:
+    explicit_storage = os.getenv("VECTOR_STORAGE")
+    if explicit_storage:
+        return explicit_storage
+
+    runtime_backend = os.getenv("RAG_VECTOR_RUNTIME_BACKEND", "").strip().lower()
+    if runtime_backend in {"faiss_sidecar", "faiss-sidecar"}:
+        return "FaissSidecarVectorDBStorage"
+    return "NanoVectorDBStorage"
+
+
 def _trace_insert(msg: str) -> None:
     if RAG_INSERT_TRACE_ENABLED:
         logger.info(f"[RAG-TRACE] {msg}")
@@ -246,7 +257,7 @@ class Ragent:
     kv_storage: str = field(default="SQLiteKVStorage")
     """Storage backend for key-value data."""
 
-    vector_storage: str = field(default="NanoVectorDBStorage")
+    vector_storage: str = field(default_factory=_resolve_default_vector_storage)
     """Storage backend for vector embeddings."""
 
     graph_storage: str = field(default="NetworkXStorage")

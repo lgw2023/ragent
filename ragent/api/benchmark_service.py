@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -97,7 +98,22 @@ class BenchmarkServiceState:
     async def startup(self) -> None:
         started_at = time.perf_counter()
         await ensure_startup_model_check_once()
+        await self.preload_configured_projects()
         self.startup_ready_seconds = round(time.perf_counter() - started_at, 6)
+
+    async def preload_configured_projects(self) -> None:
+        raw_project_dirs = os.getenv("RAG_PRELOAD_PROJECT_DIRS", "")
+        project_dirs = [
+            item.strip()
+            for part in raw_project_dirs.split(os.pathsep)
+            for item in part.split(",")
+            if item.strip()
+        ]
+        for raw_project_dir in project_dirs:
+            project_dir = str(normalize_project_dir(raw_project_dir))
+            if not normalize_project_dir(project_dir).is_dir():
+                raise RuntimeError(f"Preload project dir not found: {project_dir}")
+            await self.get_or_create_session(project_dir, require_llm=True)
 
     async def shutdown(self) -> None:
         async with self._registry_lock:

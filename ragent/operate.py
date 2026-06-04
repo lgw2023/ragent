@@ -391,7 +391,7 @@ def _resolve_vector_storage_cache_profile(
         if env_value:
             embedding_env[env_name] = env_value
 
-    return {
+    profile = {
         "vector_namespace": getattr(vector_storage, "namespace", None),
         "vector_storage_type": (
             f"{type(vector_storage).__module__}.{type(vector_storage).__qualname__}"
@@ -412,6 +412,15 @@ def _resolve_vector_storage_cache_profile(
         "embedding": embedding_identifier,
         "embedding_env": embedding_env,
     }
+    for attr_name in (
+        "sidecar_manifest_digest",
+        "sidecar_index_type",
+        "sidecar_manifest_path",
+    ):
+        attr_value = getattr(vector_storage, attr_name, None)
+        if attr_value not in (None, "", [], {}):
+            profile[attr_name] = attr_value
+    return profile
 
 
 def _build_keyword_candidate_cache_fingerprint(
