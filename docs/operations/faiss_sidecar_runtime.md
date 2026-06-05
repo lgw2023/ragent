@@ -28,6 +28,22 @@ uv run python tools/build_vector_sidecars.py \
   --hnsw-ef-search 128
 ```
 
+After relationships HNSW is validated, test entities ANN separately instead of
+changing chunks. Keep chunks exact and override only entities/relationships:
+
+```bash
+uv run python tools/build_vector_sidecars.py \
+  --project-dir /data/disk1/FoodScience_KG_final_sharded \
+  --output-dir /data/disk1/FoodScience_KG_final_sharded_sidecar_ent_hnsw_e128_rel_hnsw_r128 \
+  --index-type flat \
+  --entities-index-type hnsw \
+  --entities-hnsw-ef-search 128 \
+  --relationships-index-type hnsw \
+  --relationships-hnsw-ef-search 128 \
+  --hnsw-m 16 \
+  --hnsw-ef-construction 200
+```
+
 ## Run Benchmark Service
 
 Enable the sidecar vector storage and preload the project at service startup:

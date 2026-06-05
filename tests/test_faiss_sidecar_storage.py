@@ -15,9 +15,15 @@ import numpy as np
 from tools import build_vector_sidecars
 
 
+class _FakeHnswParams:
+    efConstruction = 0
+    efSearch = 0
+
+
 class _FakeFaissIndexFlatIP:
     def __init__(self, dim: int):
         self.dim = dim
+        self.hnsw = _FakeHnswParams()
         self.vectors = np.array([], dtype=np.float32).reshape(0, dim)
 
     @property
@@ -46,6 +52,11 @@ class _FakeFaissIndexFlatIP:
         return distances.astype(np.float32), order.astype(np.int64)
 
 
+class _FakeFaissIndexHNSWFlat(_FakeFaissIndexFlatIP):
+    def __init__(self, dim: int, _m: int, _metric: int):
+        super().__init__(dim)
+
+
 def _normalize_l2(matrix):
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
@@ -65,7 +76,7 @@ def _fake_read_index(path):
 def _fake_faiss_module():
     module = types.ModuleType("faiss")
     module.IndexFlatIP = _FakeFaissIndexFlatIP
-    module.IndexHNSWFlat = _FakeFaissIndexFlatIP
+    module.IndexHNSWFlat = _FakeFaissIndexHNSWFlat
     module.IndexIVFFlat = lambda quantizer, dim, nlist, metric: _FakeFaissIndexFlatIP(dim)
     module.METRIC_INNER_PRODUCT = 0
     module.normalize_L2 = _normalize_l2
@@ -211,6 +222,68 @@ def test_build_sidecar_allows_duplicate_external_ids(monkeypatch, capsys, tmp_pa
     finally:
         conn.close()
     assert count == 2
+
+
+def test_build_sidecar_supports_entity_and_relationship_overrides(
+    monkeypatch, tmp_path: Path
+):
+    _install_fake_faiss(monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    matrix = np.asarray(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    _write_vdb(
+        project_dir / "vdb_chunks.json",
+        matrix,
+        [
+            {"__id__": "chunk-a", "content": "apple"},
+            {"__id__": "chunk-b", "content": "banana"},
+        ],
+    )
+    _write_vdb(
+        project_dir / "vdb_entities.json",
+        matrix,
+        [
+            {"__id__": "entity-a", "entity_name": "apple"},
+            {"__id__": "entity-b", "entity_name": "banana"},
+        ],
+    )
+    _write_vdb(
+        project_dir / "vdb_relationships.json",
+        matrix,
+        [
+            {"__id__": "rel-a", "src_id": "entity-a", "tgt_id": "entity-b"},
+            {"__id__": "rel-b", "src_id": "entity-b", "tgt_id": "entity-a"},
+        ],
+    )
+
+    manifest = build_vector_sidecars.build_sidecars(
+        project_dir=project_dir,
+        output_dir=tmp_path / "sidecar",
+        namespaces=["chunks", "entities", "relationships"],
+        default_spec=build_vector_sidecars.IndexSpec(index_type="flat"),
+        entities_spec=build_vector_sidecars.IndexSpec(
+            index_type="hnsw",
+            hnsw_ef_search=64,
+        ),
+        relationships_spec=build_vector_sidecars.IndexSpec(
+            index_type="hnsw",
+            hnsw_ef_search=128,
+        ),
+    )
+
+    namespaces = manifest["namespaces"]
+    assert namespaces["chunks"]["index_type"] == "flat"
+    assert namespaces["chunks"]["search_params"] == {}
+    assert namespaces["entities"]["index_type"] == "hnsw"
+    assert namespaces["entities"]["search_params"] == {"ef_search": 64}
+    assert namespaces["relationships"]["index_type"] == "hnsw"
+    assert namespaces["relationships"]["search_params"] == {"ef_search": 128}
 
 
 def test_sidecar_dimension_mismatch_raises(monkeypatch, tmp_path: Path):

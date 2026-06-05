@@ -258,6 +258,7 @@ def build_sidecars(
     output_dir: Path,
     namespaces: list[str],
     default_spec: IndexSpec,
+    entities_spec: IndexSpec | None = None,
     relationships_spec: IndexSpec | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -272,7 +273,11 @@ def build_sidecars(
             raise ValueError(
                 f"Unknown namespace {namespace!r}. Expected one of {sorted(VDB_NAMESPACES)}"
             )
-        spec = relationships_spec if namespace == "relationships" and relationships_spec else default_spec
+        spec = default_spec
+        if namespace == "entities" and entities_spec:
+            spec = entities_spec
+        elif namespace == "relationships" and relationships_spec:
+            spec = relationships_spec
         manifest["namespaces"][namespace] = _build_namespace_sidecar(
             project_dir=project_dir,
             output_dir=output_dir,
@@ -321,22 +326,60 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Override index type for relationships only.",
     )
+    parser.add_argument(
+        "--entities-index-type",
+        choices=["flat", "hnsw", "ivf_flat"],
+        default=None,
+        help="Override index type for entities only.",
+    )
     parser.add_argument("--hnsw-m", type=int, default=16)
     parser.add_argument("--hnsw-ef-construction", type=int, default=200)
     parser.add_argument("--hnsw-ef-search", type=int, default=128)
+    parser.add_argument(
+        "--entities-hnsw-ef-search",
+        type=int,
+        default=None,
+        help="Override HNSW efSearch for entities only.",
+    )
+    parser.add_argument(
+        "--relationships-hnsw-ef-search",
+        type=int,
+        default=None,
+        help="Override HNSW efSearch for relationships only.",
+    )
     parser.add_argument("--ivf-nlist", type=int, default=4096)
     parser.add_argument("--ivf-nprobe", type=int, default=32)
+    parser.add_argument(
+        "--entities-ivf-nprobe",
+        type=int,
+        default=None,
+        help="Override IVF nprobe for entities only.",
+    )
+    parser.add_argument(
+        "--relationships-ivf-nprobe",
+        type=int,
+        default=None,
+        help="Override IVF nprobe for relationships only.",
+    )
     return parser.parse_args(argv)
 
 
-def _spec_from_args(args: argparse.Namespace, index_type: str) -> IndexSpec:
+def _spec_from_args(
+    args: argparse.Namespace,
+    index_type: str,
+    *,
+    hnsw_ef_search: int | None = None,
+    ivf_nprobe: int | None = None,
+) -> IndexSpec:
     return IndexSpec(
         index_type=index_type,
         hnsw_m=args.hnsw_m,
         hnsw_ef_construction=args.hnsw_ef_construction,
-        hnsw_ef_search=args.hnsw_ef_search,
+        hnsw_ef_search=(
+            hnsw_ef_search if hnsw_ef_search is not None else args.hnsw_ef_search
+        ),
         ivf_nlist=args.ivf_nlist,
-        ivf_nprobe=args.ivf_nprobe,
+        ivf_nprobe=ivf_nprobe if ivf_nprobe is not None else args.ivf_nprobe,
     )
 
 
@@ -346,8 +389,23 @@ def main(argv: list[str] | None = None) -> None:
     output_dir = Path(args.output_dir).expanduser().resolve()
     namespaces = _parse_namespaces(args.namespaces)
     default_spec = _spec_from_args(args, args.index_type)
+    entities_spec = (
+        _spec_from_args(
+            args,
+            args.entities_index_type,
+            hnsw_ef_search=args.entities_hnsw_ef_search,
+            ivf_nprobe=args.entities_ivf_nprobe,
+        )
+        if args.entities_index_type
+        else None
+    )
     relationships_spec = (
-        _spec_from_args(args, args.relationships_index_type)
+        _spec_from_args(
+            args,
+            args.relationships_index_type,
+            hnsw_ef_search=args.relationships_hnsw_ef_search,
+            ivf_nprobe=args.relationships_ivf_nprobe,
+        )
         if args.relationships_index_type
         else None
     )
@@ -356,6 +414,7 @@ def main(argv: list[str] | None = None) -> None:
         output_dir=output_dir,
         namespaces=namespaces,
         default_spec=default_spec,
+        entities_spec=entities_spec,
         relationships_spec=relationships_spec,
     )
     print(
@@ -367,6 +426,7 @@ def main(argv: list[str] | None = None) -> None:
                         "count": item["count"],
                         "embedding_dim": item["embedding_dim"],
                         "index_type": item["index_type"],
+                        "search_params": item["search_params"],
                     }
                     for name, item in manifest["namespaces"].items()
                 },
