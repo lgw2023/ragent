@@ -2,6 +2,9 @@
 
 Date: 2026-06-05
 
+Status: completed. Results are recorded in `RESULTS_TEMPLATE.md` and
+`benchmark/foodscience_kg_retrieval_scaleup_20260605_1132/summary.md`.
+
 This task continues the FoodScience KG performance work after relationships HNSW
 proved effective. Full answer generation is out of scope here because it is
 dominated by external LLM inference. Measure only retrieval-layer behavior.
@@ -45,8 +48,9 @@ Use the previous completed experiment as the baseline:
 | `exact` | `http://127.0.0.1:8099` | chunks/entities/relationships all flat |
 | `rel_hnsw_ef128` | `http://127.0.0.1:8102` | chunks flat, entities flat, relationships HNSW ef128 |
 
-`rel_hnsw_ef128` is the current candidate default. New variants should beat it
-on retrieval-only latency without losing final context chunks.
+`rel_hnsw_ef128` was the pre-scale-up candidate default. The completed
+50-query run found that `ent_hnsw_e128_rel_hnsw_r128` should replace it as the
+FoodScience retrieval-layer default.
 
 ## Candidate Sidecars
 
@@ -110,7 +114,7 @@ uv run --frozen --no-sync python -m ragent.api.benchmark_service \
 ```
 
 Use one port per candidate. Keep `:8099` and `:8102` running for exact and
-current-default comparisons.
+pre-scale-up default comparisons.
 
 ## Run Retrieval-only Scale-up
 
@@ -146,7 +150,7 @@ Notes:
 
 ## Metrics To Decide
 
-Promote entities HNSW only if it improves the current default:
+Promote entities HNSW only if it improves the pre-scale-up default:
 
 | Gate | Required |
 | --- | --- |
@@ -157,8 +161,9 @@ Promote entities HNSW only if it improves the current default:
 | retrieval-only p95 vs `rel_hnsw_ef128` | lower or not worse |
 | concurrency error rate | no systematic 5xx/timeout increase |
 
-If entities HNSW does not improve p95, keep entities flat and focus on
-keyword extraction, rerank, or service-level queuing in later work.
+The completed run passed these gates: retrieval p50/p95 improved versus
+relationships-only HNSW, final chunk overlap p50 stayed at 10/10, and all
+concurrency levels completed with 0 errors and 0 cache hits.
 
 ## Required Output
 

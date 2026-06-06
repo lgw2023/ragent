@@ -21,7 +21,12 @@ from ragent.offline_replay import (  # noqa: E402
     replay_raw_merge_units_to_rag,
 )
 from ragent.ragent import Ragent  # noqa: E402
+from ragent.vector_sidecar_artifacts import (  # noqa: E402
+    DEFAULT_SIDECAR_PROFILE,
+    vector_sidecar_build_enabled,
+)
 from ragent.utils import ModelUsageCollector, write_model_usage_report  # noqa: E402
+from tools.build_vector_sidecars import build_profile_sidecars  # noqa: E402
 
 
 def _prepare_output_dir(output_dir: Path, *, overwrite: bool, resume: bool) -> None:
@@ -139,6 +144,14 @@ def _parse_args() -> argparse.Namespace:
             "and restore touched graph/vector records where possible."
         ),
     )
+    parser.add_argument(
+        "--no-vector-sidecar",
+        action="store_true",
+        help=(
+            "Do not build the default project-local FAISS sidecar after replay. "
+            "Use only for comparison/debug runs."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -168,6 +181,7 @@ async def _run(args: argparse.Namespace) -> None:
 
     collector = ModelUsageCollector("replay_raw_merge_units_to_project")
     stats_payload: dict | None = None
+    vector_sidecar_manifest: dict | None = None
     try:
         with collector:
             rag: Ragent | None = None
@@ -200,6 +214,16 @@ async def _run(args: argparse.Namespace) -> None:
                         )
                         if callable(shutdown):
                             await shutdown()
+            if (
+                stats_payload is not None
+                and vector_sidecar_build_enabled()
+                and not getattr(args, "no_vector_sidecar", False)
+            ):
+                vector_sidecar_manifest = await asyncio.to_thread(
+                    build_profile_sidecars,
+                    project_dir=output_dir,
+                    profile=DEFAULT_SIDECAR_PROFILE,
+                )
     finally:
         report_path = write_model_usage_report(
             collector,
@@ -215,6 +239,11 @@ async def _run(args: argparse.Namespace) -> None:
         )
         if stats_payload is not None:
             stats_payload["model_usage_report"] = report_path
+            if vector_sidecar_manifest is not None:
+                stats_payload["vector_sidecar"] = {
+                    "profile": vector_sidecar_manifest.get("profile"),
+                    "output_dir": str(output_dir / "vector_sidecars" / "default"),
+                }
 
     if stats_payload is None:
         raise RuntimeError("raw replay finished without stats")

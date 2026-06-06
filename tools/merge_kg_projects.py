@@ -21,6 +21,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from ragent.constants import GRAPH_FIELD_SEP
+from ragent.vector_sidecar_artifacts import (
+    DEFAULT_SIDECAR_PROFILE,
+    vector_sidecar_build_enabled,
+)
+from tools.build_vector_sidecars import build_profile_sidecars
 
 
 GRAPH_FILE_NAME = "graph_chunk_entity_relation.graphml"
@@ -54,6 +59,8 @@ class MergeStats:
     doc_status_records: int = 0
     dry_run: bool = False
     output_dir: str = ""
+    vector_sidecar_profile: str | None = None
+    vector_sidecar_dir: str | None = None
 
 
 def _compute_mdhash_id(content: str, prefix: str = "") -> str:
@@ -660,6 +667,7 @@ def merge_projects(
     *,
     overwrite: bool = False,
     dry_run: bool = False,
+    build_vector_sidecar: bool = True,
 ) -> MergeStats:
     sources = [Path(source_dir).expanduser().resolve() for source_dir in source_dirs]
     if len(sources) < 1:
@@ -709,6 +717,13 @@ def merge_projects(
 
     _write_index_metadata(output_path)
     _write_empty_query_cache(output_path)
+    if build_vector_sidecar and vector_sidecar_build_enabled():
+        manifest = build_profile_sidecars(
+            project_dir=output_path,
+            profile=DEFAULT_SIDECAR_PROFILE,
+        )
+        stats.vector_sidecar_profile = str(manifest.get("profile") or "")
+        stats.vector_sidecar_dir = str(output_path / "vector_sidecars" / "default")
     return stats
 
 
@@ -740,6 +755,14 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Compute merge statistics without writing the output directory.",
     )
+    parser.add_argument(
+        "--no-vector-sidecar",
+        action="store_true",
+        help=(
+            "Do not build the default project-local FAISS sidecar after merge. "
+            "Use only for comparison/debug runs."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -750,6 +773,7 @@ def main() -> None:
         args.output,
         overwrite=args.overwrite,
         dry_run=args.dry_run,
+        build_vector_sidecar=not args.no_vector_sidecar,
     )
     print(json.dumps(asdict(stats), ensure_ascii=False, indent=2))
 

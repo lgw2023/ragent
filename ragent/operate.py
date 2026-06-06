@@ -5269,15 +5269,48 @@ async def get_keywords_from_query(
         keyword_extraction.apply_keyword_resolution(query_param, resolution)
         return query_param.hl_keywords, query_param.ll_keywords
 
-    # Extract keywords using extract_keywords_only function which already supports conversation history
-    hl_keywords, ll_keywords = await extract_keywords_only(
-        query, query_param, global_config, hashing_kv
-    )
-    keyword_extraction.apply_keyword_resolution(
-        query_param,
-        keyword_extraction.build_llm_keyword_resolution(hl_keywords, ll_keywords),
-    )
-    return hl_keywords, ll_keywords
+    # Extract keywords using extract_keywords_only function which already supports conversation history.
+    try:
+        hl_keywords, ll_keywords = await extract_keywords_only(
+            query, query_param, global_config, hashing_kv
+        )
+        if (
+            not hl_keywords
+            and not ll_keywords
+            and keyword_extraction.keyword_fallback_enabled(global_config)
+        ):
+            logger.warning(
+                "LLM keyword extraction returned no keywords; using GLiNER fallback."
+            )
+            resolution = await keyword_extraction.extract_keywords_with_gliner(
+                query,
+                global_config,
+                fallback_reason=(
+                    "LLM keyword extraction returned no keywords; using no-LLM "
+                    "token classification fallback"
+                ),
+            )
+            keyword_extraction.apply_keyword_resolution(query_param, resolution)
+            return query_param.hl_keywords, query_param.ll_keywords
+        keyword_extraction.apply_keyword_resolution(
+            query_param,
+            keyword_extraction.build_llm_keyword_resolution(hl_keywords, ll_keywords),
+        )
+        return hl_keywords, ll_keywords
+    except Exception as exc:
+        if not keyword_extraction.keyword_fallback_enabled(global_config):
+            raise
+        logger.warning("LLM keyword extraction failed; using GLiNER fallback: %s", exc)
+        resolution = await keyword_extraction.extract_keywords_with_gliner(
+            query,
+            global_config,
+            fallback_reason=(
+                "LLM keyword extraction failed; using no-LLM token "
+                f"classification fallback: {exc}"
+            ),
+        )
+        keyword_extraction.apply_keyword_resolution(query_param, resolution)
+        return query_param.hl_keywords, query_param.ll_keywords
 
 
 async def extract_keywords_only(

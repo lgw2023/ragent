@@ -64,6 +64,8 @@ class ProjectSession:
     rag: Any
     query_count: int = 0
     query_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    vector_sidecar_info: dict[str, Any] | None = None
+    keyword_fallback_preload_info: dict[str, Any] | None = None
 
     async def clear_cache(
         self,
@@ -149,7 +151,16 @@ class BenchmarkServiceState:
                 require_llm=require_llm,
                 enable_rerank=enable_rerank,
             )
-            session = ProjectSession(project_dir=project_dir, rag=rag)
+            session = ProjectSession(
+                project_dir=project_dir,
+                rag=rag,
+                vector_sidecar_info=getattr(rag, "vector_sidecar_info", None),
+                keyword_fallback_preload_info=getattr(
+                    rag,
+                    "keyword_fallback_preload_info",
+                    None,
+                ),
+            )
             async with self._registry_lock:
                 self._sessions[project_dir] = session
             return session, False, list(init_stage_timings)
@@ -288,6 +299,14 @@ def create_app() -> FastAPI:
             "started_at": state.started_at,
             "startup_ready_seconds": state.startup_ready_seconds,
             "loaded_projects": sorted(state._sessions.keys()),
+            "loaded_project_details": {
+                project_dir: {
+                    "query_count": session.query_count,
+                    "vector_sidecar": session.vector_sidecar_info,
+                    "keyword_fallback_preload": session.keyword_fallback_preload_info,
+                }
+                for project_dir, session in sorted(state._sessions.items())
+            },
             "supported_cache_types": list(QUERY_CACHE_TYPES),
         }
 

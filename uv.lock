@@ -3156,6 +3156,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "configparser" },
     { name = "dotenv" },
+    { name = "faiss-cpu" },
     { name = "future" },
     { name = "httpx" },
     { name = "litellm" },
@@ -3179,7 +3180,6 @@ all = [
     { name = "ascii-colors" },
     { name = "asyncpg" },
     { name = "distro" },
-    { name = "faiss-cpu" },
     { name = "fastapi" },
     { name = "gliner", extra = ["stanza"] },
     { name = "httpcore" },
@@ -3221,6 +3221,8 @@ api = [
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
     { name = "pytz" },
+    { name = "torch" },
+    { name = "transformers" },
     { name = "uvicorn" },
 ]
 build = [
@@ -3230,9 +3232,6 @@ build = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "xlsxwriter" },
-]
-faiss = [
-    { name = "faiss-cpu" },
 ]
 hf = [
     { name = "gliner", extra = ["stanza"] },
@@ -3264,7 +3263,7 @@ requires-dist = [
     { name = "configparser" },
     { name = "distro", marker = "extra == 'api'" },
     { name = "dotenv" },
-    { name = "faiss-cpu", marker = "extra == 'faiss'" },
+    { name = "faiss-cpu", specifier = "==1.13.2" },
     { name = "fastapi", marker = "extra == 'api'" },
     { name = "future" },
     { name = "gliner", extras = ["stanza"], marker = "extra == 'api'" },
@@ -3302,7 +3301,9 @@ requires-dist = [
     { name = "setuptools" },
     { name = "tenacity" },
     { name = "tiktoken" },
+    { name = "torch", marker = "extra == 'api'" },
     { name = "torch", marker = "extra == 'hf'" },
+    { name = "transformers", marker = "extra == 'api'" },
     { name = "transformers", marker = "extra == 'hf'" },
     { name = "uvicorn", marker = "extra == 'api'" },
     { name = "xlsxwriter", marker = "extra == 'build'", specifier = ">=3.1.0" },

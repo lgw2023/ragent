@@ -20,8 +20,13 @@ from .portable_paths import make_portable_file_path, normalize_portable_file_pat
 from .prompt import dismantle_prompt
 from .runtime_env import (
     bootstrap_runtime_environment,
-    is_mep_runtime,
     resolve_ssl_verify,
+)
+from .vector_sidecar_artifacts import (
+    DEFAULT_SIDECAR_PROFILE,
+    VectorSidecarArtifactError,
+    resolve_project_vector_sidecar,
+    resolve_vector_runtime_backend,
 )
 from .utils import (
     ModelUsageCollector,
@@ -1118,15 +1123,20 @@ def _keyword_fallback_preload_enabled(default: bool) -> bool:
 
 
 def _should_preload_keyword_fallback_for_runtime(*, require_llm: bool) -> bool:
-    default_enabled = (
-        is_mep_runtime() and not require_llm and not _has_complete_llm_config()
-    )
-    return _keyword_fallback_preload_enabled(default_enabled)
+    if not keyword_extraction.keyword_fallback_enabled():
+        return False
+    return _keyword_fallback_preload_enabled(True)
+
+
+def _vector_sidecar_check_hashes_enabled() -> bool:
+    parsed = _parse_optional_bool_env_value(os.getenv("RAG_VECTOR_SIDECAR_CHECK_HASHES"))
+    return True if parsed is None else parsed
 
 
 async def ensure_keyword_fallback_model_ready_once(
     *,
     require_llm: bool,
+    global_config: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not _should_preload_keyword_fallback_for_runtime(require_llm=require_llm):
         return None
@@ -1149,12 +1159,12 @@ async def ensure_keyword_fallback_model_ready_once(
                 "cached": True,
             }
         logger.info(
-            "No complete LLM config detected in MEP runtime; preloading resident "
-            "GLiNER keyword fallback model. model=%s device=%s",
+            "Preloading resident GLiNER keyword fallback model. "
+            "model=%s device=%s",
             model_name,
             device,
         )
-        info = await keyword_extraction.ensure_gliner_keyword_model_ready()
+        info = await keyword_extraction.ensure_gliner_keyword_model_ready(global_config)
         _KEYWORD_FALLBACK_PRELOAD_DONE.add(profile)
         logger.info(
             "Resident GLiNER keyword fallback model is ready. "
@@ -1433,6 +1443,9 @@ async def initialize_rag(
     *,
     require_llm: bool = True,
     enable_rerank: bool | None = None,
+    vector_runtime_backend: str | None = None,
+    vector_sidecar_dir: str | None = None,
+    require_sidecar: bool = True,
 ) -> Ragent:
     total_started_at = time.perf_counter()
     startup_started_at = time.perf_counter()
@@ -1450,9 +1463,54 @@ async def initialize_rag(
             }
         )
 
+    sidecar_info: dict[str, Any] | None = None
+    resolved_vector_backend = resolve_vector_runtime_backend(vector_runtime_backend)
+    if resolved_vector_backend == "faiss_sidecar":
+        sidecar_validation_started_at = time.perf_counter()
+        try:
+            sidecar_info = resolve_project_vector_sidecar(
+                working_dir,
+                sidecar_dir=vector_sidecar_dir,
+                expected_profile=DEFAULT_SIDECAR_PROFILE,
+                check_hashes=_vector_sidecar_check_hashes_enabled(),
+            )
+        except VectorSidecarArtifactError as exc:
+            if require_sidecar:
+                raise RuntimeError(f"FAISS sidecar is required but invalid: {exc}") from exc
+            logger.warning("FAISS sidecar unavailable; falling back to Nano: %s", exc)
+            resolved_vector_backend = "nano"
+        if stage_timings is not None:
+            stage_timings.append(
+                {
+                    "stage": "vector_sidecar_validation",
+                    "label": "FAISS sidecar 校验",
+                    "seconds": round(
+                        time.perf_counter() - sidecar_validation_started_at,
+                        3,
+                    ),
+                    "backend": resolved_vector_backend,
+                    "profile": (
+                        sidecar_info.get("profile") if sidecar_info is not None else None
+                    ),
+                    "sidecar_dir": (
+                        sidecar_info.get("sidecar_dir")
+                        if sidecar_info is not None
+                        else None
+                    ),
+                }
+            )
+
+    preload_global_config = {
+        "vector_storage": (
+            "FaissSidecarVectorDBStorage"
+            if resolved_vector_backend == "faiss_sidecar"
+            else "NanoVectorDBStorage"
+        )
+    }
     keyword_preload_started_at = time.perf_counter()
     preload_info = await ensure_keyword_fallback_model_ready_once(
         require_llm=require_llm,
+        global_config=preload_global_config,
     )
     if stage_timings is not None and preload_info is not None:
         stage_timings.append(
@@ -1477,6 +1535,15 @@ async def initialize_rag(
         raw_export_max_async = 1
     if raw_export_max_async is not None:
         rag_kwargs["llm_model_max_async"] = raw_export_max_async
+    if resolved_vector_backend == "faiss_sidecar":
+        if sidecar_info is None:
+            raise RuntimeError("FAISS sidecar backend selected without sidecar info.")
+        rag_kwargs["vector_storage"] = "FaissSidecarVectorDBStorage"
+        rag_kwargs["vector_db_storage_cls_kwargs"] = {
+            "sidecar_dir": sidecar_info["sidecar_dir"],
+        }
+    else:
+        rag_kwargs["vector_storage"] = "NanoVectorDBStorage"
     rag = ragent_class(
         working_dir=working_dir,
         embedding_func=openai_embed,
@@ -1486,6 +1553,8 @@ async def initialize_rag(
         or (None if require_llm else _RETRIEVAL_ONLY_LLM_MODEL_NAME),
         **rag_kwargs,
     )
+    setattr(rag, "vector_sidecar_info", sidecar_info)
+    setattr(rag, "keyword_fallback_preload_info", preload_info)
     if stage_timings is not None:
         stage_timings.append(
             {

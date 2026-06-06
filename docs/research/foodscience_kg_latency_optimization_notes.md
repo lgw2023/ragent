@@ -350,6 +350,9 @@ HNSW ef128 与 exact FAISS 的 retrieval-only 对比中，10 个查询的 final 
 
 远程实验结论：promote relationships HNSW with `ef_search=128` as default；保留 `ef_search=256` 作为质量优先 profile。
 
+后续 50-query retrieval-only scale-up 已在第 8 节完成，最终推荐从
+relationships-only HNSW 更新为 entities+relationships HNSW ef128。
+
 理由：
 
 - `relationships` manifest 已确认为 `hnsw`。
@@ -410,24 +413,33 @@ ragent/kg/faiss_sidecar_impl.py
 - 10-query full-chain 实验显示，HNSW ef128 将 median retrieval 从 13.60 s 降至 9.53 s，但 median request 只从 29.93 s 降至 27.00 s，因为 answer generation 约 17 s。
 - 在 10-query smoke set 上，HNSW ef128 与 exact FAISS 的 final context chunk ID overlap 为 10/10，未观察到 chunk 级证据集合退化。
 - `ef_search=128` 可作为默认 HNSW profile；`ef_search=256` 可作为质量优先 profile，尤其用于改善部分 query 的 referenced-file alignment。
+- 50-query retrieval-only scale-up 显示，entities+relationships HNSW ef128 将 retrieval p50/p95 从 relationships-only HNSW 的 8.12/11.20 s 降至 5.97/9.87 s。
+- 50-query retrieval-only scale-up 显示，entity index p50 从约 2.09 s 降至约 0.03 s；并发 1/2/4/8 共 600 个请求全部成功，0 error、0 cache hit、0 timeout/5xx。
+- 50-query 质量对比显示，entities+relationships HNSW 与 relationships-only HNSW 在 final chunk overlap 上一致，p50 为 10/10；唯一低于 8/10 的 q043 是 exact 自身只返回 6 个 final chunks，不是 ANN 退化。
+- 当前 FoodScience KG 检索层推荐 profile 是 chunks flat、entities HNSW ef128、relationships HNSW ef128。
 
 暂时不能写成定论：
 
 - 不能声称完整链路已经稳定低于 10 s。
-- 不能声称完整问答系统已解除所有性能瓶颈；HNSW 之后瓶颈转移到 answer generation、keyword extraction、entity index 等阶段。
-- 不能声称质量完全不变；当前证据是 10-query final chunk ID overlap 10/10，但 referenced files 有漂移，且缺少人工答案质量评估。
-- 不能把 10-query smoke 扩大表述成生产全量 p95；仍需要更大查询集、并发场景和长时间运行数据。
+- 不能声称完整问答系统已解除所有性能瓶颈；HNSW 之后完整问答仍受 answer generation、keyword extraction、rerank 等阶段限制。
+- 不能声称质量完全不变；当前证据覆盖 10-query relationships HNSW smoke 和 50-query retrieval-only scale-up 的 final chunk ID overlap，但缺少人工答案质量评估。
+- 不能把 50-query benchmark 扩大表述成生产全量 p95；仍需要长时间线上流量或更大查询集才能证明生产分布。
 - 不能把 preload 说成消除初始化成本；它只是把初始化从首个用户请求转移到服务启动阶段。
 
-待补充数据：
+已补充数据：
 
-- 更大规模查询集上的 retrieval-only 与 full-chain p50/p95。
-- HNSW under concurrency 的吞吐、排队和内存占用。
-- answer generation 优化实验，例如更快模型、流式响应、回答长度控制或分阶段生成策略。
-- entity index 是否需要 ANN 或进一步批量化优化。
+- 50-query retrieval-only p50/p95。
+- concurrency 1/2/4/8 下的 request p50/p95、retrieval p50/p95 与错误率。
+- entities HNSW ef128 是否值得启用。
+
+仍待补充数据：
+
+- 更大查询集或线上流量分布下的长时间 p95/p99。
+- HNSW under concurrency 的资源占用，例如 CPU、内存和服务队列深度。
 - HNSW `ef_search=128/256` 在人工答案质量上的差异。
+- answer generation 优化不属于本项目当前范围；如需优化，应作为外部 LLM 服务优化单独立项。
 
-## 7. 下一阶段检索层计划
+## 7. 下一阶段检索层计划（已执行）
 
 用户确认完整问答 LLM 推理时间不属于本项目范围，因此下一阶段只做 retrieval-only：
 
@@ -477,3 +489,199 @@ tasks/foodscience_kg_retrieval_scaleup/
 - final context chunk overlap 对 exact 没有系统性下降；低于 8/10 的 query 必须逐条解释。
 - 并发 2/4/8 下没有系统性 5xx、timeout 或 cache 命中污染。
 - 如果 entities HNSW 对 p95 没有贡献，就保持 entities flat，不为复杂度买单。
+
+执行结果见第 8 节。结论是 entities HNSW 对 p50/p95 均有贡献，因此推荐启用。
+
+## 8. 50-query retrieval-only scale-up 实验结果
+
+结果文件：
+
+```text
+benchmark/foodscience_kg_retrieval_scaleup_20260605_1132/summary.json
+benchmark/foodscience_kg_retrieval_scaleup_20260605_1132/summary.md
+tasks/foodscience_kg_retrieval_scaleup/RESULTS_TEMPLATE.md
+```
+
+远程实验完成于 2026-06-05 11:32-13:11 CST。
+
+### 8.1 环境与 variant
+
+| 项 | 值 |
+| --- | --- |
+| server | `DevServer-BMS-3d97cc99-0` |
+| remote repo | `/data/disk3/ragent-20260604_105639` |
+| remote commit | `5964b3e` |
+| Python / uv / FAISS | 3.10.20 / 0.11.14 / 1.13.2 |
+| KG project | `/data/disk3/FoodScience_KG_final_sharded` |
+| benchmark result dir | `benchmark/foodscience_kg_retrieval_scaleup_20260605_1132/` |
+
+| Variant | Port | chunks | entities | relationships |
+| --- | ---: | --- | --- | --- |
+| exact | 8099 | flat | flat | flat |
+| rel_hnsw_ef128 | 8102 | flat | flat | hnsw ef128 |
+| ent_hnsw_e128_rel_hnsw_r128 | 8110 | flat | hnsw ef128 | hnsw ef128 |
+
+候选 entities+relationships HNSW sidecar 构建耗时 `18:12`，大小约 13 GB；
+manifest 已确认 entities 和 relationships 均为 HNSW ef128。
+
+全部请求结果：600/600 success，0 error，0 cache hit，0 timeout/5xx。
+
+### 8.2 Sequential retrieval-only
+
+设置：50 queries，concurrency=1，`retrieval_only=true`，`enable_rerank=true`。
+
+| Variant | Request p50 | Request p95 | Retrieval p50 | Retrieval p95 | Entity index p50 | Relation index p50 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| exact | 14.59 s | 20.24 s | 14.46 s | 20.14 s | 2.21 s | 7.58 s |
+| rel_hnsw_ef128 | 8.26 s | 11.31 s | 8.12 s | 11.20 s | 2.09 s | 0.02 s |
+| ent_hnsw_e128_rel_hnsw_r128 | 6.08 s | 9.97 s | 5.97 s | 9.87 s | 0.03 s | 0.02 s |
+
+相对当前 relationships-only HNSW：
+
+- retrieval p50：8.12 s -> 5.97 s，降低约 26%。
+- retrieval p95：11.20 s -> 9.87 s，降低约 12%。
+- entity index p50：2.09 s -> 0.03 s，约 70x 加速。
+
+### 8.3 Concurrent retrieval-only
+
+下表是用户侧 request p95，包含 benchmark service session 排队。
+
+| Variant | c=2 request p95 | c=4 request p95 | c=8 request p95 |
+| --- | ---: | ---: | ---: |
+| exact | 35.8 s | 63.8 s | 110.5 s |
+| rel_hnsw_ef128 | 24.7 s | 49.7 s | 88.3 s |
+| ent_hnsw_e128_rel_hnsw_r128 | 20.7 s | 42.5 s | 65.6 s |
+
+候选在 c=8 时 request p95 相对 relationships-only HNSW 降低约 26%：
+88.3 s -> 65.6 s。检索阶段 p95 在各并发下与 relationships-only HNSW
+相当或更好，未出现系统性 5xx、timeout 或 cache hit。
+
+### 8.4 Quality
+
+质量对比使用 concurrency=1 的 exact 结果作为 oracle，比对 final context chunk IDs。
+
+| Variant | Queries | overlap p50 | min overlap | below 8/10 |
+| --- | ---: | ---: | ---: | --- |
+| rel_hnsw_ef128 | 50 | 10/10 | 6 | `q043_emulsifiers_stabilizers` |
+| ent_hnsw_e128_rel_hnsw_r128 | 50 | 10/10 | 6 | `q043_emulsifiers_stabilizers` |
+
+`q043_emulsifiers_stabilizers` 不是 ANN 退化：exact 本身只返回 6 个 final
+chunks，三个 variant 的 chunk IDs 完全一致，referenced files 也相同。
+
+### 8.5 最终决策
+
+FoodScience KG 检索层最终推荐：
+
+| Namespace | Index |
+| --- | --- |
+| chunks | flat |
+| entities | HNSW ef128 |
+| relationships | HNSW ef128 |
+
+完整问答性能优化不纳入本次结论，因为端到端 answer generation 主要由外部 LLM
+服务决定。本文只声称检索层在冷缓存、retrieval-only、50-query、并发 1/2/4/8
+条件下得到了验证。
+
+## 9. 本机 GLiNER keyword extraction 模拟实验
+
+用户进一步要求只模拟 keyword extraction 阶段，评估用本地 GLiNER 替代 LLM
+关键词抽取的速度差异，不跑完整图谱检索推理。
+
+结果文件：
+
+```text
+benchmark/foodscience_keyword_extraction_gliner_local_20260605/summary.json
+benchmark/foodscience_keyword_extraction_gliner_local_20260605/summary.md
+benchmark/foodscience_keyword_extraction_gliner_local_20260605/raw.jsonl
+```
+
+### 9.1 设置
+
+| 项 | 值 |
+| --- | --- |
+| 测试范围 | keyword extraction only |
+| 查询集 | `tasks/foodscience_kg_retrieval_scaleup/queries_50.jsonl` |
+| 查询数 / repeat | 50 queries / 5 repeats |
+| 总预测数 | 250 |
+| 本地模型 | `mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small` |
+| device | CPU |
+| 离线环境 | `HF_HUB_OFFLINE=1`，`TRANSFORMERS_OFFLINE=1` |
+
+该实验不包含 KG retrieval、graph expansion、rerank 或 LLM answer generation。
+
+### 9.2 结果
+
+GLiNER 冷加载和预热：
+
+| 指标 | 值 |
+| --- | ---: |
+| cold load + warmup | 6.910 s |
+
+模型常驻后的单条关键词抽取耗时：
+
+| 指标 | 秒 |
+| --- | ---: |
+| min | 0.0207 |
+| p50 | 0.0257 |
+| mean | 0.0267 |
+| p95 | 0.0318 |
+| max | 0.0990 |
+
+关键词数量：
+
+| 指标 | 值 |
+| --- | ---: |
+| p50 | 7 |
+| p95 | 9 |
+| min | 4 |
+| max | 9 |
+| empty predictions | 0 |
+
+样例输出：
+
+| Query | GLiNER keywords |
+| --- | --- |
+| `q001_dairy_shelf_life` | `shelf life`, `dairy products`, `preservatives`, `packaging`, `storage temperature`, `pH`, `water activity`, `spoilage risk` |
+| `q002_prepackaged_labeling` | `prepackaged food labeling`, `nutrition facts`, `ingredient lists`, `allergen declarations`, `shelf life`, `storage conditions` |
+| `q003_preservative_limits` | `benzoic acid`, `sorbic acid`, `nitrite`, `preservatives`, `processed foods`, `safety factors` |
+
+### 9.3 与远程 LLM keyword stage 的方向性对比
+
+远程 50-query retrieval-only 实验中，最终推荐 variant
+`ent_hnsw_e128_rel_hnsw_r128` 在 concurrency=1 下的 `keyword_extraction`
+阶段为：
+
+| 路径 | p50 | p95 |
+| --- | ---: | ---: |
+| remote LLM keyword stage | 2.457 s | 6.439 s |
+| local GLiNER warm prediction | 0.0257 s | 0.0318 s |
+
+方向性加速比：
+
+| 指标 | 加速比 |
+| --- | ---: |
+| p50 | 约 95x |
+| p95 | 约 202x |
+
+这不是同硬件 A/B：远程 baseline 来自服务器完整 retrieval-only trace，本地 GLiNER
+来自当前机器的 keyword-only microbenchmark。因此该结果只能证明 GLiNER 在本地常驻
+后开销极低，不能直接替代远程生产 p95 证明。
+
+### 9.4 结论
+
+GLiNER 有足够潜力把 `keyword_extraction` 从当前 retrieval 剩余瓶颈中移除：
+
+- 常驻后 p50 约 0.026 s，p95 约 0.032 s，远低于当前远程 LLM keyword stage 的 2.457/6.439 s。
+- 50 条 FoodScience 查询没有空结果，样例关键词与查询主题基本对齐。
+- 冷加载约 6.9 s，不能放在首个用户请求路径上；生产必须预加载并常驻。
+- 当前代码中 GLiNER 是 `allow_llm_keyword_extraction=false` 时的 fallback。若要替代远程 LLM keyword extraction，需要确保请求 trace 中 `keyword_source=gliner_fallback`。
+
+下一步推荐只做一轮远程 retrieval-only A/B：
+
+| Variant | 目的 |
+| --- | --- |
+| current HNSW + LLM keywords | 当前检索推荐方案 baseline |
+| current HNSW + GLiNER keywords | 验证 keyword stage 是否降到近似 0.03 s，以及 final chunk overlap 是否保持 |
+
+如果远程 A/B 中 final context chunk overlap 没有系统性下降，则可以把
+GLiNER keyword fallback 作为 retrieval-only 或低延迟路径的默认关键词策略。

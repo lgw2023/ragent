@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from ragent.utils import logger, compute_mdhash_id
 from ragent.base import BaseVectorStorage
+from ragent.native_runtime_compat import ensure_faiss_import_compatibility
 
 from .shared_storage import (
     get_storage_lock,
@@ -18,7 +19,9 @@ from .shared_storage import (
     set_all_update_flags,
 )
 
-# You must manually install faiss-cpu or faiss-gpu before using FAISS vector db
+# Standard dependencies include faiss-cpu; check native runtime compatibility
+# before importing FAISS.
+ensure_faiss_import_compatibility()
 import faiss  # type: ignore
 
 

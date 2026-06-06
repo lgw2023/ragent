@@ -171,7 +171,7 @@ def test_merge_projects_merges_graph_fields_and_avoids_unknown_override(tmp_path
     _write_vdb(source_a, "vdb_chunks.json", [], [])
     _write_vdb(source_b, "vdb_chunks.json", [], [])
 
-    merge_projects([source_a, source_b], output)
+    merge_projects([source_a, source_b], output, build_vector_sidecar=False)
 
     graph = nx.read_graphml(output / GRAPH_FILE_NAME)
     assert graph.nodes["A"]["entity_type"] == "organization"
@@ -219,7 +219,7 @@ def test_merge_projects_preserves_vdb_data_matrix_alignment(tmp_path: Path):
         _write_vdb(source_a, name, [], [])
         _write_vdb(source_b, name, [], [])
 
-    merge_projects([source_a, source_b], output)
+    merge_projects([source_a, source_b], output, build_vector_sidecar=False)
 
     data, matrix = _read_vdb(output, "vdb_chunks.json")
     assert [record["__id__"] for record in data] == ["chunk-1", "chunk-2", "chunk-3"]
@@ -275,7 +275,7 @@ def test_merge_projects_merges_sqlite_kv_and_doc_status_json(tmp_path: Path):
         encoding="utf-8",
     )
 
-    merge_projects([source_a, source_b], output)
+    merge_projects([source_a, source_b], output, build_vector_sidecar=False)
 
     full_docs = _read_sqlite_kv(output, "full_docs")
     assert set(full_docs) == {"doc-a", "doc-b"}
@@ -299,6 +299,43 @@ def test_merge_projects_merges_sqlite_kv_and_doc_status_json(tmp_path: Path):
     conn = sqlite3.connect(output / "kv_store_llm_response_cache.sqlite")
     assert conn.execute("SELECT count(*) FROM query_cache_entries").fetchone()[0] == 0
     conn.close()
+
+
+def test_merge_projects_builds_default_vector_sidecar_after_write(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from tools import merge_kg_projects as merge_tool
+
+    source_a = tmp_path / "source_a"
+    source_b = tmp_path / "source_b"
+    output = tmp_path / "merged"
+    source_a.mkdir()
+    source_b.mkdir()
+    _write_graph(source_a, nx.Graph())
+    _write_graph(source_b, nx.Graph())
+    for name in ("vdb_chunks.json", "vdb_entities.json", "vdb_relationships.json"):
+        _write_vdb(source_a, name, [], [])
+        _write_vdb(source_b, name, [], [])
+
+    captured: dict[str, object] = {}
+
+    def fake_build_profile_sidecars(**kwargs):
+        captured.update(kwargs)
+        return {"profile": "default_hnsw_v1"}
+
+    monkeypatch.setattr(
+        merge_tool,
+        "build_profile_sidecars",
+        fake_build_profile_sidecars,
+    )
+
+    stats = merge_tool.merge_projects([source_a, source_b], output)
+
+    assert captured["project_dir"] == output
+    assert captured["profile"] == "default_hnsw_v1"
+    assert stats.vector_sidecar_profile == "default_hnsw_v1"
+    assert stats.vector_sidecar_dir == str(output / "vector_sidecars" / "default")
 
 
 def test_merge_projects_refreshes_entity_and_relationship_vdb_metadata_from_graph(tmp_path: Path):
@@ -426,7 +463,7 @@ def test_merge_projects_refreshes_entity_and_relationship_vdb_metadata_from_grap
     _write_vdb(source_a, "vdb_chunks.json", [], [])
     _write_vdb(source_b, "vdb_chunks.json", [], [])
 
-    merge_projects([source_a, source_b], output)
+    merge_projects([source_a, source_b], output, build_vector_sidecar=False)
 
     entity_data, entity_matrix = _read_vdb(output, "vdb_entities.json")
     assert entity_data[0]["content"] == f"A\ndesc-a{GRAPH_FIELD_SEP}desc-c"

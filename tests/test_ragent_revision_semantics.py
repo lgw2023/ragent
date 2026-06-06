@@ -245,12 +245,32 @@ class RagentRevisionSemanticsTests(unittest.IsolatedAsyncioTestCase):
     async def test_ainsert_delegates_to_enqueue_and_process(self):
         rag = _make_ragent()
         rag.apipeline_enqueue_documents = AsyncMock()
-        rag.apipeline_process_enqueue_documents = AsyncMock()
+        rag.apipeline_process_enqueue_documents = AsyncMock(return_value=False)
 
         await rag.ainsert("content", doc_name="doc.txt")
 
         rag.apipeline_enqueue_documents.assert_awaited_once()
         rag.apipeline_process_enqueue_documents.assert_awaited_once()
+
+    async def test_ainsert_builds_default_vector_sidecar_after_success(self):
+        rag = _make_ragent()
+        rag.apipeline_enqueue_documents = AsyncMock()
+        rag.apipeline_process_enqueue_documents = AsyncMock(return_value=True)
+        rag._build_default_vector_sidecar_if_enabled = AsyncMock()
+
+        await rag.ainsert("content", doc_name="doc.txt")
+
+        rag._build_default_vector_sidecar_if_enabled.assert_awaited_once()
+
+    async def test_ainsert_skips_default_vector_sidecar_when_no_storage_update(self):
+        rag = _make_ragent()
+        rag.apipeline_enqueue_documents = AsyncMock()
+        rag.apipeline_process_enqueue_documents = AsyncMock(return_value=False)
+        rag._build_default_vector_sidecar_if_enabled = AsyncMock()
+
+        await rag.ainsert("content", doc_name="doc.txt")
+
+        rag._build_default_vector_sidecar_if_enabled.assert_not_awaited()
 
     async def test_apipeline_process_enqueue_documents_bumps_revision_on_success(self):
         rag = _make_ragent()
@@ -410,6 +430,7 @@ class RagentRevisionSemanticsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ainsert_custom_kg_bumps_revision_when_data_is_inserted(self):
         rag = _make_ragent()
+        rag._build_default_vector_sidecar_if_enabled = AsyncMock()
 
         custom_kg = {
             "chunks": [
@@ -431,9 +452,11 @@ class RagentRevisionSemanticsTests(unittest.IsolatedAsyncioTestCase):
             "custom_kg",
             affected_chunk_ids=[expected_chunk_id],
         )
+        rag._build_default_vector_sidecar_if_enabled.assert_awaited_once()
 
     async def test_ainsert_custom_kg_empty_payload_does_not_bump_revision(self):
         rag = _make_ragent()
+        rag._build_default_vector_sidecar_if_enabled = AsyncMock()
 
         await rag.ainsert_custom_kg(
             {"chunks": [], "entities": [], "relationships": []},
@@ -442,6 +465,7 @@ class RagentRevisionSemanticsTests(unittest.IsolatedAsyncioTestCase):
 
         rag._insert_done.assert_not_awaited()
         rag._try_bump_corpus_revision.assert_not_awaited()
+        rag._build_default_vector_sidecar_if_enabled.assert_not_awaited()
 
     async def test_aedit_entity_noop_does_not_bump_revision(self):
         rag = _make_ragent()

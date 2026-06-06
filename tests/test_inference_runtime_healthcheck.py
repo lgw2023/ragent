@@ -128,6 +128,9 @@ def test_initialize_rag_preloads_gliner_in_mep_without_llm(monkeypatch, tmp_path
     _patch_initialize_rag_runtime(monkeypatch, calls)
     inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
     monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_ENABLED", raising=False)
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_PRELOAD", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_PRELOAD_KEYWORD_FALLBACK", raising=False)
     for name in ("LLM_MODEL", "LLM_MODEL_KEY", "LLM_MODEL_URL"):
         monkeypatch.delenv(name, raising=False)
 
@@ -142,7 +145,8 @@ def test_initialize_rag_preloads_gliner_in_mep_without_llm(monkeypatch, tmp_path
         lambda: "cpu",
     )
 
-    async def fake_ensure_gliner_keyword_model_ready():
+    async def fake_ensure_gliner_keyword_model_ready(global_config=None):
+        calls["preload_global_config"] = global_config
         calls["preload_calls"] = int(calls["preload_calls"]) + 1
         return {
             "keyword_model": "/models/gliner",
@@ -162,6 +166,7 @@ def test_initialize_rag_preloads_gliner_in_mep_without_llm(monkeypatch, tmp_path
             str(tmp_path),
             stage_timings=stage_timings,
             require_llm=False,
+            vector_runtime_backend="nano",
         )
     )
 
@@ -170,11 +175,122 @@ def test_initialize_rag_preloads_gliner_in_mep_without_llm(monkeypatch, tmp_path
     assert calls["storage_initialized"] is True
     assert calls["pipeline_status_initialized"] is True
     assert calls["rag_kwargs"]["llm_model_name"] == "retrieval-only-no-llm"
+    assert calls["preload_global_config"] == {"vector_storage": "NanoVectorDBStorage"}
     assert any(item["stage"] == "keyword_fallback_preload" for item in stage_timings)
     inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
 
 
-def test_initialize_rag_skips_gliner_preload_when_llm_config_is_complete(
+def test_initialize_rag_preloads_gliner_when_llm_config_is_complete(
+    monkeypatch,
+    tmp_path,
+):
+    calls: dict[str, object] = {"preload_calls": 0}
+    _patch_initialize_rag_runtime(monkeypatch, calls)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+    monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_ENABLED", raising=False)
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_PRELOAD", raising=False)
+    monkeypatch.delenv("RAGENT_MEP_PRELOAD_KEYWORD_FALLBACK", raising=False)
+    monkeypatch.setenv("LLM_MODEL", "qwen")
+    monkeypatch.setenv("LLM_MODEL_KEY", "key")
+    monkeypatch.setenv("LLM_MODEL_URL", "http://127.0.0.1:8000/v1")
+
+    async def fake_preload(global_config=None):
+        calls["preload_global_config"] = global_config
+        calls["preload_calls"] = int(calls["preload_calls"]) + 1
+        return {
+            "keyword_model": "/models/gliner",
+            "keyword_model_device": "cpu",
+            "warmup_entity_count": 1,
+        }
+
+    monkeypatch.setattr(
+        inference_runtime.keyword_extraction,
+        "ensure_gliner_keyword_model_ready",
+        fake_preload,
+    )
+
+    stage_timings: list[dict] = []
+    asyncio.run(
+        inference_runtime.initialize_rag(
+            str(tmp_path),
+            stage_timings=stage_timings,
+            require_llm=False,
+            vector_runtime_backend="nano",
+        )
+    )
+
+    assert calls["rag_kwargs"]["llm_model_name"] == "qwen"
+    assert calls["preload_calls"] == 1
+    assert calls["preload_global_config"] == {"vector_storage": "NanoVectorDBStorage"}
+    assert any(item["stage"] == "keyword_fallback_preload" for item in stage_timings)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+
+
+def test_initialize_rag_preloads_gliner_for_faiss_sidecar(
+    monkeypatch,
+    tmp_path,
+):
+    calls: dict[str, object] = {"preload_calls": 0}
+    _patch_initialize_rag_runtime(monkeypatch, calls)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_ENABLED", raising=False)
+
+    def fake_resolve_project_vector_sidecar(*_args, **_kwargs):
+        return {
+            "sidecar_dir": str(tmp_path / "vector_sidecars" / "default"),
+            "profile": "default_hnsw_v1",
+            "manifest_digest": "digest",
+            "namespaces": {},
+        }
+
+    async def fake_preload(global_config=None):
+        calls["preload_calls"] = int(calls["preload_calls"]) + 1
+        calls["preload_global_config"] = global_config
+        return {
+            "keyword_model": "/models/gliner",
+            "keyword_model_device": "cpu",
+            "warmup_entity_count": 1,
+        }
+
+    monkeypatch.setattr(
+        inference_runtime,
+        "resolve_project_vector_sidecar",
+        fake_resolve_project_vector_sidecar,
+    )
+    monkeypatch.setattr(
+        inference_runtime.keyword_extraction,
+        "ensure_gliner_keyword_model_ready",
+        fake_preload,
+    )
+
+    stage_timings: list[dict] = []
+    asyncio.run(
+        inference_runtime.initialize_rag(
+            str(tmp_path),
+            stage_timings=stage_timings,
+            require_llm=False,
+            vector_runtime_backend="faiss_sidecar",
+        )
+    )
+
+    assert calls["preload_calls"] == 1
+    assert calls["preload_global_config"] == {
+        "vector_storage": "FaissSidecarVectorDBStorage"
+    }
+    assert calls["rag_kwargs"]["vector_storage"] == "FaissSidecarVectorDBStorage"
+    assert calls["rag_kwargs"]["vector_db_storage_cls_kwargs"]["sidecar_dir"].endswith(
+        "vector_sidecars/default"
+    )
+    preload_stages = [
+        item for item in stage_timings if item["stage"] == "keyword_fallback_preload"
+    ]
+    assert preload_stages
+    assert "backend" not in preload_stages[0]
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+
+
+def test_initialize_rag_skips_gliner_preload_when_fallback_disabled(
     monkeypatch,
     tmp_path,
 ):
@@ -182,12 +298,13 @@ def test_initialize_rag_skips_gliner_preload_when_llm_config_is_complete(
     _patch_initialize_rag_runtime(monkeypatch, calls)
     inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
     monkeypatch.setenv("RAGENT_RUNTIME_ENV", "mep")
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_ENABLED", "0")
     monkeypatch.setenv("LLM_MODEL", "qwen")
     monkeypatch.setenv("LLM_MODEL_KEY", "key")
     monkeypatch.setenv("LLM_MODEL_URL", "http://127.0.0.1:8000/v1")
 
-    async def fail_preload():
-        raise AssertionError("GLiNER preload should be skipped with complete LLM config")
+    async def fail_preload(global_config=None):
+        raise AssertionError("GLiNER preload should be skipped when disabled")
 
     monkeypatch.setattr(
         inference_runtime.keyword_extraction,
@@ -201,11 +318,51 @@ def test_initialize_rag_skips_gliner_preload_when_llm_config_is_complete(
             str(tmp_path),
             stage_timings=stage_timings,
             require_llm=False,
+            vector_runtime_backend="nano",
         )
     )
 
     assert calls["rag_kwargs"]["llm_model_name"] == "qwen"
     assert not any(item["stage"] == "keyword_fallback_preload" for item in stage_timings)
+
+
+def test_initialize_rag_missing_default_sidecar_fails_fast(monkeypatch, tmp_path):
+    calls: dict[str, object] = {}
+    _patch_initialize_rag_runtime(monkeypatch, calls)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_ENABLED", "0")
+
+    try:
+        asyncio.run(inference_runtime.initialize_rag(str(tmp_path), require_llm=False))
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected missing default FAISS sidecar to fail")
+
+    assert "FAISS sidecar is required but invalid" in message
+    assert "manifest" in message
+    assert "rag_kwargs" not in calls
+
+
+def test_initialize_rag_vector_runtime_backend_nano_bypasses_sidecar(
+    monkeypatch,
+    tmp_path,
+):
+    calls: dict[str, object] = {}
+    _patch_initialize_rag_runtime(monkeypatch, calls)
+    inference_runtime._KEYWORD_FALLBACK_PRELOAD_DONE.clear()
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_ENABLED", "0")
+
+    asyncio.run(
+        inference_runtime.initialize_rag(
+            str(tmp_path),
+            require_llm=False,
+            vector_runtime_backend="nano",
+        )
+    )
+
+    assert calls["rag_kwargs"]["vector_storage"] == "NanoVectorDBStorage"
+    assert "vector_db_storage_cls_kwargs" not in calls["rag_kwargs"]
 
 
 def test_execute_retrieval_only_skips_llm_check_and_returns_retrieval_payload(

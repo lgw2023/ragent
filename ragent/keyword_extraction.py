@@ -532,12 +532,14 @@ async def ensure_gliner_keyword_model_ready(
         resolved_warmup_text = DEFAULT_GLINER_WARMUP_TEXT
     resolved_warmup_text = str(resolved_warmup_text).strip()
 
+    labels = _gliner_labels(global_config)
+    threshold = _gliner_threshold(global_config)
     entity_count = await asyncio.to_thread(
         _warmup_gliner_model,
         model_name=model_name,
         device=device,
-        labels=_gliner_labels(global_config),
-        threshold=_gliner_threshold(global_config),
+        labels=labels,
+        threshold=threshold,
         warmup_text=resolved_warmup_text,
     )
     return {
@@ -605,6 +607,54 @@ def _keywords_from_gliner_entities(
     return high_level_keywords, low_level_keywords
 
 
+def _extract_keywords_with_gliner_inprocess(
+    text: str,
+    *,
+    model_name: str,
+    device: str,
+    labels: list[str],
+    threshold: float,
+    max_keywords: int,
+    fallback_reason: str,
+) -> KeywordResolution:
+    entities = _predict_gliner_entities(
+        text,
+        model_name=model_name,
+        device=device,
+        labels=labels,
+        threshold=threshold,
+    )
+    high_level_keywords, low_level_keywords = _keywords_from_gliner_entities(
+        text,
+        entities,
+        max_keywords=max_keywords,
+    )
+    reason = fallback_reason
+    if not high_level_keywords and not low_level_keywords:
+        candidates = [
+            keyword
+            for keyword in (
+                _normalize_keyword(item, text)
+                for item in _fallback_keyword_candidates(text)
+            )
+            if keyword
+        ]
+        low_level_keywords = _dedupe_limited_keywords(candidates, max_keywords)
+        if low_level_keywords:
+            reason = f"{reason}; GLiNER returned no entities, used token candidates"
+        else:
+            reason = f"{reason}; GLiNER returned no keywords"
+    return KeywordResolution(
+        high_level_keywords=high_level_keywords,
+        low_level_keywords=low_level_keywords,
+        keyword_source=KEYWORD_SOURCE_GLINER_FALLBACK,
+        keyword_strategy=KEYWORD_STRATEGY_TOKEN_CLASSIFICATION,
+        keyword_fallback_reason=reason,
+        keyword_model=model_name,
+        keyword_model_device=device,
+    )
+
+
 async def extract_keywords_with_gliner(
     text: str,
     global_config: dict[str, Any] | None = None,
@@ -630,41 +680,15 @@ async def extract_keywords_with_gliner(
     max_keywords = _gliner_max_keywords(global_config)
 
     try:
-        entities = await asyncio.to_thread(
-            _predict_gliner_entities,
+        return await asyncio.to_thread(
+            _extract_keywords_with_gliner_inprocess,
             text,
             model_name=model_name,
             device=device,
             labels=labels,
             threshold=threshold,
-        )
-        high_level_keywords, low_level_keywords = _keywords_from_gliner_entities(
-            text,
-            entities,
             max_keywords=max_keywords,
-        )
-        if not high_level_keywords and not low_level_keywords:
-            candidates = [
-                keyword
-                for keyword in (
-                    _normalize_keyword(item, text)
-                    for item in _fallback_keyword_candidates(text)
-                )
-                if keyword
-            ]
-            low_level_keywords = _dedupe_limited_keywords(candidates, max_keywords)
-            if low_level_keywords:
-                reason = f"{reason}; GLiNER returned no entities, used token candidates"
-            else:
-                reason = f"{reason}; GLiNER returned no keywords"
-        return KeywordResolution(
-            high_level_keywords=high_level_keywords,
-            low_level_keywords=low_level_keywords,
-            keyword_source=KEYWORD_SOURCE_GLINER_FALLBACK,
-            keyword_strategy=KEYWORD_STRATEGY_TOKEN_CLASSIFICATION,
-            keyword_fallback_reason=reason,
-            keyword_model=model_name,
-            keyword_model_device=device,
+            fallback_reason=reason,
         )
     except KeywordExtractorUnavailable as exc:
         logger.warning("GLiNER keyword fallback unavailable: %s", exc)

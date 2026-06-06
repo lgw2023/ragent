@@ -20,15 +20,36 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-VDB_NAMESPACES = {
-    "chunks": "vdb_chunks.json",
-    "entities": "vdb_entities.json",
-    "relationships": "vdb_relationships.json",
-}
+from ragent.vector_sidecar_artifacts import (  # noqa: E402
+    CUSTOM_SIDECAR_PROFILE,
+    DEFAULT_SIDECAR_PROFILE,
+    EXACT_SIDECAR_PROFILE,
+    MANIFEST_FILE_NAME,
+    SIDECAR_PROFILES,
+    VDB_NAMESPACES,
+    default_vector_sidecar_dir,
+    normalize_sidecar_profile,
+    profile_vector_sidecar_dir,
+    validate_vector_sidecar_manifest,
+)
+from ragent.native_runtime_compat import ensure_faiss_import_compatibility  # noqa: E402
 
-MANIFEST_FILE_NAME = "manifest.json"
 METADATA_TABLE = "vector_metadata"
 OMIT_METADATA_FIELDS = {"__vector__", "vector", "embedding", "embeddings"}
+_CUSTOM_ARG_FLAGS = {
+    "--index-type",
+    "--relationships-index-type",
+    "--entities-index-type",
+    "--hnsw-m",
+    "--hnsw-ef-construction",
+    "--hnsw-ef-search",
+    "--entities-hnsw-ef-search",
+    "--relationships-hnsw-ef-search",
+    "--ivf-nlist",
+    "--ivf-nprobe",
+    "--entities-ivf-nprobe",
+    "--relationships-ivf-nprobe",
+}
 
 
 @dataclass(frozen=True)
@@ -42,10 +63,11 @@ class IndexSpec:
 
 
 def _require_faiss():
+    ensure_faiss_import_compatibility()
     if importlib.util.find_spec("faiss") is None:
         raise RuntimeError(
-            "faiss-cpu or faiss-gpu is required. Install ragent with the "
-            "'faiss' extra before building sidecars."
+            "faiss-cpu or faiss-gpu is required. Install the standard ragent "
+            "dependencies before building sidecars."
         )
     import faiss  # type: ignore
 
@@ -260,10 +282,13 @@ def build_sidecars(
     default_spec: IndexSpec,
     entities_spec: IndexSpec | None = None,
     relationships_spec: IndexSpec | None = None,
+    profile: str = CUSTOM_SIDECAR_PROFILE,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_profile = normalize_sidecar_profile(profile)
     manifest: dict[str, Any] = {
         "version": 1,
+        "profile": resolved_profile,
         "created_at": int(time.time()),
         "source_project_dir": str(project_dir.resolve()),
         "namespaces": {},
@@ -292,6 +317,100 @@ def build_sidecars(
     return manifest
 
 
+def _specs_for_profile(
+    profile: str,
+    args: argparse.Namespace | None = None,
+) -> tuple[IndexSpec, IndexSpec | None, IndexSpec | None]:
+    resolved_profile = normalize_sidecar_profile(profile)
+    if resolved_profile == DEFAULT_SIDECAR_PROFILE:
+        base_args = args or argparse.Namespace(
+            hnsw_m=16,
+            hnsw_ef_construction=200,
+            hnsw_ef_search=128,
+            ivf_nlist=4096,
+            ivf_nprobe=32,
+        )
+        return (
+            IndexSpec(index_type="flat"),
+            IndexSpec(
+                index_type="hnsw",
+                hnsw_m=base_args.hnsw_m,
+                hnsw_ef_construction=base_args.hnsw_ef_construction,
+                hnsw_ef_search=128,
+                ivf_nlist=base_args.ivf_nlist,
+                ivf_nprobe=base_args.ivf_nprobe,
+            ),
+            IndexSpec(
+                index_type="hnsw",
+                hnsw_m=base_args.hnsw_m,
+                hnsw_ef_construction=base_args.hnsw_ef_construction,
+                hnsw_ef_search=128,
+                ivf_nlist=base_args.ivf_nlist,
+                ivf_nprobe=base_args.ivf_nprobe,
+            ),
+        )
+    if resolved_profile == EXACT_SIDECAR_PROFILE:
+        return IndexSpec(index_type="flat"), None, None
+    if args is None:
+        raise ValueError("Custom sidecar profile requires explicit args.")
+    return _custom_specs_from_args(args)
+
+
+def build_profile_sidecars(
+    *,
+    project_dir: Path,
+    output_dir: Path | None = None,
+    namespaces: list[str] | None = None,
+    profile: str = DEFAULT_SIDECAR_PROFILE,
+    args: argparse.Namespace | None = None,
+) -> dict[str, Any]:
+    resolved_profile = normalize_sidecar_profile(profile)
+    resolved_output_dir = (
+        output_dir.expanduser().resolve()
+        if output_dir is not None
+        else profile_vector_sidecar_dir(project_dir, resolved_profile)
+    )
+    default_spec, entities_spec, relationships_spec = _specs_for_profile(
+        resolved_profile,
+        args,
+    )
+    resolved_namespaces = namespaces or list(VDB_NAMESPACES)
+    manifest = build_sidecars(
+        project_dir=project_dir.expanduser().resolve(),
+        output_dir=resolved_output_dir,
+        namespaces=resolved_namespaces,
+        default_spec=default_spec,
+        entities_spec=entities_spec,
+        relationships_spec=relationships_spec,
+        profile=resolved_profile,
+    )
+    validate_vector_sidecar_manifest(
+        project_dir,
+        resolved_output_dir,
+        expected_profile=resolved_profile,
+        check_hashes=False,
+        required_namespaces=resolved_namespaces,
+    )
+    return manifest
+
+
+def build_default_vector_sidecar(
+    project_dir: str | Path,
+    *,
+    output_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    project_path = Path(project_dir).expanduser().resolve()
+    return build_profile_sidecars(
+        project_dir=project_path,
+        output_dir=(
+            Path(output_dir).expanduser().resolve()
+            if output_dir is not None
+            else default_vector_sidecar_dir(project_path)
+        ),
+        profile=DEFAULT_SIDECAR_PROFILE,
+    )
+
+
 def _parse_namespaces(raw_namespaces: list[str]) -> list[str]:
     namespaces: list[str] = []
     for raw in raw_namespaces:
@@ -307,7 +426,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Build read-only FAISS vector sidecars from existing Ragent vdb JSON files."
     )
     parser.add_argument("--project-dir", required=True, help="Existing Ragent project directory.")
-    parser.add_argument("--output-dir", required=True, help="Directory for generated sidecars.")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help=(
+            "Directory for generated sidecars. Defaults to "
+            "<project-dir>/vector_sidecars/default for the default profile."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        choices=sorted(SIDECAR_PROFILES | {"default", "flat"}),
+        default=None,
+        help=(
+            "Sidecar profile. Omit this and all custom index flags to build "
+            "the production default_hnsw_v1 profile."
+        ),
+    )
     parser.add_argument(
         "--namespaces",
         nargs="*",
@@ -383,11 +518,9 @@ def _spec_from_args(
     )
 
 
-def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
-    project_dir = Path(args.project_dir).expanduser().resolve()
-    output_dir = Path(args.output_dir).expanduser().resolve()
-    namespaces = _parse_namespaces(args.namespaces)
+def _custom_specs_from_args(
+    args: argparse.Namespace,
+) -> tuple[IndexSpec, IndexSpec | None, IndexSpec | None]:
     default_spec = _spec_from_args(args, args.index_type)
     entities_spec = (
         _spec_from_args(
@@ -409,18 +542,40 @@ def main(argv: list[str] | None = None) -> None:
         if args.relationships_index_type
         else None
     )
-    manifest = build_sidecars(
+    return default_spec, entities_spec, relationships_spec
+
+
+def _profile_from_args(args: argparse.Namespace, argv: list[str] | None) -> str:
+    if args.profile:
+        return normalize_sidecar_profile(args.profile)
+    raw_argv = argv if argv is not None else sys.argv[1:]
+    if any(item.split("=", 1)[0] in _CUSTOM_ARG_FLAGS for item in raw_argv):
+        return CUSTOM_SIDECAR_PROFILE
+    return DEFAULT_SIDECAR_PROFILE
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    project_dir = Path(args.project_dir).expanduser().resolve()
+    namespaces = _parse_namespaces(args.namespaces)
+    profile = _profile_from_args(args, argv)
+    output_dir = (
+        Path(args.output_dir).expanduser().resolve()
+        if args.output_dir
+        else profile_vector_sidecar_dir(project_dir, profile)
+    )
+    manifest = build_profile_sidecars(
         project_dir=project_dir,
         output_dir=output_dir,
         namespaces=namespaces,
-        default_spec=default_spec,
-        entities_spec=entities_spec,
-        relationships_spec=relationships_spec,
+        profile=profile,
+        args=args if profile == CUSTOM_SIDECAR_PROFILE else args,
     )
     print(
         json.dumps(
             {
                 "output_dir": str(output_dir),
+                "profile": manifest.get("profile"),
                 "namespaces": {
                     name: {
                         "count": item["count"],

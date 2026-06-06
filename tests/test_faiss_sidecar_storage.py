@@ -12,6 +12,11 @@ from pathlib import Path
 
 import numpy as np
 
+from ragent.vector_sidecar_artifacts import (
+    DEFAULT_SIDECAR_PROFILE,
+    default_vector_sidecar_dir,
+    validate_vector_sidecar_manifest,
+)
 from tools import build_vector_sidecars
 
 
@@ -112,6 +117,40 @@ def _write_vdb(path: Path, matrix: np.ndarray, records: list[dict]):
     )
 
 
+def _write_all_vdb_files(project_dir: Path):
+    matrix = np.asarray(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    _write_vdb(
+        project_dir / "vdb_chunks.json",
+        matrix,
+        [
+            {"__id__": "chunk-a", "__created_at__": 1, "content": "apple"},
+            {"__id__": "chunk-b", "__created_at__": 2, "content": "banana"},
+        ],
+    )
+    _write_vdb(
+        project_dir / "vdb_entities.json",
+        matrix,
+        [
+            {"__id__": "entity-a", "entity_name": "apple"},
+            {"__id__": "entity-b", "entity_name": "banana"},
+        ],
+    )
+    _write_vdb(
+        project_dir / "vdb_relationships.json",
+        matrix,
+        [
+            {"__id__": "rel-a", "src_id": "entity-a", "tgt_id": "entity-b"},
+            {"__id__": "rel-b", "src_id": "entity-b", "tgt_id": "entity-a"},
+        ],
+    )
+
+
 class _EmbeddingFunc:
     embedding_dim = 3
 
@@ -152,6 +191,7 @@ def test_build_sidecar_and_query_exact_results(monkeypatch, tmp_path: Path):
         namespaces=["chunks"],
         default_spec=build_vector_sidecars.IndexSpec(index_type="flat"),
     )
+    assert manifest["profile"] == "custom"
     assert manifest["namespaces"]["chunks"]["count"] == 3
     assert (sidecar_dir / "faiss_index_chunks.index").exists()
     assert (sidecar_dir / "metadata_chunks.sqlite").exists()
@@ -284,6 +324,81 @@ def test_build_sidecar_supports_entity_and_relationship_overrides(
     assert namespaces["entities"]["search_params"] == {"ef_search": 64}
     assert namespaces["relationships"]["index_type"] == "hnsw"
     assert namespaces["relationships"]["search_params"] == {"ef_search": 128}
+
+
+def test_build_profile_sidecars_uses_project_default_profile_dir(
+    monkeypatch,
+    tmp_path: Path,
+):
+    _install_fake_faiss(monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    _write_all_vdb_files(project_dir)
+
+    manifest = build_vector_sidecars.build_profile_sidecars(project_dir=project_dir)
+    sidecar_dir = default_vector_sidecar_dir(project_dir)
+
+    assert manifest["profile"] == DEFAULT_SIDECAR_PROFILE
+    assert (sidecar_dir / "manifest.json").exists()
+    assert manifest["namespaces"]["chunks"]["index_type"] == "flat"
+    assert manifest["namespaces"]["chunks"]["search_params"] == {}
+    assert manifest["namespaces"]["entities"]["index_type"] == "hnsw"
+    assert manifest["namespaces"]["entities"]["search_params"] == {"ef_search": 128}
+    assert manifest["namespaces"]["relationships"]["index_type"] == "hnsw"
+    assert manifest["namespaces"]["relationships"]["search_params"] == {
+        "ef_search": 128
+    }
+
+    validation = validate_vector_sidecar_manifest(
+        project_dir,
+        sidecar_dir,
+        expected_profile=DEFAULT_SIDECAR_PROFILE,
+    )
+    assert validation["profile"] == DEFAULT_SIDECAR_PROFILE
+    assert validation["sidecar_dir"] == str(sidecar_dir)
+    assert validation["manifest_digest"]
+
+
+def test_build_profile_sidecars_exact_profile_keeps_all_namespaces_flat(
+    monkeypatch,
+    tmp_path: Path,
+):
+    _install_fake_faiss(monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    _write_all_vdb_files(project_dir)
+
+    manifest = build_vector_sidecars.build_profile_sidecars(
+        project_dir=project_dir,
+        profile="exact",
+    )
+
+    assert manifest["profile"] == "exact"
+    assert (project_dir / "vector_sidecars" / "exact" / "manifest.json").exists()
+    assert {
+        namespace_manifest["index_type"]
+        for namespace_manifest in manifest["namespaces"].values()
+    } == {"flat"}
+
+
+def test_build_profile_sidecars_allows_namespace_subset(monkeypatch, tmp_path: Path):
+    _install_fake_faiss(monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    _write_vdb(
+        project_dir / "vdb_chunks.json",
+        np.asarray([[1.0, 0.0, 0.0]], dtype=np.float32),
+        [{"__id__": "chunk-a", "content": "apple"}],
+    )
+
+    manifest = build_vector_sidecars.build_profile_sidecars(
+        project_dir=project_dir,
+        output_dir=tmp_path / "sidecar",
+        namespaces=["chunks"],
+    )
+
+    assert set(manifest["namespaces"]) == {"chunks"}
+    assert manifest["profile"] == DEFAULT_SIDECAR_PROFILE
 
 
 def test_sidecar_dimension_mismatch_raises(monkeypatch, tmp_path: Path):

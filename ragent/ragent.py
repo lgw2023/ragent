@@ -9,6 +9,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
+from pathlib import Path
 from typing import (
     Any,
     AsyncIterator,
@@ -73,6 +74,12 @@ from .operate import (
     query_with_keywords
 )
 from .constants import GRAPH_FIELD_SEP
+from .vector_sidecar_artifacts import (
+    DEFAULT_SIDECAR_PROFILE,
+    has_required_vdb_files,
+    required_vdb_paths,
+    vector_sidecar_build_enabled,
+)
 from .utils import (
     Tokenizer,
     TiktokenTokenizer,
@@ -1151,9 +1158,11 @@ class Ragent:
         )
 
         process_start = time.perf_counter()
-        await self.apipeline_process_enqueue_documents(
+        updated = await self.apipeline_process_enqueue_documents(
             split_by_character, split_by_character_only, doc_name
         )
+        if updated:
+            await self._build_default_vector_sidecar_if_enabled()
         _trace_insert(
             f"ainsert.process.done doc_name={doc_name} elapsed={time.perf_counter() - process_start:.2f}s"
         )
@@ -1787,7 +1796,7 @@ class Ragent:
         split_by_character: str | None = None,
         split_by_character_only: bool = False,
         doc_name: str | None = None,
-    ) -> None:
+    ) -> bool:
         """
         Process pending documents by splitting them into chunks, processing
         each chunk for entity and relation extraction, and updating the
@@ -1820,7 +1829,7 @@ class Ragent:
 
                 if not to_process_docs:
                     logger.info("No documents to process")
-                    return
+                    return False
 
                 pipeline_status.update(
                     {
@@ -1842,8 +1851,9 @@ class Ragent:
                 logger.info(
                     "Another process is already processing the document queue. Request queued."
                 )
-                return
+                return False
 
+        storage_updated = False
         try:
             # Process documents until no more documents or requests
             while True:
@@ -2077,6 +2087,7 @@ class Ragent:
                     source_group_key: str,
                     group_docs: list[tuple[str, DocProcessingStatus]],
                 ) -> None:
+                    nonlocal storage_updated
                     async with semaphore:
                         staged_records: list[dict[str, Any]] = []
                         failed_stage_records: list[dict[str, Any]] = []
@@ -2194,6 +2205,7 @@ class Ragent:
                                     for chunk_id in record["chunks"].keys()
                                 ],
                             )
+                            storage_updated = True
                             _trace_insert(
                                 f"process.persist.done file={source_group_key} "
                                 f"elapsed={time.perf_counter() - persist_start_ts:.2f}s"
@@ -2286,6 +2298,8 @@ class Ragent:
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
 
+        return storage_updated
+
     async def _process_entity_relation_graph(
         self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None
     ) -> list:
@@ -2334,6 +2348,39 @@ class Ragent:
             async with pipeline_status_lock:
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
+
+    async def _build_default_vector_sidecar_if_enabled(self) -> dict[str, Any] | None:
+        if not vector_sidecar_build_enabled():
+            return None
+
+        project_dir = Path(self.working_dir).expanduser().resolve()
+        if not has_required_vdb_files(project_dir):
+            missing = [
+                str(path)
+                for path in required_vdb_paths(project_dir).values()
+                if not path.is_file()
+            ]
+            raise RuntimeError(
+                "Cannot build default FAISS sidecar because project vector DB "
+                f"files are missing: {missing}"
+            )
+
+        def _build() -> dict[str, Any]:
+            from tools.build_vector_sidecars import build_profile_sidecars
+
+            return build_profile_sidecars(
+                project_dir=project_dir,
+                profile=DEFAULT_SIDECAR_PROFILE,
+            )
+
+        started_at = time.perf_counter()
+        manifest = await asyncio.to_thread(_build)
+        logger.info(
+            "Default FAISS sidecar built for %s in %.2fs",
+            project_dir,
+            time.perf_counter() - started_at,
+        )
+        return manifest
 
     def insert_custom_kg(
         self, custom_kg: dict[str, Any], full_doc_id: str = None
@@ -2534,6 +2581,7 @@ class Ragent:
                 "custom_kg",
                 affected_chunk_ids=list(all_chunks_data.keys()),
             )
+            await self._build_default_vector_sidecar_if_enabled()
 
     async def aquery(
         self,

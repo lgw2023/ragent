@@ -197,6 +197,7 @@ def test_retrieval_only_uses_real_gliner_loader_without_llm(monkeypatch, tmp_pat
     monkeypatch.setitem(sys.modules, "gliner", SimpleNamespace(GLiNER=FakeGLiNER))
     monkeypatch.setenv("RAG_KEYWORD_FALLBACK_MODEL", str(model_dir))
     monkeypatch.setenv("RAG_KEYWORD_FALLBACK_DEVICE", "cpu")
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_LABELS", raising=False)
     keyword_extraction._MODEL_CACHE.clear()
 
     llm = _FailingLLM()
@@ -331,6 +332,7 @@ def test_ensure_gliner_keyword_model_ready_warms_cached_model(
     monkeypatch.setitem(sys.modules, "gliner", SimpleNamespace(GLiNER=FakeGLiNER))
     monkeypatch.setenv("RAG_KEYWORD_FALLBACK_MODEL", str(model_dir))
     monkeypatch.setenv("RAG_KEYWORD_FALLBACK_DEVICE", "cpu")
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_LABELS", raising=False)
     keyword_extraction._MODEL_CACHE.clear()
 
     info = asyncio.run(keyword_extraction.ensure_gliner_keyword_model_ready())
@@ -531,6 +533,84 @@ def test_normal_query_still_uses_llm_keyword_extraction(monkeypatch):
     assert llm.calls[0]["kwargs"]["keyword_extraction"] is True
     assert param.keyword_source == "llm"
     assert param.keyword_strategy == "llm_keyword_extraction"
+
+
+def test_normal_query_falls_back_to_gliner_when_llm_keyword_extraction_fails(
+    monkeypatch,
+):
+    llm = _JsonLLM("not-json")
+    monkeypatch.delenv("RAG_KEYWORD_FALLBACK_ENABLED", raising=False)
+
+    async def fake_gliner(_text, _global_config, *, fallback_reason=None):
+        return keyword_extraction.KeywordResolution(
+            high_level_keywords=["营养建议"],
+            low_level_keywords=["低糖饮食"],
+            keyword_source=keyword_extraction.KEYWORD_SOURCE_GLINER_FALLBACK,
+            keyword_strategy=keyword_extraction.KEYWORD_STRATEGY_TOKEN_CLASSIFICATION,
+            keyword_fallback_reason=fallback_reason,
+            keyword_model="/models/gliner",
+            keyword_model_device="cpu",
+        )
+
+    monkeypatch.setattr(
+        keyword_extraction,
+        "extract_keywords_with_gliner",
+        fake_gliner,
+    )
+
+    param = QueryParam(mode="hybrid")
+    hl_keywords, ll_keywords = asyncio.run(
+        operate.get_keywords_from_query("如何制定低糖饮食？", param, _global_config(llm))
+    )
+
+    assert hl_keywords == ["营养建议"]
+    assert ll_keywords == ["低糖饮食"]
+    assert len(llm.calls) == 1
+    assert param.keyword_source == "gliner_fallback"
+    assert param.keyword_model == "/models/gliner"
+    assert "LLM keyword extraction" in param.keyword_fallback_reason
+
+
+def test_normal_query_reraises_llm_keyword_failure_when_fallback_disabled(
+    monkeypatch,
+):
+    class RaisingLLM:
+        def __init__(self):
+            self.calls = []
+
+        async def __call__(self, prompt, **kwargs):
+            self.calls.append({"prompt": prompt, "kwargs": kwargs})
+            raise RuntimeError("keyword backend offline")
+
+    llm = RaisingLLM()
+
+    async def fail_gliner(*_args, **_kwargs):
+        raise AssertionError("GLiNER fallback should be disabled")
+
+    monkeypatch.setenv("RAG_KEYWORD_FALLBACK_ENABLED", "0")
+    monkeypatch.setattr(
+        keyword_extraction,
+        "extract_keywords_with_gliner",
+        fail_gliner,
+    )
+
+    param = QueryParam(mode="hybrid")
+    raised = False
+    try:
+        asyncio.run(
+            operate.get_keywords_from_query(
+                "如何制定低糖饮食？",
+                param,
+                _global_config(llm),
+            )
+        )
+    except Exception:
+        raised = True
+    else:
+        raise AssertionError("expected LLM keyword extraction failure")
+
+    assert raised is True
+    assert len(llm.calls) == 1
 
 
 def test_hybrid_retrieval_debug_includes_keyword_metadata(monkeypatch):

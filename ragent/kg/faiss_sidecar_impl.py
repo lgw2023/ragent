@@ -13,12 +13,15 @@ from typing import Any, final
 import numpy as np
 
 from ragent.base import BaseVectorStorage
+from ragent.native_runtime_compat import ensure_faiss_import_compatibility
 from ragent.utils import compute_mdhash_id, logger
+
+ensure_faiss_import_compatibility()
 
 if importlib.util.find_spec("faiss") is None:
     raise RuntimeError(
         "faiss-cpu or faiss-gpu is required for FaissSidecarVectorDBStorage. "
-        "Install ragent with the 'faiss' extra in the inference environment."
+        "Install the standard ragent dependencies in the inference environment."
     )
 
 import faiss  # type: ignore

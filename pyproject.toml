@@ -26,6 +26,7 @@ dependencies = [
     "aiohttp",
     "configparser",
     "dotenv",
+    "faiss-cpu==1.13.2",
     "future",
     "httpx",
     "litellm",
@@ -77,7 +78,7 @@ ollama = [
 # 知识图谱后端（可多选）
 neo4j = ["neo4j"]
 milvus = ["pymilvus"]
-faiss = ["faiss-cpu"]
+faiss = []
 
 # API 服务端
 api = [
@@ -97,6 +98,8 @@ api = [
     "python-jose[cryptography]",
     "python-multipart",
     "pytz",
+    "torch",
+    "transformers",
     "uvicorn",
 ]
 

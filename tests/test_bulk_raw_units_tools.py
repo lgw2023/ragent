@@ -199,7 +199,12 @@ def test_raw_export_resume_limits_initialize_rag_llm_concurrency(
     monkeypatch.setattr(inference_runtime, "initialize_pipeline_status", noop)
     monkeypatch.setattr(inference_runtime, "_resolve_ragent_class", lambda: FakeRagent)
 
-    asyncio.run(inference_runtime.initialize_rag(str(tmp_path)))
+    asyncio.run(
+        inference_runtime.initialize_rag(
+            str(tmp_path),
+            vector_runtime_backend="nano",
+        )
+    )
 
     assert captured["llm_model_max_async"] == 1
 
@@ -244,6 +249,7 @@ def test_replay_tool_passes_embedding_concurrency_override(
         allow_non_contiguous_source_groups=False,
         continue_on_error=False,
         no_rollback_on_error=False,
+        no_vector_sidecar=True,
     )
 
     asyncio.run(replay_tool._run(args))
@@ -251,3 +257,56 @@ def test_replay_tool_passes_embedding_concurrency_override(
     assert captured["llm_model_max_async"] == 1
     assert captured["embedding_func_max_async"] == 1
     assert captured["embedding_batch_num"] == 1
+
+
+def test_replay_tool_builds_default_vector_sidecar_after_success(
+    tmp_path: Path, monkeypatch
+):
+    from tools import replay_raw_merge_units_to_project as replay_tool
+
+    captured: dict[str, Any] = {}
+
+    class FakeRagent:
+        def __init__(self, **_kwargs):
+            self.embedding_func = None
+            self.llm_model_func = None
+
+        async def initialize_storages(self):
+            return None
+
+        async def finalize_storages(self):
+            return None
+
+    async def fake_replay(*_args, **_kwargs):
+        return SimpleNamespace(replayed_units=1)
+
+    def fake_build_profile_sidecars(**kwargs):
+        captured.update(kwargs)
+        return {"profile": "default_hnsw_v1"}
+
+    monkeypatch.setattr(replay_tool, "Ragent", FakeRagent)
+    monkeypatch.setattr(replay_tool, "replay_raw_merge_units_jsonl_to_rag", fake_replay)
+    monkeypatch.setattr(replay_tool, "build_profile_sidecars", fake_build_profile_sidecars)
+
+    args = argparse.Namespace(
+        raw_units=[str(tmp_path / "raw")],
+        output=str(tmp_path / "project"),
+        overwrite=True,
+        resume=False,
+        workspace="",
+        llm_model="fake-model",
+        force_llm_summary_on_merge=None,
+        llm_model_max_async=1,
+        embedding_func_max_async=1,
+        embedding_batch_num=1,
+        in_memory=False,
+        allow_non_contiguous_source_groups=False,
+        continue_on_error=False,
+        no_rollback_on_error=False,
+        no_vector_sidecar=False,
+    )
+
+    asyncio.run(replay_tool._run(args))
+
+    assert captured["project_dir"] == tmp_path / "project"
+    assert captured["profile"] == "default_hnsw_v1"

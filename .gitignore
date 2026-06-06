@@ -19,6 +19,7 @@ requirements.txt.bak
 .mep_upload/
 *.sqlite-shm
 *.sqlite-wal
+example/qwen4b_diet_kg/kv_store_llm_response_cache.sqlite
 vendor/mineru-models/
 vendor/modelscope/
 vendor/wheelhouse/
