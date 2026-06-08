@@ -44,7 +44,7 @@ class BenchmarkQueryRequest(BaseModel):
 class CacheClearRequest(BaseModel):
     project_dir: str
     modes: list[str] = Field(default_factory=list)
-    cache_types: list[Literal["answer", "retrieval", "render", "prompt"]] = Field(
+    cache_types: list[Literal["answer", "retrieval", "render", "prompt", "keyword_candidate"]] = Field(
         default_factory=list
     )
 
@@ -53,7 +53,7 @@ class ProjectResetRequest(BaseModel):
     project_dir: str
     clear_cache: bool = False
     modes: list[str] = Field(default_factory=list)
-    cache_types: list[Literal["answer", "retrieval", "render", "prompt"]] = Field(
+    cache_types: list[Literal["answer", "retrieval", "render", "prompt", "keyword_candidate"]] = Field(
         default_factory=list
     )
 

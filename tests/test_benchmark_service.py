@@ -62,3 +62,20 @@ def test_preload_configured_projects_creates_sessions(monkeypatch, tmp_path):
         ]
         == "/models/gliner"
     )
+
+
+def test_cache_request_models_accept_keyword_candidate_cache(tmp_path):
+    project_dir = str(tmp_path)
+
+    clear_request = benchmark_service.CacheClearRequest(
+        project_dir=project_dir,
+        cache_types=["keyword_candidate"],
+    )
+    reset_request = benchmark_service.ProjectResetRequest(
+        project_dir=project_dir,
+        clear_cache=True,
+        cache_types=["keyword_candidate"],
+    )
+
+    assert clear_request.cache_types == ["keyword_candidate"]
+    assert reset_request.cache_types == ["keyword_candidate"]
