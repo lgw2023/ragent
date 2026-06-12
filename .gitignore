@@ -59,3 +59,4 @@ htmlcov/
 pytorch_model.bin
 !mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small/pytorch_model.bin
 benchmark/*_*/
+example/qwen4b_diet_kg/vector_sidecars/

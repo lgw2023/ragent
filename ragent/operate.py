@@ -452,7 +452,6 @@ def _build_keyword_candidate_cache_fingerprint(
         "scope": _QUERY_CACHE_TYPE_KEYWORD_CANDIDATE,
         "mode": query_param.mode,
         "normalized_keyword": normalized_keyword,
-        "keyword_top_k": keyword_top_k,
         "corpus_revision": _coerce_non_negative_int(
             global_config.get("corpus_revision"),
             0,

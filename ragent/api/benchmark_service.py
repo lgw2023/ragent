@@ -11,6 +11,10 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from ragent.runtime_env import bootstrap_runtime_environment
+
+bootstrap_runtime_environment()
+
 from ragent.inference_runtime import (
     _close_rag,
     _request_should_require_llm,

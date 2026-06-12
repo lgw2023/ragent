@@ -640,6 +640,57 @@ class DiversifiedGraphRetrievalTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(storage.calls, [])
 
+    async def test_keyword_candidate_cache_reuses_larger_warm_cache_after_top_k_change(self):
+        warm_config = {
+            "enable_llm_cache": True,
+            "keyword_cache_enabled": True,
+            "keyword_cache_read_enabled": True,
+            "keyword_cache_write_enabled": True,
+            "keyword_cache_top_k": 20,
+            "corpus_revision": 3,
+            "index_digest": "idx",
+            "vector_db_storage_cls_kwargs": {},
+        }
+        cache = _FakeKeywordCacheKV(warm_config)
+        storage = _FakeVectorStorage(
+            {
+                "A": [
+                    {"entity_name": f"A{i}", "distance": 1.0 - i * 0.01}
+                    for i in range(20)
+                ]
+            }
+        )
+
+        await _query_vector_storage_diversified(
+            "A",
+            storage,
+            top_k=10,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=warm_config,
+            hashing_kv=cache,
+        )
+        self.assertEqual(storage.calls, [("A", 20, None)])
+
+        runtime_config = dict(warm_config)
+        runtime_config["keyword_cache_top_k"] = 10
+        cache.global_config = runtime_config
+        storage.calls.clear()
+        storage._responses = {}
+        second = await _query_vector_storage_diversified(
+            "A",
+            storage,
+            top_k=5,
+            query_param=QueryParam(mode="hybrid"),
+            global_config=runtime_config,
+            hashing_kv=cache,
+        )
+
+        self.assertEqual(
+            [item["entity_name"] for item in second],
+            [f"A{i}" for i in range(5)],
+        )
+        self.assertEqual(storage.calls, [])
+
     async def test_keyword_candidate_cache_respects_read_and_write_switches(self):
         base_config = {
             "enable_llm_cache": True,
