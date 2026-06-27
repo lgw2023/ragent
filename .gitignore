@@ -20,9 +20,7 @@ requirements.txt.bak
 *.sqlite-shm
 *.sqlite-wal
 example/qwen4b_diet_kg/kv_store_llm_response_cache.sqlite
-vendor/mineru-models/
 vendor/modelscope/
-vendor/wheelhouse/
 ragent-offline*.tar*
 mep/model_packages/qwen3-embedding-4b/modelDir/model
 
@@ -60,3 +58,21 @@ pytorch_model.bin
 !mep/component_deps/models/keyword_extraction/knowledgator-gliner-x-small/pytorch_model.bin
 benchmark/*_*/
 example/qwen4b_diet_kg/vector_sidecars/
+
+# 大型派生数据文件（应通过脚本生成）
+*.index
+*.faiss
+vdb_*.json
+*.graphml
+kv_store_doc_status.json
+kv_store_llm_response_cache.sqlite
+*.before_rejudge
+example/qwen4b_diet_kg_raw_units/
+
+# 模型与依赖缓存
+mep/model_packages/*/modelDir/model/
+mep/model_packages/*/modelDir/data/
+mep/component_deps/
+vendor/mineru-models/
+vendor/wheelhouse/
+*.whl
